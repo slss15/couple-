@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 占位名称，改名只需改这一处 -->
+    <string name="app_name">Couple</string>
+
+    <string name="tab_chat">聊天</string>
+    <string name="tab_feed">动态</string>
+    <string name="tab_ta">TA</string>
+    <string name="tab_me">我的</string>
+
+    <string name="bootstrap_title">连接到你们的服务器</string>
+    <string name="bootstrap_subtitle">请扫描管理后台生成的配置二维码</string>
+    <string name="bootstrap_tab_scan">扫码</string>
+    <string name="bootstrap_tab_manual">手动输入</string>
+    <string name="bootstrap_camera_permission">需要相机权限来扫描二维码</string>
+    <string name="bootstrap_grant_permission">授予相机权限</string>
+    <string name="bootstrap_paste_uri">粘贴 couple://bootstrap 链接</string>
+    <string name="bootstrap_apply_uri">校验并应用</string>
+    <string name="bootstrap_manual_debug">调试：直接填写地址（不校验签名）</string>
+    <string name="bootstrap_base_url">后端地址（如 https://example.com）</string>
+    <string name="bootstrap_mqtt_url">MQTT 地址（如 wss://example.com/mqtt）</string>
+    <string name="bootstrap_apply_manual">应用调试配置</string>
+    <string name="bootstrap_checking">正在检查服务器连通性… %1$d 秒</string>
+    <string name="bootstrap_verifying">正在校验签名…</string>
+    <string name="bootstrap_success">配置已生效</string>
+    <string name="bootstrap_rolled_back">服务器 30 秒内不可达，已回滚到上一份配置</string>
+    <string name="bootstrap_failed">配置失败：%1$s</string>
+
+    <string name="auth_login">登录</string>
+    <string name="auth_register">注册</string>
+    <string name="auth_username">用户名</string>
+    <string name="auth_password">密码</string>
+    <string name="auth_display_name">昵称</string>
+    <string name="auth_invite_code">注册码</string>
+    <string name="auth_switch_to_register">没有账号？去注册</string>
+    <string name="auth_switch_to_login">已有账号？去登录</string>
+    <string name="auth_change_server">更换服务器</string>
+
+    <string name="pair_title">和 TA 配对</string>
+    <string name="pair_my_code">我的配对码</string>
+    <string name="pair_generate">生成配对码</string>
+    <string name="pair_regenerate">重新生成</string>
+    <string name="pair_expires_in">%1$s 后过期</string>
+    <string name="pair_expired">已过期</string>
+    <string name="pair_share_hint">把这 6 位数字告诉 TA，在 TA 的手机上输入</string>
+    <string name="pair_enter_code">输入 TA 的配对码</string>
+    <string name="pair_join">配对</string>
+    <string name="pair_success">配对成功</string>
+
+    <string name="me_profile">我的资料</string>
+    <string name="me_couple">我们</string>
+    <string name="me_partner">TA</string>
+    <string name="me_paired_at">配对于 %1$s</string>
+    <string name="me_server">服务器配置</string>
+    <string name="me_rescan">重新扫码</string>
+    <string name="me_mqtt">实时连接</string>
+    <string name="me_unpair">解除配对</string>
+    <string name="me_unpair_request">申请解绑</string>
+    <string name="me_unpair_request_sent">已发起解绑申请，请把申请编号告诉 TA，由 TA 确认：</string>
+    <string name="me_unpair_confirm">确认 TA 的解绑申请</string>
+    <string name="me_unpair_request_id">申请编号</string>
+    <string name="me_logout">退出登录</string>
+    <string name="placeholder_coming">即将上线</string>
+    <string name="retry">重试</string>
+    <string name="back">返回</string>
+    <string name="online">在线</string>
+    <string name="offline">离线</string>
+</resources>

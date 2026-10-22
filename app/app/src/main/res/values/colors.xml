@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 仅供启动图标/窗口背景使用；Compose UI 一律走 CoupleTokens -->
+    <color name="launcher_background">#FFF7F2F4</color>
+    <color name="launcher_foreground">#FFA8235A</color>
+    <color name="window_background">#FFFFFBFC</color>
+</resources>
