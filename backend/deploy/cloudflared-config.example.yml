@@ -1,0 +1,17 @@
+# 方案 B（本地管理的 tunnel）示例：cloudflared tunnel --config this.yml run
+# 若使用 docker-compose 的 token 方式（远程管理），请在 Zero Trust 面板按同样顺序配置 Public Hostname。
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+ingress:
+  # 内部钩子不对外（后端也会拒绝带 CF-Connecting-IP 的内部请求，双保险）
+  - hostname: couple.example.com
+    path: ^/api/v1/internal/.*
+    service: http_status:404
+  # MQTT over WSS
+  - hostname: couple.example.com
+    path: ^/mqtt.*
+    service: http://emqx:8083
+  # REST API
+  - hostname: couple.example.com
+    service: http://backend:8080
+  - service: http_status:404

@@ -1,0 +1,128 @@
+# Couple backend stack: backend + MySQL 8.4 + EMQX 5 (HTTP auth/ACL → backend).
+# 入口二选一：
+#   docker compose --profile aaaa up -d     # Cloudflare 代理的 AAAA 记录 + Caddy（源站证书）
+#   docker compose --profile tunnel up -d   # Cloudflare Tunnel
+#   docker compose up -d                    # 仅内网（调试）
+name: couple
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set in .env}
+      MYSQL_DATABASE: couple
+      MYSQL_USER: ${DB_USER:-couple}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set in .env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [internal]
+
+  backend:
+    build: .
+    image: couple-backend:local
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/couple?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: ${DB_USER:-couple}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?set in .env}
+      REGISTRATION_CODE: ${REGISTRATION_CODE:-}
+      BOOTSTRAP_PRIVATE_KEY: ${BOOTSTRAP_PRIVATE_KEY:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      MQTT_HOOK_SECRET: ${MQTT_HOOK_SECRET:-}
+      PORT: "8080"
+    # 只绑定本机回环，方便调试；对外一律走 Caddy / cloudflared
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [internal]
+
+  emqx:
+    image: emqx/emqx:5.8
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?set in .env}
+      # 认证：username=userId, password=accessToken → POST backend /api/v1/internal/mqtt/auth
+      # 注意：$${...} 是 compose 对 EMQX 占位符 ${...} 的转义
+      EMQX_AUTHENTICATION: >-
+        [{mechanism = password_based, backend = http, enable = true, method = post,
+          url = "http://backend:8080/api/v1/internal/mqtt/auth",
+          body = {username = "$${username}", password = "$${password}", clientid = "$${clientid}"},
+          headers = {"content-type" = "application/json", "x-internal-token" = "${MQTT_HOOK_SECRET:-}"},
+          request_timeout = "5s"}]
+      # 授权：只允许 couple/{自己的 coupleId}/...；未匹配一律拒绝
+      EMQX_AUTHORIZATION__NO_MATCH: deny
+      EMQX_AUTHORIZATION__CACHE__TTL: 30s
+      EMQX_AUTHORIZATION__SOURCES: >-
+        [{type = http, enable = true, method = post,
+          url = "http://backend:8080/api/v1/internal/mqtt/acl",
+          body = {username = "$${username}", topic = "$${topic}", action = "$${action}", clientid = "$${clientid}"},
+          headers = {"content-type" = "application/json", "x-internal-token" = "${MQTT_HOOK_SECRET:-}"},
+          request_timeout = "5s"}]
+    volumes:
+      - emqx-data:/opt/emqx/data
+    # 8083 = MQTT over WebSocket（路径 /mqtt），由 Caddy / cloudflared 以 WSS 对外；Dashboard 只绑回环
+    ports:
+      - "127.0.0.1:18083:18083"
+    networks: [internal]
+
+  # ---- 方案 A：Cloudflare 代理的 AAAA 记录（服务器有公网 IPv6）----
+  caddy:
+    image: caddy:2
+    profiles: ["aaaa"]
+    restart: unless-stopped
+    depends_on: [backend, emqx]
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?set in .env}
+    ports:
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/certs:/certs:ro   # Cloudflare Origin CA 证书：origin.pem / origin.key（不要提交）
+      - caddy-data:/data
+    networks: [internal]
+
+  # 方案 A 配套：把本机当前公网 IPv6 同步到 Cloudflare 的 AAAA 记录（橙云代理）
+  ddns:
+    image: favonia/cloudflare-ddns:latest
+    profiles: ["aaaa"]
+    restart: unless-stopped
+    network_mode: host          # 需要看到宿主机真实的 IPv6
+    read_only: true
+    cap_drop: [all]
+    security_opt: [no-new-privileges:true]
+    environment:
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?set in .env}
+      DOMAINS: ${PUBLIC_HOSTNAME}
+      PROXIED: "true"
+      IP4_PROVIDER: none
+      IP6_PROVIDER: cloudflare.trace
+
+  # ---- 方案 B：Cloudflare Tunnel（无公网 IPv6 时的主路，或作为备用）----
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    depends_on: [backend, emqx]
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:?set in .env}"]
+    networks: [internal]
+
+networks:
+  internal: {}
+
+volumes:
+  mysql-data: {}
+  emqx-data: {}
+  caddy-data: {}
