@@ -41,3 +41,12 @@ Placeholder app name: "Couple" (to be renamed). Android package: com.qimingnan.c
 
 ## Env (backend)
 DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET, REGISTRATION_CODE, BOOTSTRAP_PRIVATE_KEY(optional), ADMIN_USERNAME(optional), PORT=8080. Never commit secrets; ship .env.example only.
+
+## P0 implementation notes (reconciled 2026-10-22)
+- publicKey = standard base64 of raw 32-byte Ed25519 key. Signature covers the decoded bytes of d; d and s are base64url without padding. baseUrl excludes /api/v1, and every route, including /internal/mqtt/*, lives under /api/v1.
+- /couple/unpair/confirm requestId is optional; when omitted, it uses the pending request.
+- Extra env vars: MQTT_HOOK_SECRET (X-Internal-Token header), AUTH_RATE_LIMIT_PER_MINUTE=30. No REGISTRATION_CODE means registration is disabled.
+- /admin/config also returns configVersion and updatedAt. A secret comes back as ****last4; on PUT, omitted/null/masked means keep, and "" means clear.
+- The access token's cid goes stale after pair/unpair, so clients must call /auth/refresh; the server always checks the DB.
+- Extra error codes: NOT_OTHER_MEMBER, UNPAIR_REQUEST_*, REFRESH_REUSED, REGISTRATION_DISABLED.
+- TODO (P1): add an id tie-breaker to audit paging; add an admin endpoint that lists couples.
