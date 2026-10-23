@@ -1,0 +1,131 @@
+name: deploy
+
+# Push-to-deploy: every push to main that touches backend/** or admin/** is tested, built
+# (linux/amd64 + linux/arm64), pushed as ghcr.io/<owner>/couple-<svc>:{sha-<short>, edge} and
+# then deployed to the home server through the signed webhook (Cloudflare ingress -> updater).
+# The job turns red if the server reports failure/rollback. Never runs for pull requests.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "admin/**"
+      - ".github/workflows/deploy-backend.yml"
+      - "deploy/scripts/deploy-hook.sh"
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "What to build & deploy"
+        type: choice
+        options: [both, backend, admin]
+        default: both
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/couple
+
+jobs:
+  changes:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.pick.outputs.backend }}
+      admin: ${{ steps.pick.outputs.admin }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/deploy-backend.yml'
+              - 'deploy/scripts/deploy-hook.sh'
+            admin:
+              - 'admin/**'
+              - '.github/workflows/deploy-backend.yml'
+              - 'deploy/scripts/deploy-hook.sh'
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          SERVICE: ${{ inputs.service }}
+          F_BACKEND: ${{ steps.filter.outputs.backend }}
+          F_ADMIN: ${{ steps.filter.outputs.admin }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            b=false a=false
+            case "$SERVICE" in both) b=true a=true ;; backend) b=true ;; admin) a=true ;; esac
+          else
+            b=$F_BACKEND a=$F_ADMIN
+          fi
+          echo "backend=$b" >> "$GITHUB_OUTPUT"
+          echo "admin=$a" >> "$GITHUB_OUTPUT"
+          echo "backend=$b admin=$a"
+
+  test-backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew --no-daemon build
+
+  test-admin:
+    needs: changes
+    if: needs.changes.outputs.admin == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npm test
+
+  image-backend:
+    needs: test-backend
+    uses: ./.github/workflows/_image-deploy.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      component: backend
+    secrets:
+      DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+      DEPLOY_HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
+
+  image-admin:
+    needs: test-admin
+    uses: ./.github/workflows/_image-deploy.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      component: admin
+    secrets:
+      DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+      DEPLOY_HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}

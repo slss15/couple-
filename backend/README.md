@@ -1,5 +1,7 @@
 # Couple 后端（P0）
 
+> **从零配置服务器的完整步骤见 [`../deploy/SETUP.md`](../deploy/SETUP.md)**（Cloudflare 入口、`.env` 每个变量、首个管理员、后台配置、扫码配对、日常运维）。
+
 两人自用情侣 App 的后端。接口以仓库根目录的 `../contract.md` 为准（权威契约）。
 
 - 技术栈：Kotlin 2.1 + Ktor 3（Netty）、Exposed + HikariCP + MySQL 8（Flyway 迁移）、kotlinx.serialization、JWT（HS256，java-jwt）、Argon2id（Bouncy Castle 纯 Java 实现）、Ed25519（JDK）、ULID。
@@ -44,6 +46,8 @@ curl localhost:8080/api/v1/health
 ```
 
 ### Docker Compose（backend + MySQL 8.4 + EMQX 5.8）
+
+> 这里的 compose 从源码构建，适合本地调试。**服务器生产部署**（GHCR 镜像、推送即部署、定时轮询 + 健康检查回滚、发版流程）见 [`../deploy/README.md`](../deploy/README.md)。
 
 ```bash
 cd backend

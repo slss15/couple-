@@ -40,8 +40,15 @@ services:
       BOOTSTRAP_PRIVATE_KEY: ${BOOTSTRAP_PRIVATE_KEY:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       MQTT_HOOK_SECRET: ${MQTT_HOOK_SECRET:-}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-30}
+      RELEASES_DIR: /data/releases
+      # optional outbound proxy for the GitHub release mirror (api.github.com / objects.githubusercontent.com)
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-mysql,emqx,admin,updater,localhost,127.0.0.1}
       PORT: "8080"
     # 只绑定本机回环，方便调试；对外一律走 Caddy / cloudflared
+    volumes:
+      - releases-data:/data/releases   # mirrored APKs
     ports:
       - "127.0.0.1:8080:8080"
     networks: [internal]
@@ -85,7 +92,7 @@ services:
     restart: unless-stopped
     depends_on: [backend, emqx]
     environment:
-      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?set in .env}
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-}
     ports:
       - "443:443"
     volumes:
@@ -104,7 +111,7 @@ services:
     cap_drop: [all]
     security_opt: [no-new-privileges:true]
     environment:
-      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?set in .env}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       DOMAINS: ${PUBLIC_HOSTNAME}
       PROXIED: "true"
       IP4_PROVIDER: none
@@ -116,7 +123,7 @@ services:
     profiles: ["tunnel"]
     restart: unless-stopped
     depends_on: [backend, emqx]
-    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:?set in .env}"]
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
     networks: [internal]
 
 networks:
@@ -124,5 +131,6 @@ networks:
 
 volumes:
   mysql-data: {}
+  releases-data: {}
   emqx-data: {}
   caddy-data: {}

@@ -7,6 +7,34 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// ---- Release versioning & signing (owned by release pipeline, see ../../deploy/README.md) ----
+// versionName comes from -Pcouple.versionName=X.Y.Z or env COUPLE_VERSION_NAME (CI sets it from the git tag);
+// versionCode = X*10000 + Y*100 + Z. Local builds default to 0.1.0 (100).
+val coupleVersionName: String = (findProperty("couple.versionName") as String?)
+    ?: System.getenv("COUPLE_VERSION_NAME")?.takeIf { it.isNotBlank() }
+    ?: "0.1.0"
+val coupleVersionCode: Int = run {
+    val m = Regex("""^(\d+)\.(\d+)\.(\d+)$""").matchEntire(coupleVersionName)
+        ?: throw GradleException("versionName '$coupleVersionName' must be X.Y.Z")
+    val (x, y, z) = m.destructured.toList().map { it.toInt() }
+    if (y > 99 || z > 99) throw GradleException("minor/patch must be <= 99 (got $coupleVersionName)")
+    x * 10000 + y * 100 + z
+}
+// Release signing from env (CI decodes SIGNING_KEYSTORE_BASE64 into SIGNING_STORE_FILE).
+// Without it a local `assembleRelease` produces an *unsigned* APK — never debug-signed.
+// With -Pcouple.requireReleaseSigning=true (the release workflow) missing signing is a hard error.
+val signingStoreFile: String? = System.getenv("SIGNING_STORE_FILE")?.takeIf { it.isNotBlank() }
+val signingStorePassword: String? = System.getenv("SIGNING_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+val signingKeyAlias: String? = System.getenv("SIGNING_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+val signingKeyPassword: String? = System.getenv("SIGNING_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+val hasReleaseSigning = listOf(signingStoreFile, signingStorePassword, signingKeyAlias, signingKeyPassword).all { it != null }
+if (!hasReleaseSigning && (findProperty("couple.requireReleaseSigning") as String?) == "true") {
+    throw GradleException(
+        "Release signing required but SIGNING_STORE_FILE / SIGNING_STORE_PASSWORD / SIGNING_KEY_ALIAS / " +
+            "SIGNING_KEY_PASSWORD are not all set. Refusing to build an unsigned or debug-signed release."
+    )
+}
+
 android {
     namespace = "com.qimingnan.couple"
     compileSdk = 35
@@ -16,11 +44,25 @@ android {
         applicationId = "com.qimingnan.couple"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = coupleVersionCode
+        versionName = coupleVersionName
         // 与 contract.md 中 /health 的 protocolVersion 对齐
         buildConfigField("int", "PROTOCOL_VERSION", "1")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(signingStoreFile!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+                enableV1Signing = false // minSdk 26: v2+v3 only
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
@@ -30,6 +72,8 @@ android {
         }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
             buildConfigField("boolean", "ALLOW_CLEARTEXT_DEBUG", "false")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
