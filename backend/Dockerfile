@@ -7,9 +7,11 @@ FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 WORKDIR /src
 COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY gradle ./gradle
+# settings.gradle.kts includes the Windows updater subproject; only its build script is needed to configure.
+COPY updater/build.gradle.kts ./updater/
 RUN chmod +x gradlew && ./gradlew --no-daemon dependencies > /dev/null
 COPY src ./src
-RUN ./gradlew --no-daemon installDist -x test
+RUN ./gradlew --no-daemon :installDist -x test
 
 # ---- runtime ----
 FROM eclipse-temurin:21-jre

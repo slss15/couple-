@@ -2,6 +2,7 @@ package com.qimingnan.couple.backend.common
 
 import com.github.f4b6a3.ulid.UlidCreator
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.security.MessageDigest
@@ -43,4 +44,14 @@ val AppJson = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
     explicitNulls = true
+}
+
+/**
+ * True when the TCP peer (not any forwarded header) is this host. Note cloudflared on the same host also connects
+ * from loopback, so callers must additionally reject requests carrying CF-Connecting-IP.
+ */
+fun ApplicationCall.isLoopbackPeer(): Boolean {
+    val addr = request.local.remoteAddress.removePrefix("[").removeSuffix("]").lowercase()
+    return addr == "localhost" || addr == "::1" || addr == "0:0:0:0:0:0:0:1" || addr.startsWith("127.") ||
+        addr == "::ffff:127.0.0.1"
 }
