@@ -48,6 +48,17 @@ object AuditActions {
     const val ADMIN_DENIED = "admin.denied"
     const val MQTT_AUTH_DENIED = "mqtt.auth_denied"
     const val BOOTSTRAP_KEY_GENERATED = "bootstrap.key_generated"
+    const val RELEASE_MIRRORED = "release.mirrored"
+    const val RELEASE_REJECTED = "release.rejected"
+    const val RELEASE_CERT_PINNED = "release.cert_pinned"
+    const val RELEASE_SYNC_FAILED = "release.sync_failed"
+    const val ADMIN_RELEASE_LIST = "admin.release.list"
+    const val ADMIN_RELEASE_SYNC = "admin.release.sync"
+    const val ADMIN_RELEASE_UPDATE = "admin.release.update"
+    const val ADMIN_RELEASE_SETTINGS_VIEW = "admin.release.settings.view"
+    const val ADMIN_RELEASE_SETTINGS_UPDATE = "admin.release.settings.update"
+    const val ADMIN_SERVER_UPDATE_STATUS = "admin.server.update_status"
+    const val UPDATER_STATUS = "updater.status"
 }
 
 class AuditService(private val db: Db, private val clock: () -> Long) {

@@ -39,6 +39,8 @@ fun testConfig(
     adminUsername: String? = null,
     bootstrapPrivateKey: String? = null,
     mqttHookSecret: String? = null,
+    releasesDir: String = java.nio.file.Files.createTempDirectory("releases").toString(),
+    githubApiBase: String = "http://127.0.0.1:9",
 ) = AppConfig(
     dbUrl = "jdbc:h2:mem:$dbName;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
     dbUser = "sa",
@@ -51,6 +53,11 @@ fun testConfig(
     authRateLimitPerMinute = 10_000,
     dbMaxPoolSize = 4,
     clock = clock::now,
+    releasesDir = releasesDir,
+    githubApiBase = githubApiBase,
+    releasePollEnabled = false,
+    releaseRetryBaseMs = 10,
+    releaseRetryAttempts = 2,
 )
 
 fun appTest(config: AppConfig = testConfig(), block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {

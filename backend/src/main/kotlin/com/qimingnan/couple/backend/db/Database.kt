@@ -84,6 +84,23 @@ object AuditLog : Table("audit_log") {
     override val primaryKey = PrimaryKey(id)
 }
 
+object AppReleases : Table("app_releases") {
+    val id = varchar("id", 26)
+    val versionCode = integer("version_code")
+    val versionName = varchar("version_name", 32)
+    val sha256 = varchar("sha256", 64)
+    val size = long("size")
+    val signingCertSha256 = varchar("signing_cert_sha256", 64)
+    val minSupportedVersionCode = integer("min_supported_version_code")
+    val notes = text("notes").nullable()
+    val publishedAt = long("published_at")
+    val filePath = varchar("file_path", 512)
+    val status = varchar("status", 16)
+    val rolloutPercent = integer("rollout_percent")
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
 class Db(val dataSource: HikariDataSource, val database: Database) {
     suspend fun <T> tx(block: suspend Transaction.() -> T): T =
         newSuspendedTransaction(Dispatchers.IO, database, Connection.TRANSACTION_READ_COMMITTED) { block() }

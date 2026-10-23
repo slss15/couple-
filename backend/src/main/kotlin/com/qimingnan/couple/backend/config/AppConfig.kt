@@ -28,6 +28,25 @@ data class AppConfig(
     val pairCodeTtlMs: Long = 10 * 60 * 1000L,
     val unpairRequestTtlMs: Long = 7L * 24 * 60 * 60 * 1000L,
     val dbMaxPoolSize: Int = 10,
+    /** Directory where mirrored release APKs live (env RELEASES_DIR). */
+    val releasesDir: String = "/data/releases",
+    /** GitHub REST API root; overridable so tests can point the mirror at a fake server. */
+    val githubApiBase: String = "https://api.github.com",
+    /** Outbound proxy for the release mirror, from HTTPS_PROXY / https_proxy (null = direct). */
+    val outboundProxy: String? = null,
+    /** Hosts that bypass [outboundProxy] (NO_PROXY, comma separated). */
+    val noProxy: String? = null,
+    /** Start the periodic release mirror job. Tests turn it off and trigger syncs explicitly. */
+    val releasePollEnabled: Boolean = true,
+    /** Delay before the first scheduled mirror run after startup. */
+    val releasePollInitialDelayMs: Long = 30_000L,
+    /** Retry backoff base for outbound GitHub requests (doubles per attempt). */
+    val releaseRetryBaseMs: Long = 2_000L,
+    val releaseRetryAttempts: Int = 4,
+    /** Backend version reported to the admin (APP_VERSION env, falls back to the build version). */
+    val appVersion: String? = null,
+    /** Optional VCS revision of the running image (APP_REVISION env). */
+    val appRevision: String? = null,
     /** Injectable clock (epoch ms) so tests can move time. */
     val clock: () -> Long = { System.currentTimeMillis() },
 ) {
@@ -51,6 +70,11 @@ data class AppConfig(
                 adminUsername = opt("ADMIN_USERNAME"),
                 mqttHookSecret = opt("MQTT_HOOK_SECRET"),
                 authRateLimitPerMinute = opt("AUTH_RATE_LIMIT_PER_MINUTE")?.toInt() ?: 30,
+                releasesDir = opt("RELEASES_DIR") ?: "/data/releases",
+                outboundProxy = opt("HTTPS_PROXY") ?: opt("https_proxy") ?: opt("ALL_PROXY") ?: opt("all_proxy"),
+                noProxy = opt("NO_PROXY") ?: opt("no_proxy"),
+                appVersion = opt("APP_VERSION") ?: opt("OCI_IMAGE_VERSION"),
+                appRevision = opt("APP_REVISION") ?: opt("OCI_IMAGE_REVISION"),
             )
         }
     }

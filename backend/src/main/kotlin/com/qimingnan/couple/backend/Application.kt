@@ -21,6 +21,12 @@ import com.qimingnan.couple.backend.health.healthRoutes
 import com.qimingnan.couple.backend.mqtt.mqttHookRoutes
 import com.qimingnan.couple.backend.pairing.PairingService
 import com.qimingnan.couple.backend.pairing.pairingRoutes
+import com.qimingnan.couple.backend.release.ReleaseMirror
+import com.qimingnan.couple.backend.release.ReleaseService
+import com.qimingnan.couple.backend.release.ReleaseSettingsService
+import com.qimingnan.couple.backend.release.adminReleaseRoutes
+import com.qimingnan.couple.backend.release.appUpdateRoutes
+import com.qimingnan.couple.backend.release.updaterStatusRoutes
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -46,6 +52,9 @@ import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
 import kotlin.time.Duration.Companion.minutes
 
+/** Lets tests reach the running mirror instance. */
+val ReleaseMirrorKey = io.ktor.util.AttributeKey<ReleaseMirror>("ReleaseMirror")
+
 private val log = LoggerFactory.getLogger("com.qimingnan.couple.backend")
 
 fun main() {
@@ -67,6 +76,11 @@ fun Application.module(config: AppConfig) {
     val keys = runBlocking { BootstrapService.loadKeys(config, db, audit) }
     val bootstrapService = BootstrapService(keys, adminConfigService, config)
     log.info("Bootstrap Ed25519 public key: {}", keys.publicKeyBase64)
+    val releaseSettings = ReleaseSettingsService(db, config.clock)
+    val releaseService = ReleaseService(db, config)
+    val releaseMirror = ReleaseMirror(db, config, releaseSettings, audit)
+    attributes.put(ReleaseMirrorKey, releaseMirror)
+    if (config.releasePollEnabled) releaseMirror.startScheduler(this)
 
     install(ContentNegotiation) { json(AppJson) }
     install(CallLogging) {
@@ -118,9 +132,12 @@ fun Application.module(config: AppConfig) {
             authRoutes(authService)
             bootstrapPublicRoutes(bootstrapService)
             mqttHookRoutes(config, db, jwtService, audit)
+            updaterStatusRoutes(config, audit, releaseService)
             authenticate(JWT_AUTH) {
                 pairingRoutes(pairingService)
                 adminRoutes(db, audit, adminConfigService, bootstrapService)
+                appUpdateRoutes(releaseService)
+                adminReleaseRoutes(db, audit, releaseService, releaseMirror, releaseSettings, this@module)
             }
         }
     }
