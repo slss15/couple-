@@ -1,0 +1,26 @@
+# Locally-managed Cloudflare Tunnel ingress for the Linux/Docker stack (deploy/docker-compose.yml, service
+# cloudflared). Committed on purpose: routing is identical on every install and never hand-typed in the dashboard.
+# No hostname on the rules: the tunnel only receives traffic for DNS names routed to it
+# (`cloudflared tunnel route dns <tunnel> couple.example.com`), so the same file fits any domain.
+# Tunnel id comes from CLOUDFLARE_TUNNEL_ID, credentials from ./cloudflared/credentials.json (gitignored).
+# Transport is forced to http2 via TUNNEL_TRANSPORT_PROTOCOL in compose (QUIC/UDP is often throttled on NAT4/CN ISPs).
+# First match wins: keep the 404 rules above the broad ones. Check with:
+#   docker compose run --rm cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate
+no-autoupdate: true
+ingress:
+  # internal hooks are never exposed
+  - path: ^/api/v1/internal/.*
+    service: http_status:404
+  # push-to-deploy webhook + status -> updater (not via backend)
+  - path: ^/_deploy/(hook|status)$
+    service: http://updater:9000
+  - path: ^/_deploy/.*
+    service: http_status:404
+  # MQTT over WSS -> EMQX
+  - path: ^/mqtt.*
+    service: http://emqx:8083
+  # REST API
+  - path: ^/api/.*
+    service: http://backend:8080
+  # admin SPA
+  - service: http://admin:8080
