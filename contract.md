@@ -55,7 +55,7 @@ DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET, REGISTRATION_CODE, BOOTSTRAP_PRIVATE_K
 The home server sits behind NAT (outbound only); clients reach it through Cloudflare. The backend mirrors APKs from GitHub Releases (outbound) and the app downloads only from the backend.
 
 ### Release assets (produced by CI, fixed)
-- GitHub Release on repo `qimingnan17/couple-`, tag `vX.Y.Z`, assets `couple-X.Y.Z.apk` and `release.json`. Drafts and prereleases are ignored.
+- GitHub Release on repo `slss15/couple-`, tag `vX.Y.Z`, assets `couple-X.Y.Z.apk` and `release.json`. Drafts and prereleases are ignored.
 - versionCode = X*10000 + Y*100 + Z (Y, Z <= 99).
 - release.json = {versionName:"X.Y.Z", versionCode, sha256 (hex of the APK), size (bytes), signingCertSha256 (hex SHA-256 of the DER signing certificate), minSupportedVersionCode, notes, publishedAt (epoch ms)}. versionName must equal the tag without "v"; 0 <= minSupportedVersionCode <= versionCode.
 

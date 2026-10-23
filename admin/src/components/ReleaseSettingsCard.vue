@@ -25,7 +25,7 @@ const rules: Record<string, FormItemRule[]> = {
   repo: [
     {
       trigger: 'blur',
-      validator: (_r, v: string, cb) => (isRepo(v ?? '') ? cb() : cb(new Error('格式为 owner/name，例如 qimingnan17/couple-'))),
+      validator: (_r, v: string, cb) => (isRepo(v ?? '') ? cb() : cb(new Error('格式为 owner/name，例如 slss15/couple-'))),
     },
   ],
   pollMinutes: [
@@ -83,7 +83,7 @@ onMounted(load)
     <el-alert v-if="loadErr" :title="`加载失败：${loadErr}`" type="error" show-icon class="mb" />
     <el-form ref="formRef" v-loading="loading" :model="form" :rules="rules" label-width="140px">
       <el-form-item label="GitHub 仓库" prop="repo">
-        <el-input v-model="form.repo" placeholder="qimingnan17/couple-" />
+        <el-input v-model="form.repo" placeholder="slss15/couple-" />
       </el-form-item>
       <el-form-item label="GitHub Token">
         <SecretInput v-model="form.token" placeholder="可选；私有仓库或避免限流时填写（只需 contents:read）" />

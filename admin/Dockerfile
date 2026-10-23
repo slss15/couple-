@@ -18,7 +18,7 @@ FROM nginxinc/nginx-unprivileged:1.27-alpine
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="couple-admin" \
-      org.opencontainers.image.source="https://github.com/qimingnan17/couple-" \
+      org.opencontainers.image.source="https://github.com/slss15/couple-" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
 ENV COUPLE_VERSION=${VERSION} \

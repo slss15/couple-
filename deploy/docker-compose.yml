@@ -7,8 +7,8 @@
 # container, so keep bind mounts OFF those two services (named volumes are fine) and keep name: couple.
 name: couple
 
-x-backend-image: &backend-image ghcr.io/qimingnan17/couple-backend:${COUPLE_TAG:-edge}
-x-admin-image: &admin-image ghcr.io/qimingnan17/couple-admin:${COUPLE_TAG:-edge}
+x-backend-image: &backend-image ghcr.io/slss15/couple-backend:${COUPLE_TAG:-edge}
+x-admin-image: &admin-image ghcr.io/slss15/couple-admin:${COUPLE_TAG:-edge}
 
 services:
   mysql:

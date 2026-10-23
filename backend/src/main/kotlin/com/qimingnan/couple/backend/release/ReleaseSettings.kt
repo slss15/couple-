@@ -18,7 +18,7 @@ data class ReleaseSettings(
     val expectedSigningCertSha256: String = "",
 ) {
     companion object {
-        const val DEFAULT_REPO = "qimingnan17/couple-"
+        const val DEFAULT_REPO = "slss15/couple-"
     }
 }
 

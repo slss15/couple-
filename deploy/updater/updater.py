@@ -54,7 +54,7 @@ class Config:
         self.window = g("UPDATE_WINDOW")  # "HH:MM-HH:MM" local time (TZ env); poller only
         self.health_timeout = int(g("HEALTH_TIMEOUT", "90"))
         self.registry = g("REGISTRY", "ghcr.io")
-        self.owner = g("IMAGE_OWNER", "qimingnan17").lower()
+        self.owner = g("IMAGE_OWNER", "slss15").lower()
         self.services = [s.strip() for s in g("SERVICES", "backend,admin").split(",") if s.strip()]
         self.health_urls = {
             "backend": g("HEALTH_URL_BACKEND", "http://backend:8080/api/v1/health"),

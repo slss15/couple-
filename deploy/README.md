@@ -2,7 +2,7 @@
 
 家里的服务器在 NAT4 后面：**没有入站端口，只能出站**。所以：
 
-- 构建全部在 GitHub Actions 上完成，镜像推到 GHCR（`ghcr.io/qimingnan17/couple-*`）；
+- 构建全部在 GitHub Actions 上完成，镜像推到 GHCR（`ghcr.io/slss15/couple-*`）；
 - 服务器上的 `updater` 容器负责更新，两种触发方式共用同一套“拉取 → 重建 → 健康检查 → 失败回滚”流程：
   1. **推送即部署**（主路）：推到 `main` → Actions 测试、构建、推送 `:edge` → 通过 Cloudflare 入口（Caddy 或 cloudflared）调用签名 webhook `/_deploy/hook` → 服务器部署 → Actions 轮询 `/_deploy/status`，部署失败或被回滚时任务显示红叉；
   2. **定时轮询**（兜底）：每 `UPDATE_INTERVAL` 秒比对远端镜像 digest，webhook 漏了也会在一个周期内追上。
@@ -36,7 +36,7 @@ Actions 轮询 GET /_deploy/status（最多约 3 分钟）─► 成功 ✓ / �
 
 ```bash
 # 服务器上（只需要本目录，不需要整个仓库）
-git clone https://github.com/qimingnan17/couple-.git && cd couple-/deploy
+git clone https://github.com/slss15/couple-.git && cd couple-/deploy
 cp .env.example .env && vi .env          # 填密码、域名、DEPLOY_HOOK_SECRET 等
 docker compose --profile tunnel up -d    # 或 --profile aaaa
 docker compose logs -f updater
@@ -71,7 +71,7 @@ docker compose logs -f updater
 ```bash
 keytool -genkeypair -v -keystore couple-release.jks -alias couple \
   -keyalg RSA -keysize 4096 -validity 36500 \
-  -dname "CN=Couple, O=qimingnan17"
+  -dname "CN=Couple, O=slss15"
 base64 -w0 couple-release.jks > couple-release.jks.b64   # macOS: base64 -i couple-release.jks
 # 把 .b64 的内容填到 SIGNING_KEYSTORE_BASE64，然后删除 .b64；.jks 离线备份，不要提交到仓库
 ```
@@ -130,7 +130,7 @@ tag 注释的正文就是 `notes`（`minSupportedVersionCode:` 那一行会被�
   公网可见的 `GET /_deploy/status` 只返回 digest、状态和错误类别（如 `health_timeout`、`pull_failed`），不含任何密钥或日志。
 - webhook 安全：
   - 请求体 `{"service","image","digest","sha","ts"}`，头 `X-Deploy-Timestamp`、`X-Deploy-Signature = hex(HMAC-SHA256(secret, "<ts>.<body>"))`；
-  - 拒绝：签名不对、时间差超过 300 秒、请求体 `ts` 与头不一致、重放（同一签名，重启后仍记得）、镜像不是 `ghcr.io/qimingnan17/couple-<service>`、服务不是 backend/admin、digest 格式不对；
+  - 拒绝：签名不对、时间差超过 300 秒、请求体 `ts` 与头不一致、重放（同一签名，重启后仍记得）、镜像不是 `ghcr.io/slss15/couple-<service>`、服务不是 backend/admin、digest 格式不对；
   - 校验通过立即返回 202，后台按 digest 拉取部署；
   - updater 挂载了 docker.sock（等同宿主机 root），所以它只监听内网、只暴露这两个路径、请求体上限 8 KB，并且只会部署白名单内仓库的镜像。**密钥泄露时立刻在两边轮换。**
 - 只有 backend 和 admin 会被自动更新；mysql/emqx/caddy 等用 `docker compose pull && docker compose up -d` 手动升级。updater 改了代码后：`git pull && docker compose up -d --build updater`。
@@ -154,8 +154,8 @@ sed -i 's/^COUPLE_TAG=.*/COUPLE_TAG=0.2.0/; s/^UPDATE_ENABLED=.*/UPDATE_ENABLED=
 docker compose pull backend admin && docker compose up -d backend admin updater
 
 # 回到某次 main 推送的镜像（Actions 日志/Packages 页里能看到 sha-xxxxxxx）
-docker pull ghcr.io/qimingnan17/couple-backend:sha-1a2b3c4
-docker tag  ghcr.io/qimingnan17/couple-backend:sha-1a2b3c4 ghcr.io/qimingnan17/couple-backend:edge
+docker pull ghcr.io/slss15/couple-backend:sha-1a2b3c4
+docker tag  ghcr.io/slss15/couple-backend:sha-1a2b3c4 ghcr.io/slss15/couple-backend:edge
 docker compose up -d --no-deps --force-recreate backend
 # 记得先设 UPDATE_ENABLED=false 并重建 updater，否则下一轮轮询会再升回 edge 最新版
 

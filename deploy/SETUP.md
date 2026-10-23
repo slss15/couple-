@@ -26,7 +26,7 @@
 - [ ] 一个托管在 Cloudflare 的域名（NS 已切到 Cloudflare）。
 - [ ] 拿到代码（服务器只需要 `deploy/` 目录）：
   ```bash
-  git clone https://github.com/qimingnan17/couple-.git && cd couple-/deploy
+  git clone https://github.com/slss15/couple-.git && cd couple-/deploy
   cp .env.example .env && chmod 600 .env
   ```
 
@@ -222,7 +222,7 @@ Release 版 App 只接受 `https://` / `wss://`。
 
 | 字段（API 名） | 填什么 |
 |---|---|
-| GitHub 仓库 `repo` | `qimingnan17/couple-`（默认值，一般不用改） |
+| GitHub 仓库 `repo` | `slss15/couple-`（默认值，一般不用改） |
 | GitHub Token `githubToken` | 公开仓库可留空；仓库私有或想提高 API 限额时填一个只读的 fine-grained token（Contents: Read） |
 | 自动发布 `autoPublish` | 开 = 镜像成功后直接对手机可见；关 = 镜像后停在“已镜像”，需在「版本发布」页手动发布（推荐先关，自己试装后再发） |
 | 轮询间隔 `pollMinutes` | 默认 30 分钟；`0` = 关闭定时镜像，只能手动“立即同步”；其他取值 5–1440 |
@@ -262,7 +262,7 @@ keytool -list -v -keystore couple-release.jks -alias couple | grep 'SHA256:' | t
 生成 keystore（只做一次，**离线备份两份**，丢了就无法再给已安装的 App 推升级）：
 ```bash
 keytool -genkeypair -v -keystore couple-release.jks -alias couple \
-  -keyalg RSA -keysize 4096 -validity 36500 -dname "CN=Couple, O=qimingnan17"
+  -keyalg RSA -keysize 4096 -validity 36500 -dname "CN=Couple, O=slss15"
 ```
 
 推镜像用自带的 `GITHUB_TOKEN`，不需要额外 Secret。PR 上运行的 CI 不读取任何 Secret、也不部署。
@@ -296,8 +296,8 @@ sed -i 's/^UPDATE_ENABLED=.*/UPDATE_ENABLED=false/' .env && docker compose up -d
 # 2a) 回到某个正式版
 sed -i 's/^COUPLE_TAG=.*/COUPLE_TAG=0.1.0/' .env && docker compose pull backend admin && docker compose up -d backend admin
 # 2b) 或回到某次 main 推送
-docker pull ghcr.io/qimingnan17/couple-backend:sha-1a2b3c4
-docker tag  ghcr.io/qimingnan17/couple-backend:sha-1a2b3c4 ghcr.io/qimingnan17/couple-backend:edge
+docker pull ghcr.io/slss15/couple-backend:sha-1a2b3c4
+docker tag  ghcr.io/slss15/couple-backend:sha-1a2b3c4 ghcr.io/slss15/couple-backend:edge
 docker compose up -d --no-deps --force-recreate backend
 # 3) 修好后恢复
 sed -i 's/^COUPLE_TAG=.*/COUPLE_TAG=edge/; s/^UPDATE_ENABLED=.*/UPDATE_ENABLED=true/' .env && docker compose up -d

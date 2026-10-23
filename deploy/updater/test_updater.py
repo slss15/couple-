@@ -21,7 +21,7 @@ SECRET = "s3cret"
 D1 = "sha256:" + "1" * 64
 D2 = "sha256:" + "2" * 64
 D3 = "sha256:" + "3" * 64
-REPO = "ghcr.io/qimingnan17/couple-backend"
+REPO = "ghcr.io/slss15/couple-backend"
 
 
 class FakeDocker:
@@ -128,9 +128,9 @@ class HmacTests(unittest.TestCase):
         self.assertIsNone(U.validate_payload(cfg, {**ok, "image": REPO + ":edge"})[0])
         bad = [
             {**ok, "image": "ghcr.io/evil/couple-backend"},
-            {**ok, "image": "docker.io/qimingnan17/couple-backend"},
-            {**ok, "image": "ghcr.io/qimingnan17/couple-admin"},  # mismatched service
-            {**ok, "image": "ghcr.io/qimingnan17/couple-backend-evil"},
+            {**ok, "image": "docker.io/slss15/couple-backend"},
+            {**ok, "image": "ghcr.io/slss15/couple-admin"},  # mismatched service
+            {**ok, "image": "ghcr.io/slss15/couple-backend-evil"},
             {**ok, "service": "mysql"},
             {**ok, "digest": "latest"},
             {**ok, "sha": "; rm -rf /"},
@@ -197,7 +197,7 @@ class DeployTests(unittest.TestCase):
         self.assertNotIn(("up", "backend"), d.calls)
 
     def test_poll_deploys_new_digest_and_skips_bad(self):
-        d = FakeDocker(local={REPO: D1, "ghcr.io/qimingnan17/couple-admin": D1})
+        d = FakeDocker(local={REPO: D1, "ghcr.io/slss15/couple-admin": D1})
         remote = {"backend": D2, "admin": D1}
         up, _ = make(self.tmp, d, lambda url: 200, remote=lambda s, t: remote[s])
         up.state["bad"]["backend"] = [D2]
@@ -206,7 +206,7 @@ class DeployTests(unittest.TestCase):
         remote["backend"] = D3
         up.poll_once(datetime(2026, 1, 1, 12, 0))
         self.assertEqual(up.state["current"]["backend"], D3)
-        self.assertNotIn(("pull", f"ghcr.io/qimingnan17/couple-admin@{D1}"), d.calls)
+        self.assertNotIn(("pull", f"ghcr.io/slss15/couple-admin@{D1}"), d.calls)
 
     def test_poll_respects_disabled_and_window(self):
         d = FakeDocker(local={REPO: D1})

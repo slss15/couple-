@@ -15,7 +15,7 @@ import type { ReleaseSettingsView } from '@/types/api'
 const HEX = 'ab'.repeat(32)
 
 const view: ReleaseSettingsView = {
-  repo: 'qimingnan17/couple-',
+  repo: 'slss15/couple-',
   githubToken: '****1234',
   autoPublish: false,
   pollMinutes: 30,
@@ -28,7 +28,7 @@ describe('版本发布设置表单 → 请求体', () => {
     const p = releaseSettingsPayload(releaseSettingsForm(view))
     expect('githubToken' in p).toBe(false)
     expect(JSON.stringify(p)).not.toContain('****')
-    expect(p).toEqual({ repo: 'qimingnan17/couple-', autoPublish: false, pollMinutes: 30, expectedSigningCertSha256: HEX })
+    expect(p).toEqual({ repo: 'slss15/couple-', autoPublish: false, pollMinutes: 30, expectedSigningCertSha256: HEX })
   })
 
   it('新令牌覆盖、勾选清除发送空串；证书指纹规范化，留空清除固定', () => {
@@ -45,7 +45,7 @@ describe('版本发布设置表单 → 请求体', () => {
 
   it('空视图给出默认值', () => {
     const f = releaseSettingsForm(null)
-    expect(f.repo).toBe('qimingnan17/couple-')
+    expect(f.repo).toBe('slss15/couple-')
     expect(f.pollMinutes).toBe(30)
     expect(f.token.masked).toBeNull()
   })
@@ -54,7 +54,7 @@ describe('版本发布设置表单 → 请求体', () => {
 describe('校验与格式化', () => {
   it('仓库、轮询间隔、证书指纹', () => {
     expect(isRepo('a/b')).toBe(true)
-    expect(isRepo('qimingnan17/couple-')).toBe(true)
+    expect(isRepo('slss15/couple-')).toBe(true)
     expect(isRepo('nope')).toBe(false)
     expect(isRepo('a/b/c')).toBe(false)
     expect(isValidPollMinutes(0)).toBe(true)

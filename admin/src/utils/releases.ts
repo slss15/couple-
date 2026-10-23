@@ -63,7 +63,7 @@ export interface ReleaseSettingsForm {
 
 export function releaseSettingsForm(v: ReleaseSettingsView | null): ReleaseSettingsForm {
   return {
-    repo: v?.repo ?? 'qimingnan17/couple-',
+    repo: v?.repo ?? 'slss15/couple-',
     token: { masked: v?.githubToken || null, value: '', clear: false },
     autoPublish: v?.autoPublish ?? false,
     pollMinutes: v?.pollMinutes ?? 30,
