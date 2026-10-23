@@ -150,6 +150,9 @@ dependencies {
     implementation(libs.work.runtime.ktx)
     implementation(libs.paho.mqtt)
     implementation(libs.bouncycastle)
+    // Silent self-update through Shizuku when available (see data/update/ApkInstaller.kt)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

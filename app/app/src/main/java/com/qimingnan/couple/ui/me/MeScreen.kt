@@ -18,6 +18,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.R
 import com.qimingnan.couple.data.mqtt.MqttState
+import com.qimingnan.couple.data.update.ShizukuState
+import com.qimingnan.couple.data.update.UpdatePhase
+import com.qimingnan.couple.ui.update.UpdateViewModel
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.components.BannerKind
 import com.qimingnan.couple.ui.components.CoupleTextField
@@ -30,9 +36,16 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun MeScreen(onRescan: () -> Unit, modifier: Modifier = Modifier, vm: MeViewModel = hiltViewModel()) {
+fun MeScreen(
+    onRescan: () -> Unit,
+    modifier: Modifier = Modifier,
+    vm: MeViewModel = hiltViewModel(),
+    updateVm: UpdateViewModel = hiltViewModel(),
+) {
     val t = LocalCoupleTokens.current
     val s by vm.state.collectAsStateWithLifecycle()
+    val upd by updateVm.state.collectAsStateWithLifecycle()
+    var updateMsg by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { vm.refresh() }
     val dateFmt = DateFormat.getDateInstance(DateFormat.MEDIUM)
 
@@ -93,6 +106,34 @@ fun MeScreen(onRescan: () -> Unit, modifier: Modifier = Modifier, vm: MeViewMode
                 s.pinFingerprint?.let { KeyValueRow("公钥指纹", it) }
             }
             SecondaryButton(stringResource(R.string.me_rescan), onClick = onRescan)
+        }
+
+        SectionCard("应用更新") {
+            KeyValueRow("当前版本", "${upd.currentVersionName}（${upd.currentVersionCode}）")
+            if (upd.lastCheckAt > 0) KeyValueRow("上次检查", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(upd.lastCheckAt)))
+            KeyValueRow(
+                "静默安装",
+                when (upd.shizuku) {
+                    ShizukuState.AUTHORIZED -> "Shizuku 已授权"
+                    ShizukuState.NOT_AUTHORIZED -> "Shizuku 未授权"
+                    ShizukuState.UNSUPPORTED -> "Shizuku 版本过旧"
+                    ShizukuState.NOT_RUNNING -> "未检测到 Shizuku（将使用系统安装确认）"
+                },
+            )
+            upd.available?.let { a ->
+                StatusBanner("可更新到 ${a.versionName}" + if (upd.force) "（必须更新）" else "", if (upd.force) BannerKind.Warning else BannerKind.Info)
+            }
+            (upd.phase as? UpdatePhase.Downloading)?.let { p ->
+                Text("正在下载 ${p.done * 100 / maxOf(p.total, 1)}%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+            }
+            updateMsg?.let { Text(it, style = t.typography.caption, color = t.colors.onSurfaceVariant) }
+            SecondaryButton(
+                if (upd.checking) "检查中…" else "检查更新",
+                onClick = { updateVm.checkNow { updateMsg = it } },
+                enabled = !upd.checking,
+            )
+            if (upd.available != null) SecondaryButton("查看更新", onClick = updateVm::reopen)
+            if (upd.shizuku == ShizukuState.NOT_AUTHORIZED) SecondaryButton("授权 Shizuku 静默安装", onClick = updateVm::requestShizukuPermission)
         }
 
         SectionCard(stringResource(R.string.me_unpair)) {

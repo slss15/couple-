@@ -23,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.qimingnan.couple.R
 import com.qimingnan.couple.theme.LocalCoupleTokens
+import com.qimingnan.couple.ui.update.UpdateDialogHost
 import com.qimingnan.couple.ui.auth.AuthScreen
 import com.qimingnan.couple.ui.bootstrap.BootstrapScreen
 import com.qimingnan.couple.ui.components.BannerKind
@@ -100,6 +101,8 @@ fun CoupleRoot(deepLinkUri: String?, onDeepLinkConsumed: () -> Unit, vm: RootVie
                 }
             }
         }
+        // App self-update prompt (blocking when forced), above every screen.
+        UpdateDialogHost()
     }
 }
 

@@ -6,6 +6,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <!-- App self-update: system installer fallback, download progress notification, WorkManager foreground download -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:name=".CoupleApp"
@@ -49,6 +54,24 @@
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
+
+        <!-- 自更新：WorkManager 前台下载（dataSync），系统安装器回调，Shizuku 静默安装 -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <receiver
+            android:name=".data.update.InstallResultReceiver"
+            android:exported="false" />
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <!-- ML Kit 条码模型随 APK 打包（bundled），无需 Play 服务下载 -->
         <meta-data
