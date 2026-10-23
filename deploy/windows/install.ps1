@@ -27,7 +27,10 @@ param(
     [string]$TunnelHostname,
     [string]$TunnelJsonFile,
     # Re-render config\cloudflared\config.yml even if it exists (the previous one is kept as config.yml.bak).
-    [switch]$ForceTunnelConfig
+    [switch]$ForceTunnelConfig,
+    # Only download the pinned, sha256-verified cloudflared.exe to <InstallDir>\cloudflared\ and exit
+    # (needed once before `cloudflared tunnel login/create`).
+    [switch]$CloudflaredOnly
 )
 
 Set-StrictMode -Version 2.0
@@ -114,6 +117,26 @@ function Expand-Template([string]$Source, [string]$Dest, [hashtable]$Values) {
     Write-Utf8NoBom $Dest $text
 }
 
+function Install-Cloudflared([string]$Dir, [hashtable]$Pins, [string]$Proxy) {
+    $exe = Join-Path $Dir 'cloudflared.exe'
+    $want = $Pins['CLOUDFLARED_WINDOWS_AMD64_SHA256'].ToLowerInvariant()
+    $have = if (Test-Path -LiteralPath $exe) { (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant() } else { '' }
+    if ($have -eq $want) { return $exe }
+    Stop-CoupleService 'couple-cloudflared'
+    New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+    $url = "https://github.com/cloudflare/cloudflared/releases/download/$($Pins['CLOUDFLARED_VERSION'])/cloudflared-windows-amd64.exe"
+    $tmp = "$exe.download"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $iwr = @{ Uri = $url; OutFile = $tmp; UseBasicParsing = $true }
+    if ($Proxy) { $iwr['Proxy'] = $Proxy }
+    Write-Host "    downloading $url"
+    Invoke-WebRequest @iwr
+    $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
+    if ($got -ne $want) { Remove-Item -LiteralPath $tmp -Force; throw "cloudflared sha256 mismatch: $got" }
+    Move-Item -LiteralPath $tmp -Destination $exe -Force
+    return $exe
+}
+
 function Install-WinswService([string]$Name, [string]$WinswExe) {
     $exe = Join-Path $servicesDir "$Name.exe"
     Stop-CoupleService $Name
@@ -143,6 +166,13 @@ if ($tunnelRequested -and -not ($TunnelId -and $TunnelHostname -and $TunnelJsonF
 }
 
 Write-Host "Couple server $version -> $InstallDir"
+
+if ($CloudflaredOnly) {
+    $proxy = (Read-KeyValueFile $envFile)['HTTPS_PROXY']
+    $exe = Install-Cloudflared (Join-Path $InstallDir 'cloudflared') $pins $proxy
+    Write-Host "cloudflared $($pins['CLOUDFLARED_VERSION']) ready: $exe"
+    return
+}
 
 Write-Step 'Creating directories'
 foreach ($d in @('config', 'config\cloudflared', 'data\releases', 'data\mqtt', 'data\updater', 'logs', 'releases', 'services', 'updater', 'cloudflared')) {
@@ -206,23 +236,7 @@ Expand-Template (Join-Path $pkg 'service\couple-updater.xml.in') (Join-Path $ser
 if ($tunnelRequested) {
     Write-Step "Cloudflare Tunnel (cloudflared $($pins['CLOUDFLARED_VERSION']), locally managed)"
     if ($TunnelId -notmatch '^[0-9a-fA-F-]{36}$') { throw "-TunnelId must be the tunnel UUID, got '$TunnelId'" }
-    $cfDir = Join-Path $InstallDir 'cloudflared'
-    $cfExe = Join-Path $cfDir 'cloudflared.exe'
-    $want = $pins['CLOUDFLARED_WINDOWS_AMD64_SHA256'].ToLowerInvariant()
-    $have = if (Test-Path -LiteralPath $cfExe) { (Get-FileHash -Algorithm SHA256 -LiteralPath $cfExe).Hash.ToLowerInvariant() } else { '' }
-    if ($have -ne $want) {
-        Stop-CoupleService 'couple-cloudflared'
-        $url = "https://github.com/cloudflare/cloudflared/releases/download/$($pins['CLOUDFLARED_VERSION'])/cloudflared-windows-amd64.exe"
-        $tmp = "$cfExe.download"
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        $iwr = @{ Uri = $url; OutFile = $tmp; UseBasicParsing = $true }
-        if ($cfg['HTTPS_PROXY']) { $iwr['Proxy'] = $cfg['HTTPS_PROXY'] }
-        Write-Host "    downloading $url"
-        Invoke-WebRequest @iwr
-        $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
-        if ($got -ne $want) { Remove-Item -LiteralPath $tmp -Force; throw "cloudflared sha256 mismatch: $got" }
-        Move-Item -LiteralPath $tmp -Destination $cfExe -Force
-    }
+    $cfExe = Install-Cloudflared (Join-Path $InstallDir 'cloudflared') $pins $cfg['HTTPS_PROXY']
     $credDest = Join-Path $configDir "cloudflared\$TunnelId.json"
     Copy-Item -LiteralPath $TunnelJsonFile -Destination $credDest -Force
     Protect-File $credDest

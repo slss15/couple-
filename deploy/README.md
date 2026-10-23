@@ -1,5 +1,11 @@
 # 部署与自动更新
 
+> **生产主推 Windows 原生部署**（云 Windows 主机，没有虚拟化 → 不能跑 Docker/WSL2）：后端内置 MQTT broker 并直接托管管理后台，
+> couple-backend / couple-updater / couple-cloudflared 三个 Windows 服务，从零配置见 [`windows/SETUP-windows.md`](windows/SETUP-windows.md)。
+> 推 `main` → CI 产出 `couple-server-windows-x64-edge-<sha>.zip`（交叉 jlink 的 JRE 21 + 后端 + 管理后台 + updater + WinSW）发到滚动预发布 `edge`，
+> 并通过签名 webhook 让 couple-updater 下载、校验 sha256、切换版本、健康检查（失败自动回滚）。打 tag 时 zip 也附在正式 Release 上。
+> 下面描述的是可选的 Linux + Docker 方案（同一套 HMAC webhook，载荷不同，由仓库变量 `DEPLOY_TARGET` 选择）。
+
 家里的服务器在 NAT4 后面：**没有入站端口，只能出站**。所以：
 
 - 构建全部在 GitHub Actions 上完成，镜像推到 GHCR（`ghcr.io/slss15/couple-*`）；
@@ -16,19 +22,20 @@ git push main ──► Actions: test ─► build amd64+arm64 ─► push :sha-
                                      updater: pull @digest ─► compose up --force-recreate ─► 健康检查
                                                             ├─ 成功：记录 current
                                                             └─ 失败：回滚到上一个 digest，标记新 digest 为坏
-Actions 轮询 GET /_deploy/status（最多约 3 分钟）─► 成功 ✓ / 回滚或失败 ✗
+Actions 轮询 GET /_deploy/status（最多约 10 分钟）─► 成功 ✓ / 回滚或失败 ✗
 ```
 
 ## 目录
 
 | 文件 | 作用 |
 |---|---|
-| `docker-compose.yml` | 生产栈：mysql、backend、admin、emqx、updater，以及 `aaaa`（Caddy+DDNS）/ `tunnel`（cloudflared）两种入口 |
+| `windows/` | **主推：Windows 原生部署**——服务器 zip 打包脚本、WinSW 服务模板、`install.ps1`/`uninstall.ps1`、cloudflared 配置模板、[`SETUP-windows.md`](windows/SETUP-windows.md) |
+| `docker-compose.yml` | Linux/Docker 栈（可选）：mysql、backend、admin、emqx、updater、cloudflared（默认入口）；可选 `aaaa`（Caddy+DDNS）、`tunnel-token` |
 | `.env.example` | 环境变量模板，复制成 `.env` |
-| `Caddyfile` | 方案 A 的路由（含 `/_deploy/*` → updater） |
-| `cloudflared-config.example.yml` | 方案 B 的路由（同样顺序） |
-| `updater/` | 更新器（Python 标准库 + docker CLI + compose 插件），含单元/集成测试 |
-| `scripts/deploy-hook.sh` | Actions 里调用 webhook 并等待结果的脚本 |
+| `cloudflared/config.yml` | 默认隧道的路由（本地管理，已提交；凭证 `cloudflared/credentials.json` 不提交） |
+| `Caddyfile` | 可选 AAAA 方案的路由（同样顺序） |
+| `updater/` | Docker 版更新器（Python 标准库 + docker CLI + compose 插件），含单元/集成测试；Windows 版在 `../backend/updater/`（Kotlin） |
+| `scripts/deploy-hook.sh` | Actions 里调用 webhook 并等待结果的脚本（`windows` / `docker` 两种载荷） |
 
 `backend/docker-compose.yml` 仍是**从源码构建**的开发栈；服务器上用本目录。
 
@@ -38,7 +45,7 @@ Actions 轮询 GET /_deploy/status（最多约 3 分钟）─► 成功 ✓ / �
 # 服务器上（只需要本目录，不需要整个仓库）
 git clone https://github.com/slss15/couple-.git && cd couple-/deploy
 cp .env.example .env && vi .env          # 填密码、域名、DEPLOY_HOOK_SECRET 等
-docker compose --profile tunnel up -d    # 或 --profile aaaa
+docker compose up -d                     # 默认带本地管理隧道（见 SETUP.md 第 1 节）
 docker compose logs -f updater
 ```
 
@@ -48,19 +55,21 @@ docker compose logs -f updater
   - 新增 `/_deploy/hook`、`/_deploy/status` → `updater:9000`，其他 `/_deploy/*` 一律 404；
   - `/api/*` → backend；`/mqtt*` → emqx；`/api/v1/internal/*` 仍然 404；
   - 其余路径 → admin 前端（同域访问，前端的 `/api` 请求也由 admin 的 nginx 转给 backend）。
-  - 用 Cloudflare Tunnel 远程管理（token 模式）时，请在 Zero Trust 面板里按 `cloudflared-config.example.yml` 的**顺序**添加 Public Hostname（`/_deploy/(hook|status)` 指向 `http://updater:9000`）。
-- 如果开启了 Cloudflare 的 Bot Fight Mode / WAF 挑战，请为路径 `/_deploy/*` 加一条跳过规则，否则 Actions 的 curl 会被拦。
+  - 路由写在 `cloudflared/config.yml`（本地管理隧道）；只有用备选的 token 模式时，才需要在 Zero Trust 面板里按同样**顺序**手工添加 Public Hostname。
+- **Bot Fight Mode 必须关闭**（免费版无法用 WAF 规则跳过，会拦 Actions 的 curl 和 App 的非浏览器客户端）；`/api/*`、`/mqtt`、`/_deploy/*` 上不要有任何质询。
 
 ## 二、GitHub Secrets（Settings → Secrets and variables → Actions）
 
 | Secret | 用途 | 必需 |
 |---|---|---|
 | `DEPLOY_HOOK_URL` | 服务器公网地址，例如 `https://couple.example.com`（不带路径） | 推送即部署 |
-| `DEPLOY_HOOK_SECRET` | 与服务器 `.env` 相同的 HMAC 密钥 | 推送即部署 |
+| `DEPLOY_HOOK_SECRET` | 与服务器 `.env` / `couple.env` 相同的 HMAC 密钥 | 推送即部署 |
 | `SIGNING_KEYSTORE_BASE64` | 发布签名 keystore 的 base64 | 打 tag 发版 |
 | `SIGNING_STORE_PASSWORD` | keystore 密码 | 打 tag 发版 |
 | `SIGNING_KEY_ALIAS` | key 别名 | 打 tag 发版 |
 | `SIGNING_KEY_PASSWORD` | key 密码 | 打 tag 发版 |
+
+仓库**变量** `DEPLOY_TARGET`：`windows`（默认，未设置即是）= webhook 部署 Windows 包；`docker` = webhook 部署镜像。两种产物每次推 main 都会构建（Windows zip 发到滚动预发布 `edge`，镜像推到 GHCR），只是 webhook 只通知其中一种。
 
 推镜像用的是自带的 `GITHUB_TOKEN`（`packages: write`），不需要额外配置。
 没配 `DEPLOY_HOOK_*` 时镜像照样推送，只是改由服务器轮询拉取（Actions 里会有一条黄色警告）。
