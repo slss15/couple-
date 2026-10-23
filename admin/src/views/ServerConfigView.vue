@@ -4,6 +4,7 @@ import { ElMessage, type FormInstance, type FormItemRule } from 'element-plus'
 import { api } from '@/api'
 import { errorText } from '@/api/errors'
 import SecretInput from '@/components/SecretInput.vue'
+import ReleaseSettingsCard from '@/components/ReleaseSettingsCard.vue'
 import type { AdminConfigView } from '@/types/api'
 import { formatTs } from '@/utils/format'
 import { emptyForm, fromConfig, isHttpUrl, isWssUrl, toPayload, type ConfigForm } from '@/utils/configForm'
@@ -138,6 +139,10 @@ onMounted(load)
         <el-button type="primary" :loading="saving" @click="save">保存配置</el-button>
       </div>
     </el-form>
+
+    <div class="form release">
+      <ReleaseSettingsCard />
+    </div>
   </div>
 </template>
 
@@ -147,4 +152,5 @@ onMounted(load)
 .ml { margin-left: 8px; }
 .hint { padding-left: 140px; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; }
+.release { margin-top: 24px; }
 </style>

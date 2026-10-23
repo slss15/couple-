@@ -122,3 +122,81 @@ export interface JwtClaims {
   exp?: number
   iat?: number
 }
+
+// ---- 自动更新（contract “Auto-update (P0.5)”） ----
+
+export type ReleaseStatus = 'MIRRORED' | 'PUBLISHED' | 'WITHDRAWN'
+
+/** GET /admin/releases 的一项 */
+export interface AppReleaseView {
+  id: string
+  versionCode: number
+  versionName: string
+  sha256: string
+  size: number
+  signingCertSha256: string
+  minSupportedVersionCode: number
+  notes: string | null
+  publishedAt: number
+  status: ReleaseStatus
+  rolloutPercent: number
+  createdAt: number
+  /** 服务器磁盘上的 APK 是否还在 */
+  fileExists: boolean
+}
+
+/** PATCH /admin/releases/{versionCode}，字段均可选 */
+export interface ReleasePatch {
+  status?: ReleaseStatus
+  rolloutPercent?: number
+  minSupportedVersionCode?: number
+  notes?: string
+}
+
+/** POST/GET /admin/releases/sync */
+export interface SyncState {
+  running: boolean
+  lastRunAt: number | null
+  lastFinishedAt: number | null
+  lastResult: 'ok' | 'error' | null
+  lastError: string | null
+  mirrored: number[]
+  rejected: string[]
+}
+
+/** GET /admin/releases/settings；githubToken 为脱敏值或 null */
+export interface ReleaseSettingsView {
+  repo: string
+  githubToken: string | null
+  autoPublish: boolean
+  pollMinutes: number
+  expectedSigningCertSha256: string | null
+  updatedAt: number | null
+}
+
+/** PUT /admin/releases/settings：githubToken 缺省 = 保持，"" = 清除 */
+export interface ReleaseSettingsUpdate {
+  repo?: string
+  githubToken?: string
+  autoPublish?: boolean
+  pollMinutes?: number
+  expectedSigningCertSha256?: string
+}
+
+/** server-updater 上报的状态（原样转发，字段可能缺失） */
+export interface UpdaterReport {
+  channel?: string
+  enabled?: boolean
+  current?: Record<string, string | null>
+  lastCheck?: number | null
+  lastResult?: string | null
+  lastError?: string | null
+  [k: string]: unknown
+}
+
+/** GET /admin/server/update-status */
+export interface ServerUpdateStatus {
+  backend: { version: string; buildVersion: string; revision: string | null }
+  updater: UpdaterReport | null
+  updaterReportedAt: number | null
+}

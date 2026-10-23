@@ -4,7 +4,8 @@ import { Refresh } from '@element-plus/icons-vue'
 import { api } from '@/api'
 import { ApiError, errorText, toApiError } from '@/api/errors'
 import { apiRoot } from '@/api/http'
-import type { BootstrapPubkey, Couple, HealthInfo } from '@/types/api'
+import type { BootstrapPubkey, Couple, HealthInfo, ServerUpdateStatus } from '@/types/api'
+import { shortDigest, updaterResultTag } from '@/utils/releases'
 import { formatDate, formatTs } from '@/utils/format'
 import { base64ToBytes } from '@/utils/base64url'
 import { useAuthStore } from '@/stores/auth'
@@ -23,6 +24,8 @@ const coupleErr = ref('')
 const pubkey = ref<BootstrapPubkey | null>(null)
 const pubkeyFp = ref('')
 const loading = ref(false)
+const updStatus = ref<ServerUpdateStatus | null>(null)
+const updErr = ref('')
 
 async function fingerprint(b64: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', base64ToBytes(b64) as BufferSource)
@@ -69,9 +72,19 @@ async function loadPubkey() {
   }
 }
 
+async function loadUpdateStatus() {
+  updErr.value = ''
+  try {
+    updStatus.value = await api.serverUpdateStatus()
+  } catch (e) {
+    updStatus.value = null
+    updErr.value = errorText(e)
+  }
+}
+
 async function reload() {
   loading.value = true
-  await Promise.all([loadHealth(), loadCouple(), loadPubkey()])
+  await Promise.all([loadHealth(), loadCouple(), loadPubkey(), loadUpdateStatus()])
   auth.sync()
   loading.value = false
 }
@@ -115,6 +128,34 @@ onMounted(reload)
               </template>
               <span v-else class="muted">未获取</span>
             </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+
+        <el-card shadow="never" class="card">
+          <template #header>
+            <div class="card-h">
+              <span>服务器自动更新状态</span>
+              <el-tag v-if="updStatus?.updater" :type="updaterResultTag(updStatus.updater)">{{ updStatus.updater.lastError ? '出错' : (updStatus.updater.lastResult || '未知') }}</el-tag>
+              <el-tag v-else-if="updStatus" type="info">未上报</el-tag>
+            </div>
+          </template>
+          <el-alert v-if="updErr" :title="updErr" type="error" :closable="false" show-icon />
+          <el-descriptions v-else-if="updStatus" :column="1" border size="small">
+            <el-descriptions-item label="后端版本">
+              {{ updStatus.backend.version }}
+              <span v-if="updStatus.backend.revision" class="muted mono">（{{ shortDigest(updStatus.backend.revision, 8) }}）</span>
+            </el-descriptions-item>
+            <template v-if="updStatus.updater">
+              <el-descriptions-item v-for="(v, k) in updStatus.updater.current ?? {}" :key="k" :label="`当前 ${k}`">
+                <el-tooltip :content="String(v ?? '—')" placement="top"><span class="mono">{{ shortDigest(v ?? null, 19) }}</span></el-tooltip>
+              </el-descriptions-item>
+              <el-descriptions-item v-if="updStatus.updater.channel" label="跟踪通道">{{ updStatus.updater.channel }}<span v-if="updStatus.updater.enabled === false" class="muted">（已停用）</span></el-descriptions-item>
+              <el-descriptions-item label="上次检查">{{ formatTs(updStatus.updater.lastCheck ?? null) }}</el-descriptions-item>
+              <el-descriptions-item label="结果">{{ updStatus.updater.lastResult || '—' }}</el-descriptions-item>
+              <el-descriptions-item v-if="updStatus.updater.lastError" label="错误"><span class="err">{{ updStatus.updater.lastError }}</span></el-descriptions-item>
+              <el-descriptions-item label="上报时间">{{ formatTs(updStatus.updaterReportedAt) }}</el-descriptions-item>
+            </template>
+            <el-descriptions-item v-else label="updater"><span class="muted">尚未收到 server-updater 的状态上报</span></el-descriptions-item>
           </el-descriptions>
         </el-card>
       </el-col>
@@ -171,4 +212,5 @@ onMounted(reload)
 .ml { margin-left: 8px; }
 .members { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
 .member { display: flex; gap: 12px; align-items: center; }
+.err { color: #f56c6c; }
 </style>
