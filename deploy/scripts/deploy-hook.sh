@@ -1,38 +1,71 @@
 #!/usr/bin/env bash
-# Trigger a push-deploy on the home server and wait for its result.
+# Trigger a push-deploy on the server and wait for its result.
 #
-#   deploy-hook.sh <service> <image> <digest> [sha]
+#   deploy-hook.sh windows <version> <assetUrl> <sha256> [sha]    # Windows-native server (couple-updater, default target)
+#   deploy-hook.sh docker  <service> <image> <digest> [sha]       # Linux/Docker server (deploy/updater, Python)
+#   deploy-hook.sh <service> <image> <digest> [sha]               # legacy form = docker
+#
+# Payloads:
+#   windows: {service:"server", version, sha, assetUrl, sha256, ts}
+#   docker:  {service, image, digest, sha, ts}
 #
 # Env:
 #   DEPLOY_HOOK_URL     base URL, e.g. https://couple.example.com   (required)
 #   DEPLOY_HOOK_SECRET  shared HMAC secret                         (required)
-#   DEPLOY_WAIT_SECONDS how long to wait for a terminal state (default 180)
+#   DEPLOY_WAIT_SECONDS how long to wait for a terminal state (default 600: a cold download over a slow link is slow)
 #   DEPLOY_POLL_SECONDS poll interval (default 5)
 #
 # Signature: X-Deploy-Signature = hex(HMAC-SHA256(secret, "<timestamp>.<body>")).
 # Exit codes: 0 deployed (or already current), 1 deploy failed/rolled back, 2 usage/transport error.
 set -euo pipefail
 
-usage() { echo "usage: $0 <service> <image> <digest> [sha]" >&2; exit 2; }
+usage() {
+  echo "usage: $0 windows <version> <assetUrl> <sha256> [sha] | $0 docker <service> <image> <digest> [sha]" >&2
+  exit 2
+}
+[ $# -ge 1 ] || usage
+case "$1" in
+  windows|docker) target=$1; shift ;;
+  *) target=docker ;;
+esac
 [ $# -ge 3 ] || usage
-service=$1 image=$2 digest=$3 sha=${4:-}
 : "${DEPLOY_HOOK_URL:?DEPLOY_HOOK_URL is not set}"
 : "${DEPLOY_HOOK_SECRET:?DEPLOY_HOOK_SECRET is not set}"
-wait_s=${DEPLOY_WAIT_SECONDS:-180}
+wait_s=${DEPLOY_WAIT_SECONDS:-600}
 poll_s=${DEPLOY_POLL_SECONDS:-5}
 base=${DEPLOY_HOOK_URL%/}
 
-case "$digest" in sha256:*) ;; *) echo "::error::digest must look like sha256:..." >&2; exit 2 ;; esac
+if [ "$target" = windows ]; then
+  service=server version=$1 asset=$2 match=$3 sha=${4:-}
+  [[ "$match" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::sha256 must be 64 lowercase hex chars" >&2; exit 2; }
+  case "$asset" in https://github.com/*/releases/download/*) ;; *) echo "::error::assetUrl must be a GitHub release asset URL" >&2; exit 2 ;; esac
+  match_field=sha256
+  label="$version"
+else
+  service=$1 image=$2 match=$3 sha=${4:-}
+  case "$match" in sha256:*) ;; *) echo "::error::digest must look like sha256:..." >&2; exit 2 ;; esac
+  match_field=digest
+  label="$match"
+fi
 
 ua="couple-deploy/1 (+github-actions)"
 curl_common=(--silent --show-error --max-time 20 --retry 3 --retry-delay 3 --retry-all-errors -A "$ua")
+
+body_for() { # ts
+  if [ "$target" = windows ]; then
+    jq -cn --arg v "$version" --arg u "$asset" --arg s "$match" --arg h "$sha" --argjson t "$1" \
+      '{service:"server",version:$v,sha:$h,assetUrl:$u,sha256:$s,ts:$t}'
+  else
+    jq -cn --arg s "$service" --arg i "$image" --arg d "$match" --arg h "$sha" --argjson t "$1" \
+      '{service:$s,image:$i,digest:$d,sha:$h,ts:$t}'
+  fi
+}
 
 send_hook() {
   # A fresh timestamp/signature per attempt (the updater rejects replays of the same signature).
   local ts body sig code
   ts=$(date +%s)
-  body=$(jq -cn --arg s "$service" --arg i "$image" --arg d "$digest" --arg h "$sha" --argjson t "$ts" \
-    '{service:$s,image:$i,digest:$d,sha:$h,ts:$t}')
+  body=$(body_for "$ts")
   sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac "$DEPLOY_HOOK_SECRET" -r | cut -d' ' -f1)
   code=$(curl --silent --show-error --max-time 20 -A "$ua" -o /tmp/deploy-hook-resp.json -w '%{http_code}' \
     -X POST "$base/_deploy/hook" \
@@ -56,7 +89,7 @@ if [ "$code" != 202 ]; then
   echo "::error::deploy hook rejected: HTTP $code $(cat /tmp/deploy-hook-resp.json 2>/dev/null || true)" >&2
   exit 2
 fi
-echo "hook accepted: $service $digest"
+echo "hook accepted ($target): $service $label"
 
 deadline=$(( $(date +%s) + wait_s ))
 state=unknown
@@ -66,16 +99,16 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
     echo "status poll failed, retrying" >&2
     continue
   fi
-  state=$(printf '%s' "$status" | jq -r --arg s "$service" --arg d "$digest" \
-    '.deploys[$s] // {} | if .digest == $d then (.state // "unknown") else "pending" end' 2>/dev/null || echo unknown)
+  state=$(printf '%s' "$status" | jq -r --arg s "$service" --arg f "$match_field" --arg m "$match" \
+    '.deploys[$s] // {} | if .[$f] == $m then (.state // "unknown") else "pending" end' 2>/dev/null || echo unknown)
   echo "deploy state: $state"
   case "$state" in
-    success|noop) echo "deployed $service @ $digest"; exit 0 ;;
+    success|noop) echo "deployed $service $label"; exit 0 ;;
     rolled_back|failed|rollback_failed)
       err=$(printf '%s' "$status" | jq -r --arg s "$service" '.deploys[$s].error // ""')
       echo "::error::deploy of $service failed: $state ($err)" >&2
       exit 1 ;;
   esac
 done
-echo "::error::timed out after ${wait_s}s waiting for deploy of $service (last state: $state)" >&2
+echo "::error::timed out after ${wait_s}s waiting for deploy of $service $label (last state: $state); the server may still finish - check /_deploy/status" >&2
 exit 1

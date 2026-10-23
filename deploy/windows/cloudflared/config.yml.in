@@ -1,0 +1,33 @@
+# Locally-managed Cloudflare Tunnel for the Windows-native deployment.
+# Rendered by install.ps1 into C:\couple\config\cloudflared\config.yml (placeholders @TUNNEL_ID@, @HOSTNAME@,
+# @CREDENTIALS_FILE@). Rules are matched top to bottom; first match wins. Keep the 404 rules ABOVE the broad ones.
+tunnel: @TUNNEL_ID@
+credentials-file: @CREDENTIALS_FILE@
+# QUIC (UDP 7844) is often throttled or blocked behind NAT4 / CGNAT / CN ISPs; http2 uses outbound TCP 7844 (or 443).
+protocol: http2
+no-autoupdate: true
+edge-ip-version: auto
+metrics: 127.0.0.1:20241
+
+ingress:
+  # 1. Internal hooks are never public (the backend also rejects them: loopback + token + no CF-Connecting-IP).
+  - hostname: @HOSTNAME@
+    path: ^/api/v1/internal/.*
+    service: http_status:404
+  # 2. Push-to-deploy webhook + status -> couple-updater (HMAC-signed; bound to 127.0.0.1 only).
+  - hostname: @HOSTNAME@
+    path: ^/_deploy/(hook|status)$
+    service: http://127.0.0.1:9000
+  # 3. Everything else under /_deploy is closed.
+  - hostname: @HOSTNAME@
+    path: ^/_deploy/.*
+    service: http_status:404
+  # 4. MQTT over WebSocket -> embedded broker in couple-backend.
+  - hostname: @HOSTNAME@
+    path: ^/mqtt.*
+    service: http://127.0.0.1:8083
+  # 5. REST API + admin SPA (served by the backend itself).
+  - hostname: @HOSTNAME@
+    service: http://127.0.0.1:8080
+  # Anything for another hostname.
+  - service: http_status:404

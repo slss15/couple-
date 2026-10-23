@@ -1,13 +1,19 @@
 name: image-deploy (reusable)
 
 # Called by deploy-backend.yml only (workflow_call); builds one component multi-arch, pushes
-# :sha-<short> and :edge, then triggers the signed deploy webhook and waits for the result.
+# :sha-<short> and :edge, then (inputs.deploy, i.e. vars.DEPLOY_TARGET=docker) triggers the signed deploy webhook
+# and waits for the result.
 on:
   workflow_call:
     inputs:
       component:
         required: true
         type: string
+      deploy:
+        description: "Call the deploy webhook (only when the server runs the Docker stack, vars.DEPLOY_TARGET=docker)"
+        required: false
+        type: boolean
+        default: true
     secrets:
       DEPLOY_HOOK_URL:
         required: false
@@ -66,6 +72,7 @@ jobs:
           cache-from: type=gha,scope=${{ inputs.component }}
           cache-to: type=gha,mode=max,scope=${{ inputs.component }}
       - name: Deploy to server (signed webhook) and wait for result
+        if: inputs.deploy
         env:
           DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
           DEPLOY_HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
@@ -77,4 +84,4 @@ jobs:
             echo "::warning::DEPLOY_HOOK_URL / DEPLOY_HOOK_SECRET not set; image pushed as :edge, the server poller will pick it up within UPDATE_INTERVAL."
             exit 0
           fi
-          bash deploy/scripts/deploy-hook.sh "$SERVICE" "$IMAGE" "$DIGEST" "$GITHUB_SHA"
+          bash deploy/scripts/deploy-hook.sh docker "$SERVICE" "$IMAGE" "$DIGEST" "$GITHUB_SHA"

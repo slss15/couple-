@@ -289,4 +289,47 @@ class UpdaterTest {
             server.stop(0)
         }
     }
+
+    // ---------------------------------------------------------------- GitHub release lookup (fake API)
+
+    @Test
+    fun githubReleaseSourceParsesDigestAndSidecar() {
+        val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        val base = "http://127.0.0.1:${server.address.port}"
+        val digestSha = "b".repeat(64)
+        val sidecarSha = "c".repeat(64)
+        fun reply(ex: com.sun.net.httpserver.HttpExchange, code: Int, body: String) {
+            val bytes = body.toByteArray(); ex.sendResponseHeaders(code, bytes.size.toLong()); ex.responseBody.use { it.write(bytes) }
+        }
+        server.createContext("/repos/$repo/releases/tags/edge") { ex ->
+            reply(ex, 200, """{"tag_name":"edge","target_commitish":"abc1234def","assets":[
+              {"name":"couple-1.0.0.apk","browser_download_url":"x"},
+              {"name":"couple-server-windows-x64-edge-abc1234.zip","digest":"sha256:$digestSha",
+               "browser_download_url":"https://github.com/$repo/releases/download/edge/couple-server-windows-x64-edge-abc1234.zip"}]}""")
+        }
+        server.createContext("/repos/$repo/releases/latest") { ex ->
+            reply(ex, 200, """{"tag_name":"v0.3.0","target_commitish":"main","assets":[
+              {"name":"couple-server-windows-x64-0.3.0.zip","browser_download_url":"https://github.com/$repo/releases/download/v0.3.0/couple-server-windows-x64-0.3.0.zip"},
+              {"name":"couple-server-windows-x64-0.3.0.zip.sha256","browser_download_url":"$base/sidecar"}]}""")
+        }
+        server.createContext("/sidecar") { ex -> reply(ex, 200, "$sidecarSha  couple-server-windows-x64-0.3.0.zip\n") }
+        server.createContext("/repos/$repo/releases/tags/v9.9.9") { ex -> reply(ex, 404, "{}") }
+        server.start()
+        try {
+            val c = cfg(Files.createTempDirectory("gh")).copy(githubApi = base)
+            val src = GitHubReleaseSource(c, Http(null, null))
+            val edge = assertNotNull(src.latest("edge"))
+            assertEquals("edge-abc1234", edge.version)
+            assertEquals(digestSha, edge.sha256)
+            assertEquals("abc1234def", edge.sha)
+            assertNull(assetUrlError(c, edge.assetUrl))
+            val stable = assertNotNull(src.latest("stable"))
+            assertEquals("0.3.0", stable.version)
+            assertEquals(sidecarSha, stable.sha256)
+            assertEquals("", stable.sha)
+            assertNull(src.latest("9.9.9"))
+        } finally {
+            server.stop(0)
+        }
+    }
 }

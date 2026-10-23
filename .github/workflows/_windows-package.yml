@@ -1,0 +1,229 @@
+name: windows-package (reusable)
+
+# Builds couple-server-windows-x64-<version>.zip (cross-jlink'd Windows JRE + backend + admin + updater + WinSW +
+# install scripts) on Linux, smoke-tests it on a real Windows runner, and optionally publishes it to the rolling
+# `edge` prerelease and calls the deploy webhook. Called by deploy-backend.yml (push to main) and release.yml (tags).
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Package version: X.Y.Z (tags) or edge-<shortsha> (main)"
+        required: true
+        type: string
+      ref:
+        description: "Git ref to build (default: the triggering ref)"
+        required: false
+        type: string
+        default: ""
+      publish-edge:
+        description: "Replace the asset on the rolling `edge` prerelease"
+        required: false
+        type: boolean
+        default: false
+      deploy:
+        description: "Call the deploy webhook (DEPLOY_TARGET=windows) after publishing to edge"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      DEPLOY_HOOK_URL:
+        required: false
+      DEPLOY_HOOK_SECRET:
+        required: false
+    outputs:
+      zip-name:
+        description: "File name of the zip"
+        value: ${{ jobs.build.outputs.zip }}
+      sha256:
+        description: "sha256 of the zip"
+        value: ${{ jobs.build.outputs.sha256 }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      zip: ${{ steps.pkg.outputs.zip }}
+      sha256: ${{ steps.pkg.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - name: Backend + updater (tests, installDist)
+        working-directory: backend
+        env:
+          VERSION: ${{ inputs.version }}
+        run: ./gradlew --no-daemon "-PappVersion=$VERSION" build :installDist :updater:installDist
+      - name: Admin dist
+        working-directory: admin
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - uses: actions/cache@v4
+        with:
+          path: .cache/windows-package
+          key: windows-package-${{ hashFiles('deploy/windows/versions.env') }}
+      - name: Assemble zip (cross-jlink Windows JRE)
+        id: pkg
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          bash deploy/windows/build-package.sh "$VERSION" out
+          zip="couple-server-windows-x64-$VERSION.zip"
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(cut -d' ' -f1 "out/$zip.sha256")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: out
+      - name: Verify sha256 and extract
+        shell: pwsh
+        env:
+          ZIP: ${{ needs.build.outputs.zip }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 "out/$env:ZIP").Hash.ToLowerInvariant()
+          if ($hash -ne $env:SHA256) { throw "sha256 mismatch: $hash" }
+          Expand-Archive -Path "out/$env:ZIP" -DestinationPath pkg
+          $dir = Get-ChildItem pkg -Directory | Select-Object -First 1
+          "PKG=$($dir.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Bundled JRE runs backend and updater
+        shell: pwsh
+        run: |
+          & "$env:PKG\jre\bin\java.exe" -version
+          if ($LASTEXITCODE -ne 0) { throw 'java -version failed' }
+          # No DB configured: the backend must load all classes and fail on the missing DB_URL.
+          $out = & "$env:PKG\jre\bin\java.exe" -cp "$env:PKG\app\lib\*" com.qimingnan.couple.backend.ApplicationKt 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'Missing required environment variable DB_URL') { throw 'backend did not start as expected' }
+          & "$env:PKG\jre\bin\java.exe" -cp "$env:PKG\updater\lib\*" com.qimingnan.couple.updater.MainKt version
+          if ($LASTEXITCODE -ne 0) { throw 'updater version failed' }
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          $issues = @('install.ps1', 'uninstall.ps1') | ForEach-Object {
+            Invoke-ScriptAnalyzer -Path (Join-Path $env:PKG $_) -Severity Warning, Error `
+              -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions
+          }
+          $issues | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+          if ($issues) { throw 'PSScriptAnalyzer findings' }
+      - name: install.ps1 / services / uninstall.ps1 (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = 'C:\couple-ci'
+          New-Item -ItemType Directory -Force -Path "$dir\config" | Out-Null
+          # Pre-seeded env: no automatic deploys on the CI runner; secrets get generated by install.ps1.
+          Set-Content -Path "$dir\config\couple.env" -Encoding ASCII -Value @('UPDATE_ENABLED=false', 'JWT_SECRET=', 'DB_PASSWORD=ci')
+          & "$env:PKG\install.ps1" -InstallDir $dir -NoStart
+          foreach ($s in 'couple-backend', 'couple-updater') { if (-not (Get-Service $s -ErrorAction SilentlyContinue)) { throw "service $s missing" } }
+          $envText = Get-Content "$dir\config\couple.env" -Raw
+          if ($envText -notmatch 'JWT_SECRET=[0-9a-f]{64}') { throw 'JWT_SECRET not generated' }
+          if ($envText -notmatch 'DB_PASSWORD=ci') { throw 'existing value overwritten' }
+          [xml]$xml = Get-Content "$dir\services\couple-backend.xml" -Raw
+          if (-not (Test-Path $xml.service.executable)) { throw "backend executable missing: $($xml.service.executable)" }
+          Start-Service couple-updater
+          $ok = $false
+          for ($i = 0; $i -lt 30 -and -not $ok; $i++) {
+            try { $ok = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9000/_deploy/healthz -TimeoutSec 3).StatusCode -eq 200 } catch { Start-Sleep 2 }
+          }
+          if (-not $ok) { Get-Content "$dir\logs\*" -ErrorAction SilentlyContinue | Write-Host; throw 'updater did not answer on 127.0.0.1:9000' }
+          (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9000/_deploy/status).Content | Write-Host
+          & "$env:PKG\install.ps1" -InstallDir $dir -NoStart   # idempotent re-run (upgrade path)
+          & "$env:PKG\uninstall.ps1" -InstallDir $dir -RemoveData -Force
+          if (Get-Service couple-backend -ErrorAction SilentlyContinue) { throw 'service not removed' }
+
+  publish-edge:
+    needs: [build, smoke]
+    if: inputs.publish-edge
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      asset-url: ${{ steps.up.outputs.url }}
+    concurrency:
+      group: windows-edge-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: out
+      - name: Replace asset on the rolling `edge` prerelease
+        id: up
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          ZIP: ${{ needs.build.outputs.zip }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if ! gh release view edge >/dev/null 2>&1; then
+            gh release create edge --prerelease --title "edge (rolling)" --target "$SHA" \
+              --notes "Rolling build of main for the Windows server package. Not a stable release; tracked by servers with UPDATE_CHANNEL=edge."
+          fi
+          # Move the edge tag to this commit (prerelease target_commitish is informational only).
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/edge" -f sha="$SHA" -F force=true >/dev/null \
+            || gh api -X POST "repos/$GH_REPO/git/refs" -f ref=refs/tags/edge -f sha="$SHA" >/dev/null
+          gh release upload edge "out/$ZIP" "out/$ZIP.sha256" --clobber
+          for a in $(gh release view edge --json assets -q '.assets[].name'); do
+            case "$a" in
+              "$ZIP"|"$ZIP.sha256") ;;
+              couple-server-windows-x64-*) gh release delete-asset edge "$a" -y ;;
+            esac
+          done
+          echo "url=https://github.com/$GH_REPO/releases/download/edge/$ZIP" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: [build, publish-edge]
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-server-windows
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          sparse-checkout: deploy/scripts
+      - name: Deploy to the Windows server (signed webhook) and wait for result
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+          DEPLOY_HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
+          VERSION: ${{ inputs.version }}
+          ASSET_URL: ${{ needs.publish-edge.outputs.asset-url }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ] || [ -z "$DEPLOY_HOOK_SECRET" ]; then
+            echo "::warning::DEPLOY_HOOK_URL / DEPLOY_HOOK_SECRET not set; the server poller picks up the edge zip within UPDATE_INTERVAL."
+            exit 0
+          fi
+          bash deploy/scripts/deploy-hook.sh windows "$VERSION" "$ASSET_URL" "$SHA256" "$GITHUB_SHA"

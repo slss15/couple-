@@ -1,9 +1,12 @@
 name: deploy
 
-# Push-to-deploy: every push to main that touches backend/** or admin/** is tested, built
-# (linux/amd64 + linux/arm64), pushed as ghcr.io/<owner>/couple-<svc>:{sha-<short>, edge} and
-# then deployed to the home server through the signed webhook (Cloudflare ingress -> updater).
-# The job turns red if the server reports failure/rollback. Never runs for pull requests.
+# Push-to-deploy: every push to main that touches backend/** or admin/** is tested and built twice:
+#  - Windows-native package couple-server-windows-x64-edge-<short>.zip -> rolling `edge` prerelease
+#    (reusable _windows-package.yml, smoke-tested on windows-latest);
+#  - Docker images ghcr.io/<owner>/couple-<svc>:{sha-<short>, edge} (linux/amd64 + linux/arm64, optional path).
+# Then the signed webhook (Cloudflare Tunnel -> updater) deploys whichever the server runs, chosen by the
+# repository variable DEPLOY_TARGET = windows (default) | docker. The deploy job turns red if the server reports
+# failure/rollback. Never runs for pull requests; publishing/deploying only happens for refs/heads/main.
 on:
   push:
     branches: [main]
@@ -11,7 +14,10 @@ on:
       - "backend/**"
       - "admin/**"
       - ".github/workflows/deploy-backend.yml"
+      - ".github/workflows/_image-deploy.yml"
+      - ".github/workflows/_windows-package.yml"
       - "deploy/scripts/deploy-hook.sh"
+      - "deploy/windows/**"
   workflow_dispatch:
     inputs:
       service:
@@ -32,12 +38,13 @@ env:
 
 jobs:
   changes:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       backend: ${{ steps.pick.outputs.backend }}
       admin: ${{ steps.pick.outputs.admin }}
+      version: ${{ steps.pick.outputs.version }}
+      target: ${{ steps.pick.outputs.target }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -47,10 +54,14 @@ jobs:
             backend:
               - 'backend/**'
               - '.github/workflows/deploy-backend.yml'
+              - '.github/workflows/_image-deploy.yml'
+              - '.github/workflows/_windows-package.yml'
               - 'deploy/scripts/deploy-hook.sh'
+              - 'deploy/windows/**'
             admin:
               - 'admin/**'
               - '.github/workflows/deploy-backend.yml'
+              - '.github/workflows/_image-deploy.yml'
               - 'deploy/scripts/deploy-hook.sh'
       - id: pick
         env:
@@ -58,6 +69,7 @@ jobs:
           SERVICE: ${{ inputs.service }}
           F_BACKEND: ${{ steps.filter.outputs.backend }}
           F_ADMIN: ${{ steps.filter.outputs.admin }}
+          TARGET: ${{ vars.DEPLOY_TARGET || 'windows' }}
         run: |
           if [ "$EVENT" = workflow_dispatch ]; then
             b=false a=false
@@ -65,9 +77,14 @@ jobs:
           else
             b=$F_BACKEND a=$F_ADMIN
           fi
-          echo "backend=$b" >> "$GITHUB_OUTPUT"
-          echo "admin=$a" >> "$GITHUB_OUTPUT"
-          echo "backend=$b admin=$a"
+          case "$TARGET" in windows|docker) ;; *) echo "::error::vars.DEPLOY_TARGET must be windows or docker (got '$TARGET')"; exit 1 ;; esac
+          {
+            echo "backend=$b"
+            echo "admin=$a"
+            echo "version=edge-${GITHUB_SHA::7}"
+            echo "target=$TARGET"
+          } >> "$GITHUB_OUTPUT"
+          echo "backend=$b admin=$a target=$TARGET"
 
   test-backend:
     needs: changes
@@ -106,26 +123,45 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+  # Windows-native package (backend + admin + updater in one zip): built when either side changed.
+  windows:
+    needs: [changes, test-backend, test-admin]
+    if: >-
+      !cancelled() && !contains(needs.*.result, 'failure') &&
+      (needs.changes.outputs.backend == 'true' || needs.changes.outputs.admin == 'true')
+    uses: ./.github/workflows/_windows-package.yml
+    permissions:
+      contents: write
+    with:
+      version: ${{ needs.changes.outputs.version }}
+      publish-edge: ${{ github.ref == 'refs/heads/main' }}
+      deploy: ${{ github.ref == 'refs/heads/main' && needs.changes.outputs.target == 'windows' }}
+    secrets:
+      DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+      DEPLOY_HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
+
   image-backend:
-    needs: test-backend
+    needs: [changes, test-backend]
     uses: ./.github/workflows/_image-deploy.yml
     permissions:
       contents: read
       packages: write
     with:
       component: backend
+      deploy: ${{ github.ref == 'refs/heads/main' && needs.changes.outputs.target == 'docker' }}
     secrets:
       DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
       DEPLOY_HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
 
   image-admin:
-    needs: test-admin
+    needs: [changes, test-admin]
     uses: ./.github/workflows/_image-deploy.yml
     permissions:
       contents: read
       packages: write
     with:
       component: admin
+      deploy: ${{ github.ref == 'refs/heads/main' && needs.changes.outputs.target == 'docker' }}
     secrets:
       DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
       DEPLOY_HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}

@@ -75,14 +75,20 @@ fun log(msg: String) {
 
 /** java.net.http clients: one direct (loopback calls), one honouring HTTPS_PROXY / NO_PROXY for GitHub. */
 class Http(proxyUrl: String?, noProxy: String?) {
-    val direct: HttpClient = HttpClient.newBuilder()
-        .proxy(HttpClient.Builder.NO_PROXY)
-        .connectTimeout(Duration.ofSeconds(5))
-        .build()
-
     val outbound: HttpClient
+    val direct: HttpClient
 
     init {
+        // Must be set before the first java.net.http client exists: the JDK reads these once. Basic auth for CONNECT
+        // tunnels is disabled by default, which breaks HTTPS_PROXY=http://user:pass@host:port.
+        if (proxyUrl?.let { "@" in it } == true) {
+            System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "")
+            System.setProperty("jdk.http.auth.proxying.disabledSchemes", "")
+        }
+        direct = HttpClient.newBuilder()
+            .proxy(HttpClient.Builder.NO_PROXY)
+            .connectTimeout(Duration.ofSeconds(5))
+            .build()
         val b = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(20))
             // NORMAL never follows https -> http; GitHub asset downloads redirect to its object storage over https.
@@ -102,8 +108,6 @@ class Http(proxyUrl: String?, noProxy: String?) {
             proxy.rawUserInfo?.let { info ->
                 val user = URLDecoder.decode(info.substringBefore(':'), Charsets.UTF_8)
                 val pass = URLDecoder.decode(info.substringAfter(':', ""), Charsets.UTF_8)
-                System.setProperty("jdk.http.auth.tunneling.disabledSchemes", "")
-                System.setProperty("jdk.http.auth.proxying.disabledSchemes", "")
                 b.authenticator(object : Authenticator() {
                     override fun getPasswordAuthentication(): PasswordAuthentication? =
                         if (requestorType == RequestorType.PROXY) PasswordAuthentication(user, pass.toCharArray()) else null
