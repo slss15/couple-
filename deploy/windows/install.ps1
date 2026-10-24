@@ -149,6 +149,7 @@ function Install-WinswService([string]$Name, [string]$WinswExe) {
 }
 
 # ---------------------------------------------------------------------------------------------------------------
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 if (-not (Test-Admin)) { throw 'Run this script from an elevated PowerShell (Run as Administrator).' }
 
 $pkg = $PSScriptRoot
@@ -223,22 +224,28 @@ $javaUpd = Join-Path $InstallDir 'updater\jre\bin\java.exe'
 $updCp = (Join-Path $InstallDir 'updater\lib') + '\*'
 
 Write-Step 'Service couple-backend'
-Install-WinswService 'couple-backend' $winsw
+# The WinSW XML must exist before `install` (WinSW reads <id>/<executable> from it).
+Stop-CoupleService 'couple-backend'
 $env:COUPLE_HOME = $InstallDir
 $env:COUPLE_ENV_FILE = $envFile
 & $javaUpd -cp $updCp com.qimingnan.couple.updater.MainKt render-service $releaseDir
 if ($LASTEXITCODE -ne 0) { throw "render-service failed ($LASTEXITCODE)" }
+if (-not (Test-Path -LiteralPath (Join-Path $servicesDir 'couple-backend.xml'))) { throw 'render-service did not produce services\couple-backend.xml' }
+Install-WinswService 'couple-backend' $winsw
 
 Write-Step 'Service couple-updater'
-Install-WinswService 'couple-updater' $winsw
 Expand-Template (Join-Path $pkg 'service\couple-updater.xml.in') (Join-Path $servicesDir 'couple-updater.xml') @{ INSTALL_DIR = $InstallDir }
+Install-WinswService 'couple-updater' $winsw
 
 if ($tunnelRequested) {
     Write-Step "Cloudflare Tunnel (cloudflared $($pins['CLOUDFLARED_VERSION']), locally managed)"
     if ($TunnelId -notmatch '^[0-9a-fA-F-]{36}$') { throw "-TunnelId must be the tunnel UUID, got '$TunnelId'" }
     $cfExe = Install-Cloudflared (Join-Path $InstallDir 'cloudflared') $pins $cfg['HTTPS_PROXY']
+    if (-not (Test-Path -LiteralPath $TunnelJsonFile -PathType Leaf)) { throw "-TunnelJsonFile not found: $TunnelJsonFile" }
     $credDest = Join-Path $configDir "cloudflared\$TunnelId.json"
-    Copy-Item -LiteralPath $TunnelJsonFile -Destination $credDest -Force
+    if ([IO.Path]::GetFullPath($TunnelJsonFile) -ne [IO.Path]::GetFullPath($credDest)) {
+        Copy-Item -LiteralPath $TunnelJsonFile -Destination $credDest -Force
+    }
     Protect-File $credDest
     $cfConfig = Join-Path $configDir 'cloudflared\config.yml'
     if ((Test-Path -LiteralPath $cfConfig) -and -not $ForceTunnelConfig) {
@@ -250,8 +257,9 @@ if ($tunnelRequested) {
     }
     & $cfExe tunnel --config $cfConfig ingress validate
     if ($LASTEXITCODE -ne 0) { throw 'cloudflared ingress validate failed' }
-    Install-WinswService 'couple-cloudflared' $winsw
+    Stop-CoupleService 'couple-cloudflared'
     Expand-Template (Join-Path $pkg 'service\couple-cloudflared.xml.in') (Join-Path $servicesDir 'couple-cloudflared.xml') @{ INSTALL_DIR = $InstallDir; CLOUDFLARED_VERSION = $pins['CLOUDFLARED_VERSION'] }
+    Install-WinswService 'couple-cloudflared' $winsw
 }
 
 if ($NoStart) {
@@ -275,7 +283,8 @@ while ((Get-Date) -lt $deadline) {
     try {
         $r = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5
         if ($r.StatusCode -eq 200) { $ok = $true; break }
-    } catch { Start-Sleep -Seconds 3 }
+    } catch { Write-Verbose "health not ready: $($_.Exception.Message)" }
+    Start-Sleep -Seconds 3
 }
 if ($ok) {
     Write-Host "    backend healthy: $($r.Content)" -ForegroundColor Green
