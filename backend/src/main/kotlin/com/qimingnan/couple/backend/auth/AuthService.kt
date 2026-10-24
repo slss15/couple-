@@ -71,9 +71,7 @@ class AuthService(
         val displayName = req.displayName?.trim().orEmpty()
         val deviceId = requireDevice(req.deviceId)
         val deviceName = req.deviceName?.trim()?.take(128).orEmpty().ifEmpty { "unknown" }
-        if (!usernameRegex.matches(username)) throw badRequest("VALIDATION_ERROR", "username must be 3-32 chars of [A-Za-z0-9_.-]")
-        if (password.length < 8 || password.length > 128) throw badRequest("VALIDATION_ERROR", "password must be 8-128 characters")
-        if (displayName.isEmpty() || displayName.length > 64) throw badRequest("VALIDATION_ERROR", "displayName must be 1-64 characters")
+        validateCredentials(username, password, displayName)
 
         val hash = hasher.hash(password)
         val now = config.clock()
@@ -85,20 +83,55 @@ class AuthService(
                 Users.selectAll().count() == 0L -> Roles.ADMIN
                 else -> Roles.USER
             }
-            Users.insert {
-                it[id] = userId
-                it[Users.username] = username
-                it[passwordHash] = hash
-                it[Users.displayName] = displayName
-                it[avatarUrl] = null
-                it[Users.role] = role
-                it[coupleId] = null
-                it[createdAt] = now
-            }
+            insertUser(userId, username, hash, displayName, role, now)
             role
         }
         audit.log(userId, AuditActions.REGISTER, userId, mapOf("username" to username, "role" to role, "deviceId" to deviceId, "ip" to ip))
         return issueNewFamily(userId, deviceId, deviceName)
+    }
+
+    /** True when at least one admin account exists. */
+    suspend fun adminExists(): Boolean = db.tx { Users.selectAll().where { Users.role eq Roles.ADMIN }.limit(1).count() > 0L }
+
+    /**
+     * First-run setup: creates [username] as admin (same username/password policy as register) and logs it in.
+     * Throws [ApiException] 410 SETUP_COMPLETED if an admin appeared meanwhile. Callers serialize concurrent calls.
+     */
+    suspend fun createFirstAdmin(username: String, password: String, deviceId: String?, deviceName: String?): TokenPair {
+        val name = username.trim()
+        val device = requireDevice(deviceId)
+        val devName = deviceName?.trim()?.take(128).orEmpty().ifEmpty { "unknown" }
+        validateCredentials(name, password, name)
+        val hash = hasher.hash(password)
+        val now = config.clock()
+        val userId = Ids.newId()
+        db.tx {
+            if (Users.selectAll().where { Users.role eq Roles.ADMIN }.limit(1).count() > 0L) {
+                throw ApiException(io.ktor.http.HttpStatusCode.Gone, "SETUP_COMPLETED", "Setup has already been completed")
+            }
+            if (UserRepo.byUsername(name) != null) throw conflict("USERNAME_TAKEN", "Username already exists")
+            insertUser(userId, name, hash, name, Roles.ADMIN, now)
+        }
+        return issueNewFamily(userId, device, devName)
+    }
+
+    private fun validateCredentials(username: String, password: String, displayName: String) {
+        if (!usernameRegex.matches(username)) throw badRequest("VALIDATION_ERROR", "username must be 3-32 chars of [A-Za-z0-9_.-]")
+        if (password.length < 8 || password.length > 128) throw badRequest("VALIDATION_ERROR", "password must be 8-128 characters")
+        if (displayName.isEmpty() || displayName.length > 64) throw badRequest("VALIDATION_ERROR", "displayName must be 1-64 characters")
+    }
+
+    private fun insertUser(userId: String, username: String, hash: String, displayName: String, role: String, now: Long) {
+        Users.insert {
+            it[id] = userId
+            it[Users.username] = username
+            it[passwordHash] = hash
+            it[Users.displayName] = displayName
+            it[avatarUrl] = null
+            it[Users.role] = role
+            it[coupleId] = null
+            it[createdAt] = now
+        }
     }
 
     suspend fun login(req: LoginRequest, ip: String?): TokenPair {

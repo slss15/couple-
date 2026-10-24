@@ -9,6 +9,7 @@ import com.qimingnan.couple.backend.common.Roles
 import com.qimingnan.couple.backend.common.badRequest
 import com.qimingnan.couple.backend.common.forbidden
 import com.qimingnan.couple.backend.db.Db
+import com.qimingnan.couple.backend.setup.suggestedUrls
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
@@ -32,7 +33,13 @@ suspend fun ApplicationCall.requireAdmin(db: Db, audit: AuditService): String {
 }
 
 /** Must be mounted inside authenticate(JWT_AUTH). Role is re-checked against the DB, not just the JWT claim. */
-fun Route.adminRoutes(db: Db, audit: AuditService, configService: AdminConfigService, bootstrap: BootstrapService) {
+fun Route.adminRoutes(
+    db: Db,
+    audit: AuditService,
+    configService: AdminConfigService,
+    bootstrap: BootstrapService,
+    mqttPath: String = "/mqtt",
+) {
     suspend fun ApplicationCall.requireAdmin(): String = requireAdmin(db, audit)
 
     route("/admin") {
@@ -40,11 +47,12 @@ fun Route.adminRoutes(db: Db, audit: AuditService, configService: AdminConfigSer
             val admin = call.requireAdmin()
             val view = configService.view()
             audit.log(admin, AuditActions.ADMIN_CONFIG_VIEW, "config", mapOf("configVersion" to view.configVersion))
-            call.respond(view)
+            call.respond(view.copy(suggested = call.suggestedUrls(mqttPath)))
         }
         put("/config") {
             val admin = call.requireAdmin()
-            val (view, changedSecrets) = configService.update(call.receive())
+            val (updated, changedSecrets) = configService.update(call.receive())
+            val view = updated.copy(suggested = call.suggestedUrls(mqttPath))
             audit.log(
                 admin, AuditActions.ADMIN_CONFIG_UPDATE, "config",
                 // Only the *names* of changed secrets are logged, never values.

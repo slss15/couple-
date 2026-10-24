@@ -35,6 +35,8 @@ object AuditActions {
     const val REFRESH_FAILED = "auth.refresh_failed"
     const val REFRESH_REUSE = "auth.refresh_reuse_detected"
     const val LOGOUT = "auth.logout"
+    const val SETUP_COMPLETED = "setup.completed"
+    const val SETUP_FAILED = "setup.failed"
     const val PAIR_CODE = "pair.code"
     const val PAIR_JOIN = "pair.join"
     const val PAIR_JOIN_FAILED = "pair.join_failed"

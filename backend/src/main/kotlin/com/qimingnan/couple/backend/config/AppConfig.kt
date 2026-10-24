@@ -87,6 +87,16 @@ data class AppConfig(
     val adminStaticDir: String? = null,
     /** apiBase written into /config.js for the admin SPA (COUPLE_API_BASE / ADMIN_API_BASE); empty = same origin. */
     val adminApiBase: String = "",
+    /**
+     * First-run setup token (SETUP_TOKEN). Null = a random one is generated at startup while no admin exists and
+     * logged once at WARN.
+     */
+    val setupToken: String? = null,
+    /**
+     * Writable data directory (DATA_DIR, else the parent of RELEASES_DIR). The generated setup token is also written
+     * to <dataDir>/setup-token.txt. Null = no file.
+     */
+    val dataDir: String? = null,
     /** Injectable clock (epoch ms) so tests can move time. */
     val clock: () -> Long = { System.currentTimeMillis() },
 ) {
@@ -139,6 +149,8 @@ data class AppConfig(
                 mqttSessionExpiry = opt("MQTT_SESSION_EXPIRY") ?: "7d",
                 adminStaticDir = opt("ADMIN_STATIC_DIR"),
                 adminApiBase = opt("COUPLE_API_BASE") ?: opt("ADMIN_API_BASE") ?: "",
+                setupToken = opt("SETUP_TOKEN"),
+                dataDir = opt("DATA_DIR") ?: File(opt("RELEASES_DIR") ?: "/data/releases").parent,
             )
         }
     }

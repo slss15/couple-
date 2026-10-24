@@ -42,6 +42,8 @@ data class AdminConfigView(
     val storage: JsonObject,
     val configVersion: Long,
     val updatedAt: Long?,
+    /** Values derived from the request (forwarded headers) for empty fields; see contract "First-run setup". */
+    val suggested: com.qimingnan.couple.backend.setup.SuggestedUrls? = null,
 )
 
 class AdminConfigService(private val db: Db, private val config: AppConfig) {
@@ -86,6 +88,30 @@ class AdminConfigService(private val db: Db, private val config: AppConfig) {
             Snapshot(next, version, now)
         }
         return snap.toView() to changedSecrets
+    }
+
+    /**
+     * Fills baseUrl / mqttUrl only where they are empty (never overwrites an operator's value). Bumps configVersion
+     * when anything was written. Returns the names of the fields that were filled.
+     */
+    suspend fun fillMissingUrls(baseUrl: String?, mqttUrl: String?): List<String> {
+        val now = config.clock()
+        return db.tx {
+            val cur = readSnapshot(forUpdate = true)
+            val filled = mutableListOf<String>()
+            var next = cur.stored
+            if (cur.stored.baseUrl.isNullOrBlank() && !baseUrl.isNullOrBlank()) {
+                next = next.copy(baseUrl = baseUrl.trimEnd('/')); filled += "baseUrl"
+            }
+            if (cur.stored.mqttUrl.isNullOrBlank() && !mqttUrl.isNullOrBlank() && mqttUrl.startsWith("wss://")) {
+                next = next.copy(mqttUrl = mqttUrl); filled += "mqttUrl"
+            }
+            if (filled.isNotEmpty()) {
+                SettingsRepo.put(KEY_CONFIG, AppJson.encodeToString(StoredConfig.serializer(), next), now)
+                SettingsRepo.put(KEY_VERSION, (cur.version + 1).toString(), now)
+            }
+            filled
+        }
     }
 
     private fun readSnapshot(forUpdate: Boolean = false): Snapshot {

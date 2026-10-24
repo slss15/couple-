@@ -27,6 +27,8 @@ import com.qimingnan.couple.backend.db.Couples
 import com.qimingnan.couple.backend.health.SERVER_VERSION
 import org.jetbrains.exposed.sql.selectAll
 import com.qimingnan.couple.backend.pairing.PairingService
+import com.qimingnan.couple.backend.setup.SetupService
+import com.qimingnan.couple.backend.setup.setupRoutes
 import com.qimingnan.couple.backend.pairing.pairingRoutes
 import com.qimingnan.couple.backend.release.ReleaseMirror
 import com.qimingnan.couple.backend.release.ReleaseService
@@ -59,6 +61,9 @@ import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
 import kotlin.time.Duration.Companion.minutes
+
+/** Lets tests reach the first-run setup service (generated token). */
+val SetupServiceKey = io.ktor.util.AttributeKey<SetupService>("SetupService")
 
 /** Lets tests reach the running mirror instance. */
 val ReleaseMirrorKey = io.ktor.util.AttributeKey<ReleaseMirror>("ReleaseMirror")
@@ -94,6 +99,9 @@ fun Application.module(config: AppConfig) {
     val authService = AuthService(db, config, jwtService, PasswordHasher(), audit)
     val pairingService = PairingService(db, config, audit)
     val adminConfigService = AdminConfigService(db, config)
+    val setupService = SetupService(config, authService, adminConfigService, audit)
+    runBlocking { setupService.init() }
+    attributes.put(SetupServiceKey, setupService)
     val keys = runBlocking { BootstrapService.loadKeys(config, db, audit) }
     val bootstrapService = BootstrapService(keys, adminConfigService, config)
     log.info("Bootstrap Ed25519 public key: {}", keys.publicKeyBase64)
@@ -151,13 +159,14 @@ fun Application.module(config: AppConfig) {
         route("/api/v1") {
             healthRoutes()
             authRoutes(authService)
+            setupRoutes(setupService, config.mqttWsPath)
             bootstrapPublicRoutes(bootstrapService)
             // EMQX hooks exist only in external mode; in embedded mode /internal/mqtt/* is simply 404.
             if (config.mqttBrokerMode == MqttBrokerMode.EXTERNAL) mqttHookRoutes(config, mqttAccess)
             updaterStatusRoutes(config, audit, releaseService)
             authenticate(JWT_AUTH) {
                 pairingRoutes(pairingService)
-                adminRoutes(db, audit, adminConfigService, bootstrapService)
+                adminRoutes(db, audit, adminConfigService, bootstrapService, config.mqttWsPath)
                 appUpdateRoutes(releaseService)
                 adminReleaseRoutes(db, audit, releaseService, releaseMirror, releaseSettings, this@module)
             }
