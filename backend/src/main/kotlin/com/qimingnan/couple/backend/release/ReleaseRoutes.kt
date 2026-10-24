@@ -9,6 +9,8 @@ import com.qimingnan.couple.backend.common.Crypto
 import com.qimingnan.couple.backend.common.badRequest
 import com.qimingnan.couple.backend.common.notFound
 import com.qimingnan.couple.backend.config.AppConfig
+import com.qimingnan.couple.backend.config.MqttBrokerMode
+import com.qimingnan.couple.backend.common.isLoopbackPeer
 import com.qimingnan.couple.backend.db.Db
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -211,12 +213,15 @@ fun Route.adminReleaseRoutes(
 }
 
 /**
- * POST /internal/updater/status from the server-updater sidecar. Same guard as the EMQX hooks
- * (X-Internal-Token == MQTT_HOOK_SECRET, no Cloudflare traffic), except the secret is mandatory here.
+ * POST /internal/updater/status from the server-updater. Same guard as the EMQX hooks
+ * (X-Internal-Token == MQTT_HOOK_SECRET, no Cloudflare traffic); the secret is mandatory, and in embedded mode
+ * the TCP peer must also be loopback.
  */
 fun Route.updaterStatusRoutes(config: AppConfig, audit: AuditService, service: ReleaseService) {
     post("/internal/updater/status") {
         if (call.request.headers["CF-Connecting-IP"] != null) throw notFound()
+        // Embedded mode (Windows-native): the updater runs on the same host, so only loopback callers are accepted.
+        if (config.mqttBrokerMode == MqttBrokerMode.EMBEDDED && !call.isLoopbackPeer()) throw notFound()
         val secret = config.mqttHookSecret ?: throw notFound()
         val given = call.request.headers["X-Internal-Token"] ?: throw notFound()
         if (!Crypto.constantTimeEquals(given, secret)) throw notFound()

@@ -1,0 +1,13 @@
+# Repo-wide safety net (modules keep their own .gitignore too).
+.env
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+# cloudflared tunnel credentials / origin cert (locally-managed tunnel)
+**/cloudflared/*.json
+cert.pem
+# build-package.sh download cache and output
+.cache/
+dist-windows/

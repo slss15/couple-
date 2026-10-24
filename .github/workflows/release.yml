@@ -3,7 +3,9 @@ name: release
 # Tagged release: `git tag -a v0.2.0 -m "notes" && git push origin v0.2.0`
 #  - backend/admin images  -> ghcr.io/<owner>/couple-{backend,admin}:{X.Y.Z, X.Y, stable}
 #  - signed APK + release.json -> GitHub Release
-# `stable` is only moved after every job (incl. APK signing) has succeeded.
+#  - Windows server package couple-server-windows-x64-X.Y.Z.zip + .sha256 -> same GitHub Release
+#    (Windows servers with UPDATE_CHANNEL=stable pick it up from releases/latest)
+# `stable` is only moved after every job (incl. APK signing and the Windows smoke test) has succeeded.
 on:
   push:
     tags: ["v*.*.*"]
@@ -202,8 +204,17 @@ jobs:
           path: out/
           retention-days: 7
 
+  windows:
+    needs: meta
+    uses: ./.github/workflows/_windows-package.yml
+    permissions:
+      contents: read
+    with:
+      version: ${{ needs.meta.outputs.version }}
+      ref: ${{ needs.meta.outputs.tag }}
+
   promote:
-    needs: [meta, images, app]
+    needs: [meta, images, app, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -226,7 +237,7 @@ jobs:
         run: docker buildx imagetools create -t "$IMAGE:stable" "$IMAGE:$VERSION"
 
   github-release:
-    needs: [meta, app, promote]
+    needs: [meta, app, promote, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -239,6 +250,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-notes
+          path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
           path: out
       - name: Assemble release.json and publish
         env:
@@ -262,8 +277,11 @@ jobs:
               signingCertSha256:$apk[0].signingCertSha256, minSupportedVersionCode:$minSupported,
               notes:($notes|sub("\\s+$";"")), publishedAt:$publishedAt}' > release.json
           cat release.json
+          win="couple-server-windows-x64-$VERSION.zip"
+          if [ ! -f "$win" ] || [ ! -f "$win.sha256" ]; then echo "::error::Windows package missing"; exit 1; fi
+          sha256sum -c "$win.sha256"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "couple-$VERSION.apk" release.json --clobber
+            gh release upload "$TAG" "couple-$VERSION.apk" release.json "$win" "$win.sha256" --clobber
           else
-            gh release create "$TAG" "couple-$VERSION.apk" release.json --title "$TAG" --notes-file release-notes.md --verify-tag
+            gh release create "$TAG" "couple-$VERSION.apk" release.json "$win" "$win.sha256" --title "$TAG" --notes-file release-notes.md --verify-tag
           fi

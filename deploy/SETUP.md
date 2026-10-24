@@ -1,4 +1,7 @@
-# 后端从零配置清单
+# 后端从零配置清单（Linux + Docker 方案）
+
+> **主推方案是 Windows 原生部署（云 Windows 主机、无需 Docker/WSL）：[`windows/SETUP-windows.md`](windows/SETUP-windows.md)。**
+> 本文是可选的 Linux + Docker 方案（EMQX + Python updater + GHCR 镜像），推送即部署需把仓库变量 `DEPLOY_TARGET` 设为 `docker`（见第 7 节）。
 
 一条路走到底：照顺序打勾即可。更细的原理见 [`README.md`](README.md)（自动更新/发版）和 [`../backend/README.md`](../backend/README.md)（接口与实现）。
 
@@ -15,14 +18,8 @@
   docker version && docker compose version
   ```
 - [ ] 确认架构：`uname -m` → `x86_64`（amd64）或 `aarch64`（arm64）。两种镜像都有，无需额外操作。
-- [ ] 判断有没有可用的公网 IPv6，决定入口方案：
-  ```bash
-  curl -6 -s https://ifconfig.co || echo "没有公网 IPv6"
-  ```
-  | 情况 | 选择 | 启动参数 |
-  |---|---|---|
-  | 有公网 IPv6，且路由器/光猫可放行 443 入站 | 方案 A：Cloudflare 代理 AAAA + Caddy + DDNS | `--profile aaaa` |
-  | 没有 IPv6 / NAT4 / 不想开端口 | 方案 B：Cloudflare Tunnel（只出站） | `--profile tunnel` |
+- [ ] 入口默认就是 **Cloudflare Tunnel（只出站）**：没有公网 IPv4/IPv6、NAT4 都能用，只要求能出站访问 Cloudflare 边缘的 **TCP 7844**（http2 隧道连接）和 HTTPS 443（登录/API）。
+  只有确认服务器有公网 IPv6 **且**能放行 443 入站时，才考虑可选的 AAAA + Caddy 方案（第 1 节末尾）。
 - [ ] 一个托管在 Cloudflare 的域名（NS 已切到 Cloudflare）。
 - [ ] 拿到代码（服务器只需要 `deploy/` 目录）：
   ```bash
@@ -32,32 +29,37 @@
 
 ## 1. 域名与 Cloudflare
 
-### 方案 A：AAAA + DDNS + Caddy
+### 默认：本地管理的 Cloudflare Tunnel（路由写在仓库里）
+
+路由规则在 [`cloudflared/config.yml`](cloudflared/config.yml)（已提交到 git，顺序固定，含 404 规则），compose 默认就启动它，**不需要在 Zero Trust 面板里手工敲规则**。
+
+1. [ ] 在任意一台能开浏览器的机器（或服务器本身）安装同版本 cloudflared，登录并创建隧道：
+   ```bash
+   docker run --rm -it --user "$(id -u):$(id -g)" -v ~/.cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:2026.10.3 tunnel login
+   docker run --rm -it --user "$(id -u):$(id -g)" -v ~/.cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:2026.10.3 tunnel create couple
+   docker run --rm -it --user "$(id -u):$(id -g)" -v ~/.cloudflared:/home/nonroot/.cloudflared cloudflare/cloudflared:2026.10.3 tunnel route dns couple couple.example.com
+   ```
+   `login` 会打印一个链接，在浏览器里选中你的域名授权；`create` 输出隧道 UUID 并生成 `~/.cloudflared/<UUID>.json`。
+2. [ ] 把凭证放到 compose 目录（文件已被 `.gitignore` 忽略，**不要提交**），容器以 uid 65532 运行：
+   ```bash
+   cp ~/.cloudflared/<UUID>.json deploy/cloudflared/credentials.json
+   sudo chown 65532:65532 deploy/cloudflared/credentials.json && sudo chmod 400 deploy/cloudflared/credentials.json
+   ```
+3. [ ] `.env` 填 `CLOUDFLARE_TUNNEL_ID=<UUID>`；`TUNNEL_TRANSPORT_PROTOCOL` 保持 `http2`（QUIC/UDP 在 NAT4、国内运营商常被限速或阻断）。
+4. [ ] 校验规则：`docker compose run --rm cloudflared tunnel --config /etc/cloudflared/config.yml ingress validate`。
+
+> 备选：面板创建的 token（远程管理）隧道——`.env` 填 `CLOUDFLARE_TUNNEL_TOKEN`，用 `docker compose --profile tunnel-token up -d --scale cloudflared=0`，并在隧道的 **Public Hostname** 里**严格按** `cloudflared/config.yml` 的顺序添加规则（`http_status:404` 在面板里不一定能配，这就是默认改为本地管理的原因）。
+
+### 可选：AAAA + DDNS + Caddy（仅确认有公网 IPv6 且可放行 443 入站时）
 
 1. [ ] Cloudflare → 域名 → **SSL/TLS** → 模式选 **Full (strict)**。
 2. [ ] **SSL/TLS → Origin Server → Create Certificate**（RSA，主机名填 `couple.example.com`，15 年），把证书和私钥分别存为 `deploy/certs/origin.pem`、`deploy/certs/origin.key`（`chmod 600`，不要提交）。
 3. [ ] **My Profile → API Tokens → Create Token** → 模板 *Edit zone DNS*，Zone Resources 只选这个域名 → 得到的 token 填 `.env` 的 `CLOUDFLARE_API_TOKEN`。
 4. [ ] `.env` 填 `PUBLIC_HOSTNAME=couple.example.com`。DDNS 容器会自动创建/更新橙云 AAAA 记录。
-5. [ ] 路由器/防火墙放行 TCP 443 入站（建议只放行 [Cloudflare IP 段](https://www.cloudflare.com/ips/)）。
+5. [ ] 防火墙放行 TCP 443 入站且只放行 [Cloudflare IP 段](https://www.cloudflare.com/ips/)。注意 Docker 发布的端口**绕过 ufw/firewalld**，要在 `DOCKER-USER` 链里限制（见 `../backend/README.md`）。
+6. [ ] 启动时用 `docker compose --profile aaaa up -d --scale cloudflared=0`。
 
-### 方案 B：Cloudflare Tunnel
-
-1. [ ] Cloudflare **Zero Trust → Networks → Tunnels → Create a tunnel** → 类型 *Cloudflared* → 起名 `couple`。
-2. [ ] 在“安装连接器”页面复制 `--token` 后面那串，填 `.env` 的 `CLOUDFLARE_TUNNEL_TOKEN`（不用按页面装 cloudflared，compose 里已有）。
-3. [ ] 在该 tunnel 的 **Public Hostname** 里**按以下顺序**添加（先匹配先生效）：
-
-| # | Subdomain/Domain | Path | Service |
-|---|---|---|---|
-| 1 | couple.example.com | `^/api/v1/internal/.*` | `http_status:404` |
-| 2 | couple.example.com | `^/_deploy/(hook\|status)$` | `http://updater:9000` |
-| 3 | couple.example.com | `^/_deploy/.*` | `http_status:404` |
-| 4 | couple.example.com | `^/mqtt.*` | `http://emqx:8083` |
-| 5 | couple.example.com | `^/api/.*` | `http://backend:8080` |
-| 6 | couple.example.com | （空） | `http://admin:8080` |
-
-> 面板里不能直接配 `http_status:404` 时，可以把 1、3 改成 Access 策略拦截，或改用本地配置文件 `cloudflared-config.example.yml`。
-
-### 两种方案共同的路由结果
+### 路由结果（隧道与 Caddy 相同）
 
 | 路径 | 去向 | 说明 |
 |---|---|---|
@@ -68,7 +70,8 @@
 | 其余 | admin:8080 | 管理后台网页 |
 
 - [ ] Cloudflare → **Network** → 确认 **WebSockets** 开启（默认开）。
-- [ ] 如开了 Bot Fight Mode / WAF 托管挑战：**Security → WAF → Custom rules** 加一条 `URI Path starts with /_deploy/` → **Skip**，否则 GitHub Actions 的部署请求会被拦。
+- [ ] **Security → Bots → Bot Fight Mode 必须关闭**。免费版的 Bot Fight Mode **不能**被 WAF 自定义规则跳过，它会挑战 GitHub Actions 的部署请求，也会挑战 App 的非浏览器客户端（OkHttp、Paho WebSocket）。
+- [ ] `/api/*`、`/mqtt`、`/_deploy/*` 上不能有任何质询：**Security → Settings** 里关闭 *Browser Integrity Check*（或用 Configuration Rule 对这些路径关闭），如有 WAF 托管质询规则，加一条 `URI Path starts with /_deploy/ or /mqtt or /api/` → **Skip**。
 
 ## 2. 填写 `.env`
 
@@ -96,7 +99,7 @@ openssl rand -base64 48 | tr -d '/+=' | cut -c1-48
 |---|---|---|---|---|
 | `JWT_SECRET` | ✅ | — | 签发登录令牌的 HS256 密钥，**≥ 32 字符**，否则后端拒绝启动；修改后所有人需重新登录 | `openssl rand -base64 48` |
 | `REGISTRATION_CODE` | 建议 | 空 | 注册邀请码，留空 = 关闭注册。两人都注册完后建议清空 | `openssl rand -hex 4` 或自定一个 |
-| `MQTT_HOOK_SECRET` | 强烈建议 | 空 | EMQX 调 `/api/v1/internal/mqtt/*`、updater 上报状态时带的 `X-Internal-Token` | `openssl rand -hex 32` |
+| `MQTT_HOOK_SECRET` | ✅ | — | EMQX 调 `/api/v1/internal/mqtt/*`、updater 上报状态时带的 `X-Internal-Token`。Docker 方案用外部 EMQX（`MQTT_BROKER_MODE=external`），缺失时 compose 与后端都拒绝启动 | `openssl rand -hex 32` |
 | `BOOTSTRAP_PRIVATE_KEY` | 建议 | 空 | 引导二维码的 Ed25519 签名私钥（base64 的 PKCS#8 DER / 32 字节 seed）。留空则首次启动自动生成并存进数据库。**丢失 = 所有手机要重新信任** | `openssl genpkey -algorithm ed25519 -outform DER \| base64 -w0` |
 | `ADMIN_USERNAME` | | 空 | 指定管理员用户名；留空 = 第一个注册的用户是管理员 | — |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | | `30` | 注册/登录/刷新，每 IP 每分钟上限 | — |
@@ -115,9 +118,11 @@ openssl rand -base64 48 | tr -d '/+=' | cut -c1-48
 
 | 名称 | 必填 | 默认 | 说明 | 如何生成 |
 |---|---|---|---|---|
-| `PUBLIC_HOSTNAME` | 方案 A ✅ | — | 公网域名，Caddy 证书和 DDNS 用 | — |
-| `CLOUDFLARE_API_TOKEN` | 方案 A ✅ | — | DDNS 用，权限 Zone:DNS:Edit，只限该域名 | 见第 1 节 A-3 |
-| `CLOUDFLARE_TUNNEL_TOKEN` | 方案 B ✅ | — | Tunnel token | 见第 1 节 B-2 |
+| `CLOUDFLARE_TUNNEL_ID` | ✅（默认隧道） | — | 本地管理隧道的 UUID（凭证文件 `cloudflared/credentials.json`） | 见第 1 节 |
+| `TUNNEL_TRANSPORT_PROTOCOL` | | `http2` | 隧道传输协议；NAT4/国内网络保持 http2 | — |
+| `CLOUDFLARE_TUNNEL_TOKEN` | 备选 | — | 仅 `--profile tunnel-token`（面板管理的隧道） | 面板复制 |
+| `PUBLIC_HOSTNAME` | 可选 AAAA ✅ | — | 公网域名，Caddy 证书和 DDNS 用 | — |
+| `CLOUDFLARE_API_TOKEN` | 可选 AAAA ✅ | — | DDNS 用，权限 Zone:DNS:Edit，只限该域名 | 见第 1 节 |
 
 ### 2.5 镜像与自动更新
 
@@ -140,7 +145,7 @@ openssl rand -base64 48 | tr -d '/+=' | cut -c1-48
 ## 3. 首次启动与验证
 
 ```bash
-docker compose --profile tunnel up -d        # 方案 A 换成 --profile aaaa
+docker compose up -d                          # 默认带本地管理隧道；可选 AAAA：--profile aaaa up -d --scale cloudflared=0
 docker compose ps                             # backend / admin / emqx / mysql 应为 healthy
 docker compose logs -f backend updater        # Ctrl+C 退出
 ```
@@ -267,6 +272,8 @@ keytool -genkeypair -v -keystore couple-release.jks -alias couple \
 
 推镜像用自带的 `GITHUB_TOKEN`，不需要额外 Secret。PR 上运行的 CI 不读取任何 Secret、也不部署。
 
+**仓库变量**（Settings → Secrets and variables → Actions → **Variables**）：`DEPLOY_TARGET=docker`。不设置时默认 `windows`，推送后 webhook 会发 Windows 包的载荷，Docker 版 updater 会以 400 拒绝（镜像照常推送，轮询仍会在 `UPDATE_INTERVAL` 内拉取）。
+
 ## 8. 日常运维
 
 ### 推送即部署（backend / admin）
@@ -328,13 +335,14 @@ mysql / emqx / caddy / cloudflared 不会被自动更新：`docker compose pull 
 | `docker compose up` 报 `required variable ... is missing` | `.env` 里该必填项为空；对照第 2 节 |
 | backend 一直 `unhealthy` / 重启 | `docker compose logs backend`：`JWT_SECRET must be at least 32 characters`、数据库连不上（MySQL 还在初始化，等 1 分钟；或改了 `DB_PASSWORD` 但数据卷是旧的） |
 | 拉镜像 `denied` / `unauthorized` | GHCR 包是 private：改公开或设 `GHCR_USER/GHCR_TOKEN` |
-| 公网访问 502 / 1033 | 方案 B：tunnel 未连接（`docker compose logs cloudflared`）、Public Hostname 的服务名写错；方案 A：AAAA 未更新（`docker compose logs ddns`）、443 没放行、证书文件不在 `certs/` |
-| 公网访问 525/526 | 方案 A 的 SSL 模式不是 Full (strict) 或源站证书不匹配域名 |
+| 公网访问 502 / 1033 | 隧道未连接：`docker compose logs cloudflared`（凭证文件权限、`CLOUDFLARE_TUNNEL_ID` 写错、出站 TCP 7844 被封）；可选 AAAA：AAAA 未更新（`docker compose logs ddns`）、443 没放行、证书文件不在 `certs/` |
+| 公网访问 525/526 | 可选 AAAA 方案的 SSL 模式不是 Full (strict) 或源站证书不匹配域名 |
+| backend / compose 报 `MQTT_HOOK_SECRET` 缺失 | Docker 方案用外部 EMQX，`MQTT_HOOK_SECRET` 必填（`openssl rand -hex 32`） |
 | App 扫码后“健康检查失败”并回滚 | 手机上打开 `https://couple.example.com/api/v1/health` 看是否 200；`baseUrl` 不要带 `/api/v1`；Release 版必须 https |
 | App 显示 MQTT 连不上 | `mqttUrl` 必须是 `wss://域名/mqtt`；Cloudflare WebSockets 开启；EMQX 控制台认证状态；`MQTT_HOOK_SECRET` 改过后要 `docker compose up -d` 让 EMQX 也拿到新值 |
 | 注册提示邀请码错误 / 注册已关闭 | `REGISTRATION_CODE` 为空即关闭注册；改后需 `docker compose up -d backend` |
 | Actions 部署步骤 `HTTP 401` | 两边 `DEPLOY_HOOK_SECRET` 不一致，或服务器时间不准（误差需 < 300 秒，开启 NTP：`timedatectl set-ntp true`） |
-| Actions 部署步骤 `HTTP 403` / HTML 挑战页 | Cloudflare WAF/Bot Fight 拦截，按第 1 节加 `/_deploy/` 跳过规则 |
+| Actions 部署步骤 `HTTP 403` / HTML 挑战页 | Bot Fight Mode 没关（免费版无法用 WAF 规则跳过）或有托管质询：按第 1 节关闭 |
 | Actions 部署步骤 `HTTP 404` | 入口没把 `/_deploy/hook` 路由到 updater（第 1 节表格），或 updater 没启动 |
 | Actions 部署步骤 `HTTP 503` | 服务器 `UPDATE_ENABLED=false` 或 `DEPLOY_HOOK_SECRET` 为空 |
 | Actions 显示 `rolled_back (health_timeout)` | 新版本起不来：`docker compose logs backend` 看启动报错；旧版本已自动恢复，该 digest 被标记为坏，修复后再推即可 |

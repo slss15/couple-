@@ -5,11 +5,14 @@ plugins {
 }
 
 group = "com.qimingnan.couple"
-version = "0.1.0"
+// CI passes -PappVersion=X.Y.Z (tags) or edge-<sha> (main); local builds stay 0.1.0.
+version = (findProperty("appVersion") as String?)?.takeIf { it.isNotBlank() } ?: "0.1.0"
 
 val ktorVersion = "3.1.3"
 val exposedVersion = "0.61.0"
 val flywayVersion = "11.8.2"
+// Must match the Netty that ktor-server-netty brings, so Moquette's netty-codec-mqtt is aligned with it.
+val nettyVersion = "4.1.119.Final"
 
 repositories {
     mavenCentral()
@@ -45,10 +48,23 @@ dependencies {
     implementation("com.github.f4b6a3:ulid-creator:5.2.3")
     implementation("ch.qos.logback:logback-classic:1.5.18")
 
+    // Embedded MQTT broker (MQTT_BROKER_MODE=embedded, the Windows-native default).
+    implementation(platform("io.netty:netty-bom:$nettyVersion"))
+    implementation("io.moquette:moquette-broker:0.17") {
+        // Logging goes through logback; metrics/error-reporting integrations are never enabled.
+        exclude(group = "org.slf4j", module = "slf4j-reload4j")
+        exclude(group = "ch.qos.reload4j")
+        exclude(group = "com.bugsnag")
+        exclude(group = "com.librato.metrics")
+        exclude(group = "io.dropwizard.metrics")
+        exclude(group = "com.zaxxer", module = "HikariCP")
+    }
+
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
     testImplementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
     testImplementation("com.h2database:h2:2.3.232")
+    testImplementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 }
 
 tasks.processResources {

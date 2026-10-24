@@ -1,0 +1,33 @@
+<!--
+  WinSW 2.x config of the couple-backend service. Rendered by couple-updater (render-service / every deploy) into
+  @INSTALL_DIR@\services\couple-backend.xml; edit the template in the repo (deploy/windows/service/), not the copy.
+  Placeholders: @INSTALL_DIR@ @RELEASE_DIR@ @VERSION@ @JAVA_OPTS@ (JAVA_OPTS from config\couple.env).
+  Environment: everything else comes from config\couple.env (COUPLE_ENV_FILE); a non-blank value there overrides
+  the defaults below.
+-->
+<service>
+  <id>couple-backend</id>
+  <name>Couple Backend</name>
+  <description>Couple API, embedded MQTT broker and admin web (release @VERSION@)</description>
+  <executable>@RELEASE_DIR@\jre\bin\java.exe</executable>
+  <arguments>@JAVA_OPTS@ -Dfile.encoding=UTF-8 -cp "@RELEASE_DIR@\app\lib\*" com.qimingnan.couple.backend.ApplicationKt</arguments>
+  <workingdirectory>@INSTALL_DIR@</workingdirectory>
+  <env name="COUPLE_HOME" value="@INSTALL_DIR@"/>
+  <env name="COUPLE_ENV_FILE" value="@INSTALL_DIR@\config\couple.env"/>
+  <env name="ADMIN_STATIC_DIR" value="@RELEASE_DIR@\admin"/>
+  <env name="RELEASES_DIR" value="@INSTALL_DIR@\data\releases"/>
+  <env name="MQTT_DATA_DIR" value="@INSTALL_DIR@\data\mqtt"/>
+  <env name="APP_VERSION" value="@VERSION@"/>
+  <logpath>@INSTALL_DIR@\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart/>
+</service>

@@ -18,7 +18,14 @@ import com.qimingnan.couple.backend.common.ErrorBody
 import com.qimingnan.couple.backend.config.AppConfig
 import com.qimingnan.couple.backend.db.Db
 import com.qimingnan.couple.backend.health.healthRoutes
+import com.qimingnan.couple.backend.mqtt.EmbeddedMqttBroker
+import com.qimingnan.couple.backend.mqtt.MqttAccessService
 import com.qimingnan.couple.backend.mqtt.mqttHookRoutes
+import com.qimingnan.couple.backend.admin.adminStaticRoutes
+import com.qimingnan.couple.backend.config.MqttBrokerMode
+import com.qimingnan.couple.backend.db.Couples
+import com.qimingnan.couple.backend.health.SERVER_VERSION
+import org.jetbrains.exposed.sql.selectAll
 import com.qimingnan.couple.backend.pairing.PairingService
 import com.qimingnan.couple.backend.pairing.pairingRoutes
 import com.qimingnan.couple.backend.release.ReleaseMirror
@@ -31,6 +38,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
+import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.install
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.authentication
@@ -59,6 +67,8 @@ private val log = LoggerFactory.getLogger("com.qimingnan.couple.backend")
 
 fun main() {
     val config = AppConfig.fromEnv()
+    // Ktor's EmbeddedServer registers a JVM shutdown hook on start: a Windows service stop (WinSW sends Ctrl+C)
+    // or docker stop runs ApplicationStopping/Stopped (embedded broker, DB pool) before the process exits.
     embeddedServer(Netty, port = config.port, host = "0.0.0.0") {
         module(config)
     }.start(wait = true)
@@ -70,6 +80,17 @@ fun Application.module(config: AppConfig) {
 
     val audit = AuditService(db, config.clock)
     val jwtService = JwtService(config.jwtSecret, config.accessTokenTtlMs, config.clock)
+    val mqttAccess = MqttAccessService(db, jwtService, audit)
+    if (config.mqttBrokerMode == MqttBrokerMode.EMBEDDED) {
+        val broker = EmbeddedMqttBroker(
+            config,
+            MqttAccessService(db, jwtService, audit, coupleCacheTtlMs = 10_000),
+            activeCoupleIds = { db.tx { Couples.selectAll().where { Couples.deletedAt.isNull() }.map { it[Couples.id] } } },
+        )
+        broker.start()
+        // Stop the broker (clean disconnects, persistent store flushed) before the DB pool closes.
+        monitor.subscribe(ApplicationStopping) { broker.stop() }
+    }
     val authService = AuthService(db, config, jwtService, PasswordHasher(), audit)
     val pairingService = PairingService(db, config, audit)
     val adminConfigService = AdminConfigService(db, config)
@@ -131,7 +152,8 @@ fun Application.module(config: AppConfig) {
             healthRoutes()
             authRoutes(authService)
             bootstrapPublicRoutes(bootstrapService)
-            mqttHookRoutes(config, db, jwtService, audit)
+            // EMQX hooks exist only in external mode; in embedded mode /internal/mqtt/* is simply 404.
+            if (config.mqttBrokerMode == MqttBrokerMode.EXTERNAL) mqttHookRoutes(config, mqttAccess)
             updaterStatusRoutes(config, audit, releaseService)
             authenticate(JWT_AUTH) {
                 pairingRoutes(pairingService)
@@ -139,6 +161,9 @@ fun Application.module(config: AppConfig) {
                 appUpdateRoutes(releaseService)
                 adminReleaseRoutes(db, audit, releaseService, releaseMirror, releaseSettings, this@module)
             }
+        }
+        config.adminStaticDir?.let { dir ->
+            adminStaticRoutes(dir, config.adminApiBase, config.appVersion ?: SERVER_VERSION)
         }
     }
 }
