@@ -74,7 +74,9 @@ fun main() {
     val config = AppConfig.fromEnv()
     // Ktor's EmbeddedServer registers a JVM shutdown hook on start: a Windows service stop (WinSW sends Ctrl+C)
     // or docker stop runs ApplicationStopping/Stopped (embedded broker, DB pool) before the process exits.
-    embeddedServer(Netty, port = config.port, host = "0.0.0.0") {
+    // BIND_HOST: listen address (default 0.0.0.0 for Docker; the Windows service sets 127.0.0.1, cloudflared is local).
+    val bindHost = AppConfig.systemEnv()("BIND_HOST")?.trim()?.takeIf { it.isNotEmpty() } ?: "0.0.0.0"
+    embeddedServer(Netty, port = config.port, host = bindHost) {
         module(config)
     }.start(wait = true)
 }
