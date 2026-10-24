@@ -97,6 +97,15 @@ cp "$here/config/couple.env.example" "$pkg/config/"
 cp "$here/lib/common.ps1" "$pkg/lib/"
 cp "$here/setup.ps1" "$here/install.ps1" "$here/uninstall.ps1" "$here/doctor.ps1" "$here/watchdog.ps1" "$here/versions.env" "$pkg/"
 printf '%s\n' "$version" > "$pkg/VERSION"
+# Build order for the anti-downgrade rule (updater VersionOrder.kt / install.ps1): edge-<sha> names carry no order.
+commit_sha=$(git -C "$root" rev-parse HEAD 2>/dev/null || true)
+commit_epoch=${SOURCE_DATE_EPOCH:-$(git -C "$root" log -1 --format=%ct HEAD 2>/dev/null || true)}
+case "$commit_epoch" in ''|*[!0-9]*) echo "::warning::no commit time for BUILD_INFO (not a git checkout?)" >&2; commit_epoch= ;; esac
+{
+  printf 'VERSION=%s\n' "$version"
+  if [ -n "$commit_sha" ]; then printf 'COMMIT_SHA=%s\n' "$commit_sha"; fi
+  if [ -n "$commit_epoch" ]; then printf 'COMMIT_EPOCH=%s\n' "$commit_epoch"; fi
+} > "$pkg/BUILD_INFO"
 cat > "$pkg/README.txt" <<TXT
 Couple server $version for Windows x64.
 First-time setup (elevated PowerShell):  powershell -ExecutionPolicy Bypass -File .\\setup.ps1

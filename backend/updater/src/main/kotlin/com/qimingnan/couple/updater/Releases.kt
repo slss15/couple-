@@ -35,13 +35,17 @@ class Releases(private val cfg: Config) {
         if (missing.isNotEmpty()) throw IOException("package incomplete, missing: ${missing.joinToString()}")
     }
 
-    /** Extracts [zip] as releases\<version> (replacing a stale copy that is neither current nor [keep]). */
-    fun install(zip: Path, version: String, keep: String?) {
+    /**
+     * Extracts [zip] as releases\<version> (replacing a stale copy that is neither current nor [keep]). [check] runs
+     * on the extracted, validated staging dir before anything is replaced; throwing aborts the install.
+     */
+    fun install(zip: Path, version: String, keep: String?, check: (Path) -> Unit = {}) {
         val target = dir(version)
         val staging = cfg.releasesDir.resolve(".staging-$version-${System.nanoTime()}")
         try {
             Files2.extract(zip, staging)
             validate(staging)
+            check(staging)
             if (Files.exists(target)) {
                 if (version == current() || version == keep) throw IOException("release $version is in use; refusing to overwrite")
                 Files2.deleteTree(target)

@@ -41,7 +41,9 @@ param(
     # Do not set up the Cloudflare Tunnel (local-only install).
     [switch]$SkipTunnel,
     # Continue even when doctor.ps1 reports FAIL (it still runs and prints its table).
-    [switch]$IgnoreDoctor
+    [switch]$IgnoreDoctor,
+    # Passed to install.ps1: allow installing this package over a newer installed release (manual rollback).
+    [switch]$AllowDowngrade
 )
 
 Set-StrictMode -Version 2.0
@@ -482,6 +484,7 @@ try {
 
     Enter-Step 5 'Cloudflare Tunnel'
     $installArgs = @{ InstallDir = $InstallDir }
+    if ($AllowDowngrade) { $installArgs['AllowDowngrade'] = $true }
     if ($SkipTunnel) {
         Write-Info '-SkipTunnel：跳过（只在本机 127.0.0.1 可访问）'
     } else {

@@ -1,8 +1,10 @@
 package com.qimingnan.couple.updater
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -91,8 +93,11 @@ fun verifyHook(
     return HookResult(200, "ok", data)
 }
 
-/** A deploy request for the Windows server package. */
-data class DeployJob(val version: String, val assetUrl: String, val sha256: String, val sha: String)
+/**
+ * A deploy request for the Windows server package. [allowDowngrade] = explicit manual pin / rollback: the
+ * anti-downgrade rule (see [VersionOrder]) does not apply.
+ */
+data class DeployJob(val version: String, val assetUrl: String, val sha256: String, val sha: String, val allowDowngrade: Boolean = false)
 
 private val VERSION_RE = Regex("^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$")
 private val SHA256_RE = Regex("^[0-9a-f]{64}$")
@@ -100,8 +105,9 @@ private val GIT_SHA_RE = Regex("^[0-9a-f]{7,40}$")
 private val ASSET_NAME_RE = Regex("^couple-server-windows-x64-[0-9A-Za-z._+-]{1,64}\\.zip$")
 
 /**
- * Payload: {service:"server", version, sha, assetUrl, sha256, ts}. assetUrl must be a release asset of the
- * configured repo: https://github.com/<repo>/releases/download/<tag>/couple-server-windows-x64-<version>.zip.
+ * Payload: {service:"server", version, sha, assetUrl, sha256, ts, allowDowngrade?}. assetUrl must be a release asset
+ * of the configured repo: https://github.com/<repo>/releases/download/<tag>/couple-server-windows-x64-<version>.zip.
+ * allowDowngrade (boolean, default false) marks an intentional rollback to an older build (signed like the rest).
  */
 fun validatePayload(cfg: Config, data: JsonObject): Pair<String?, DeployJob?> {
     fun str(k: String) = (data[k] as? JsonPrimitive)?.contentOrNull ?: ""
@@ -115,7 +121,12 @@ fun validatePayload(cfg: Config, data: JsonObject): Pair<String?, DeployJob?> {
     val url = str("assetUrl")
     val err = assetUrlError(cfg, url)
     if (err != null) return err to null
-    return null to DeployJob(version, url, sha256, sha)
+    val downgrade = when (val d = data["allowDowngrade"]) {
+        null, JsonNull -> false
+        is JsonPrimitive -> if (d.isString) return "allowDowngrade must be a boolean" to null else d.booleanOrNull ?: return "allowDowngrade must be a boolean" to null
+        else -> return "allowDowngrade must be a boolean" to null
+    }
+    return null to DeployJob(version, url, sha256, sha, downgrade)
 }
 
 fun assetUrlError(cfg: Config, url: String): String? {

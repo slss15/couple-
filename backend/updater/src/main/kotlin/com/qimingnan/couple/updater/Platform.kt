@@ -138,6 +138,13 @@ class Http(proxyUrl: String?, noProxy: String?) {
         Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING)
     }
 
+    /** Same proxy settings as [outbound], but redirects are handled by the caller (see [GitHubApi.fetchAsset]). */
+    val outboundNoRedirect: HttpClient by lazy {
+        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).followRedirects(HttpClient.Redirect.NEVER)
+            .also { b -> outbound.proxy().ifPresent { b.proxy(it) }; outbound.authenticator().ifPresent { b.authenticator(it) } }
+            .build()
+    }
+
     /** Posts the status JSON to the backend (best effort, loopback, never through a proxy). */
     fun postStatus(url: String, token: String, body: String) {
         if (url.isBlank() || token.isBlank()) return
@@ -153,11 +160,109 @@ class Http(proxyUrl: String?, noProxy: String?) {
 }
 
 /**
+ * GitHub REST calls of the updater. With UPDATE_GITHUB_TOKEN set, release lookups AND asset downloads are
+ * authenticated, so private repositories work: assets are fetched through the API asset URL
+ * (`GET /repos/<repo>/releases/assets/<id>`, `Accept: application/octet-stream`), which answers with a redirect to a
+ * short-lived signed storage URL. Redirects are followed by hand and the token is only ever sent to the API host
+ * (the signed URL rejects a second credential and must never see the token).
+ */
+class GitHubApi(private val cfg: Config, private val http: Http) {
+    private val apiUri = URI(cfg.githubApi)
+    private val token = cfg.githubToken?.takeIf { it.isNotBlank() }
+
+    val authenticated: Boolean get() = token != null
+
+    /** True when [uri] may receive the token: same scheme/host/port as the configured API base. */
+    fun sendsToken(uri: URI): Boolean = token != null && uri.scheme.equals(apiUri.scheme, true) &&
+        uri.host.equals(apiUri.host, true) && uri.port == apiUri.port
+
+    fun getJson(path: String): String {
+        val url = "${cfg.githubApi}/repos/${cfg.repo}/$path"
+        val b = HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(30)).header("User-Agent", "couple-updater")
+            .header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2022-11-28")
+        token?.let { b.header("Authorization", "Bearer $it") }
+        val res = http.outbound.send(b.GET().build(), HttpResponse.BodyHandlers.ofString())
+        if (res.statusCode() != 200) throw IOException("HTTP ${res.statusCode()} from ${URI(url).host}")
+        return res.body()
+    }
+
+    /** Release JSON for [tag] (edge, v0.2.0, ...). */
+    fun releaseByTag(tag: String): JsonObject = Json.parseToJsonElement(getJson("releases/tags/$tag")).jsonObject
+
+    /**
+     * Downloads an asset through its API URL ([apiAssetUrl] = the asset's `url` field) to [dest], or returns its
+     * body as text when [dest] is null (sidecar .sha256 files).
+     */
+    fun fetchAsset(apiAssetUrl: String, dest: Path?): String? {
+        var uri = URI(apiAssetUrl)
+        if (!sendsToken(uri) && token != null) throw IOException("asset URL is not on ${apiUri.host}")
+        val requireHttps = apiUri.scheme == "https"
+        repeat(6) {
+            if (requireHttps && uri.scheme != "https") throw IOException("refusing non-https URL ${uri.host}")
+            val b = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(30)).header("User-Agent", "couple-updater")
+                .header("Accept", "application/octet-stream")
+            if (sendsToken(uri)) b.header("Authorization", "Bearer $token").header("X-GitHub-Api-Version", "2022-11-28")
+            val req = b.GET().build()
+            val tmp = dest?.resolveSibling(dest.fileName.toString() + ".part")
+            val res: HttpResponse<*> = if (tmp != null) {
+                http.outboundNoRedirect.send(req, HttpResponse.BodyHandlers.ofFile(tmp))
+            } else {
+                http.outboundNoRedirect.send(req, HttpResponse.BodyHandlers.ofString())
+            }
+            when (res.statusCode()) {
+                in 200..299 -> {
+                    if (tmp != null && dest != null) {
+                        Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING)
+                        return null
+                    }
+                    return res.body() as String
+                }
+                301, 302, 303, 307, 308 -> {
+                    tmp?.let { Files.deleteIfExists(it) }
+                    val loc = res.headers().firstValue("Location").orElseThrow { IOException("redirect without Location") }
+                    uri = uri.resolve(loc)
+                }
+                else -> {
+                    tmp?.let { Files.deleteIfExists(it) }
+                    throw IOException("HTTP ${res.statusCode()} downloading ${uri.host}")
+                }
+            }
+        }
+        throw IOException("too many redirects downloading asset")
+    }
+
+    /**
+     * Maps a public download URL (https://github.com/<repo>/releases/download/<tag>/<name>, already allow-listed) to
+     * the API asset URL by looking the asset up in release <tag>.
+     */
+    fun apiUrlFor(downloadUrl: String): String {
+        val rest = downloadUrl.removePrefix(cfg.assetPrefix)
+        val tag = rest.substringBefore('/')
+        val name = rest.substringAfter('/')
+        val rel = releaseByTag(tag)
+        val assets = (rel["assets"] as? JsonArray) ?: JsonArray(emptyList())
+        val asset = assets.map { it.jsonObject }.firstOrNull { it.str("name") == name }
+            ?: throw IOException("asset $name not found in release $tag")
+        return asset.str("url").takeIf { it.isNotEmpty() } ?: throw IOException("asset $name has no API url")
+    }
+}
+
+internal fun JsonObject.str(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: ""
+
+/** Downloads release zips: the public URL without a token, the authenticated API asset URL with one. */
+class GitHubDownloader(private val api: GitHubApi, private val plain: Downloader) : Downloader {
+    override fun download(url: String, dest: Path) {
+        if (!api.authenticated) return plain.download(url, dest)
+        api.fetchAsset(api.apiUrlFor(url), dest)
+    }
+}
+
+/**
  * Finds the server zip on GitHub Releases: edge -> release tag `edge` (rolling prerelease), stable -> latest
  * non-prerelease, anything else -> tag v<channel>. The sha256 comes from the asset's `digest` field, falling back to
- * the `<zip>.sha256` asset.
+ * the `<zip>.sha256` asset (fetched through the API when a token is set).
  */
-class GitHubReleaseSource(private val cfg: Config, private val http: Http) : ReleaseSource {
+class GitHubReleaseSource(private val cfg: Config, private val http: Http, private val api: GitHubApi = GitHubApi(cfg, http)) : ReleaseSource {
     private val nameRe = Regex("^couple-server-windows-x64-(.+)\\.zip$")
 
     override fun latest(channel: String): RemoteAsset? = try {
@@ -166,7 +271,7 @@ class GitHubReleaseSource(private val cfg: Config, private val http: Http) : Rel
             "stable", "latest" -> "releases/latest"
             else -> "releases/tags/v${channel.removePrefix("v")}"
         }
-        val rel = Json.parseToJsonElement(get("${cfg.githubApi}/repos/${cfg.repo}/$path", api = true)).jsonObject
+        val rel = Json.parseToJsonElement(api.getJson(path)).jsonObject
         val assets = (rel["assets"] as? JsonArray) ?: JsonArray(emptyList())
         val zip = assets.map { it.jsonObject }.firstOrNull { nameRe.matches(it.str("name")) }
         if (zip == null) {
@@ -177,7 +282,11 @@ class GitHubReleaseSource(private val cfg: Config, private val http: Http) : Rel
             val digest = zip.str("digest").removePrefix("sha256:").lowercase()
             val sha256 = if (digest.length == 64) digest else {
                 val sidecar = assets.map { it.jsonObject }.firstOrNull { it.str("name") == "$name.sha256" }
-                sidecar?.let { get(it.str("browser_download_url"), api = false).trim().split(Regex("\\s+")).first().lowercase() }.orEmpty()
+                sidecar?.let {
+                    val text = if (api.authenticated && it.str("url").isNotEmpty()) api.fetchAsset(it.str("url"), null).orEmpty()
+                    else getPlain(it.str("browser_download_url"))
+                    text.trim().split(Regex("\\s+")).first().lowercase()
+                }.orEmpty()
             }
             val version = nameRe.find(name)!!.groupValues[1]
             if (sha256.length != 64) null else RemoteAsset(version, url, sha256, rel.str("target_commitish").takeIf { Regex("^[0-9a-f]{7,40}$").matches(it) } ?: "")
@@ -187,15 +296,9 @@ class GitHubReleaseSource(private val cfg: Config, private val http: Http) : Rel
         null
     }
 
-    private fun JsonObject.str(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: ""
-
-    private fun get(url: String, api: Boolean): String {
-        val b = HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(30)).header("User-Agent", "couple-updater")
-        if (api) {
-            b.header("Accept", "application/vnd.github+json")
-            cfg.githubToken?.let { b.header("Authorization", "Bearer $it") }
-        }
-        val res = http.outbound.send(b.GET().build(), HttpResponse.BodyHandlers.ofString())
+    private fun getPlain(url: String): String {
+        val req = HttpRequest.newBuilder(URI(url)).timeout(Duration.ofSeconds(30)).header("User-Agent", "couple-updater").GET().build()
+        val res = http.outbound.send(req, HttpResponse.BodyHandlers.ofString())
         if (res.statusCode() != 200) throw IOException("HTTP ${res.statusCode()} from ${URI(url).host}")
         return res.body()
     }

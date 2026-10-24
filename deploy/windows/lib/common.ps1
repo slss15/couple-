@@ -213,12 +213,13 @@ function Get-ExpectedTunnelPort([hashtable]$Cfg) {
     return [pscustomobject]@{ Backend = $p; MqttWs = $m; Hook = $h }
 }
 
-# True when the ingress ports of a rendered config.yml are exactly the expected ones (pure).
+# True when every expected port (backend, MQTT WS, updater hook) appears as an ingress service of a rendered
+# config.yml (pure). Extra services the user added by hand do not count as a mismatch.
 function Test-TunnelPortsMatch([int[]]$Actual, $Expected) {
-    $want = @($Expected.Backend, $Expected.MqttWs, $Expected.Hook) | Sort-Object -Unique
-    $have = @($Actual) | Sort-Object -Unique
-    if (@($want).Count -ne @($have).Count) { return $false }
-    for ($i = 0; $i -lt @($want).Count; $i++) { if (@($want)[$i] -ne @($have)[$i]) { return $false } }
+    $have = @($Actual)
+    foreach ($p in @($Expected.Backend, $Expected.MqttWs, $Expected.Hook)) {
+        if ($have -notcontains $p) { return $false }
+    }
     return $true
 }
 
