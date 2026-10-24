@@ -61,6 +61,12 @@ object AuditActions {
     const val ADMIN_RELEASE_SETTINGS_UPDATE = "admin.release.settings.update"
     const val ADMIN_SERVER_UPDATE_STATUS = "admin.server.update_status"
     const val UPDATER_STATUS = "updater.status"
+    const val RELEASE_DOWNGRADE_REFUSED = "release.downgrade_refused"
+    const val RELEASE_AUTO_PAUSED = "release.auto_paused"
+    const val RELEASE_PROMOTED = "release.promoted"
+    const val RELEASE_HEALTH_FAILED = "release.health_failed"
+    const val ADMIN_RELEASE_HEALTH = "admin.release.health"
+    const val ADMIN_DEVICE_LIST = "admin.device.list"
 }
 
 class AuditService(private val db: Db, private val clock: () -> Long) {

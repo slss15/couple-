@@ -106,7 +106,7 @@ fun Application.module(config: AppConfig) {
     val bootstrapService = BootstrapService(keys, adminConfigService, config)
     log.info("Bootstrap Ed25519 public key: {}", keys.publicKeyBase64)
     val releaseSettings = ReleaseSettingsService(db, config.clock)
-    val releaseService = ReleaseService(db, config)
+    val releaseService = ReleaseService(db, config, releaseSettings, audit)
     val releaseMirror = ReleaseMirror(db, config, releaseSettings, audit)
     attributes.put(ReleaseMirrorKey, releaseMirror)
     if (config.releasePollEnabled) releaseMirror.startScheduler(this)

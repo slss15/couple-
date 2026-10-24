@@ -64,10 +64,14 @@ class FakeGitHub(
     var claimedCert: String = sha256Hex("CERT-A".toByteArray())
     var minSupported = 0
     var requests = mutableListOf<String>()
+    /** release.json.sig content; null = no signature asset. */
+    var signer: ((ByteArray) -> String)? = null
+    /** Extra schema-2 fields appended to the manifest JSON (e.g. ',"protocolVersion":2'). */
+    var extraFields: String = ""
 
     fun manifest(): String {
         val m = """{"versionName":"$version","versionCode":$versionCode,"sha256":"${sha256Hex(apk)}","size":${apk.size},""" +
-            """"signingCertSha256":"$claimedCert","minSupportedVersionCode":$minSupported,"notes":"修复若干问题","publishedAt":1760000000000}"""
+            """"signingCertSha256":"$claimedCert","minSupportedVersionCode":$minSupported,"notes":"修复若干问题","publishedAt":1760000000000$extraFields}"""
         return manifestOverride?.invoke(m) ?: m
     }
 
@@ -80,9 +84,11 @@ class FakeGitHub(
                     {"tag_name":"v9.9.9","draft":true,"prerelease":false,"assets":[]},
                     {"tag_name":"v$version","draft":false,"prerelease":false,"assets":[
                       {"name":"release.json","url":"$base/api-asset/json","browser_download_url":"$base/dl/release.json","size":1},
+                      ${if (signer != null) """{"name":"release.json.sig","url":"$base/api-asset/sig","browser_download_url":"$base/dl/release.json.sig","size":1},""" else ""}
                       {"name":"couple-$version.apk","url":"$base/api-asset/apk","browser_download_url":"$base/dl/couple-$version.apk","size":${apk.size}}
                     ]}]""".toByteArray()
                 path == "/dl/release.json" || path == "/api-asset/json" -> 200 to manifest().toByteArray()
+                path == "/dl/release.json.sig" || path == "/api-asset/sig" -> 200 to signer!!(manifest().toByteArray()).toByteArray()
                 path == "/dl/couple-$version.apk" || path == "/api-asset/apk" -> {
                     ex.responseHeaders.add("Location", "$base/blob/apk")
                     302 to ByteArray(0)
@@ -97,4 +103,13 @@ class FakeGitHub(
     }
 
     override fun close() = server.stop(0)
+}
+
+/** Ed25519 release key for tests: raw 32-byte public key (base64) + a signer producing release.json.sig content. */
+class TestReleaseKey {
+    private val kp = java.security.KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+    val publicKeyB64: String = java.util.Base64.getEncoder().encodeToString(kp.public.encoded.takeLast(32).toByteArray())
+    fun sign(bytes: ByteArray): String = java.security.Signature.getInstance("Ed25519").run {
+        initSign(kp.private); update(bytes); java.util.Base64.getEncoder().encodeToString(sign())
+    }
 }

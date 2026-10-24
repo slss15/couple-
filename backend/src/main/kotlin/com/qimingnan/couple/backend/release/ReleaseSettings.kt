@@ -16,6 +16,8 @@ data class ReleaseSettings(
     val pollMinutes: Int = 30,
     /** Lowercase hex SHA-256 of the APK signing certificate; "" = not pinned yet (pinned from the first mirror). */
     val expectedSigningCertSha256: String = "",
+    /** OTA v2 staged rollout: devices (token did) that get CANARY-stage releases first ("me first"). */
+    val canaryDeviceIds: List<String> = emptyList(),
 ) {
     companion object {
         const val DEFAULT_REPO = "slss15/couple-"
@@ -31,6 +33,7 @@ data class ReleaseSettingsView(
     val pollMinutes: Int,
     val expectedSigningCertSha256: String?,
     val updatedAt: Long?,
+    val canaryDeviceIds: List<String> = emptyList(),
 )
 
 /**
@@ -45,6 +48,7 @@ data class ReleaseSettingsUpdate(
     val autoPublish: Boolean? = null,
     val pollMinutes: Int? = null,
     val expectedSigningCertSha256: String? = null,
+    val canaryDeviceIds: List<String>? = null,
 )
 
 class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) {
@@ -58,6 +62,9 @@ class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) 
         req.repo?.let { if (!REPO.matches(it.trim())) throw badRequest("VALIDATION_ERROR", "repo must look like owner/name") }
         req.pollMinutes?.let { if (it != 0 && it !in 5..1440) throw badRequest("VALIDATION_ERROR", "pollMinutes must be 0 (off) or 5..1440") }
         val pin = req.expectedSigningCertSha256?.let { if (it.isEmpty()) "" else normalizeHex(it) ?: throw badRequest("VALIDATION_ERROR", "expectedSigningCertSha256 must be 64 hex chars") }
+        val canary = req.canaryDeviceIds?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct()?.also { ids ->
+            if (ids.size > 10 || ids.any { it.length > 128 }) throw badRequest("VALIDATION_ERROR", "canaryDeviceIds: at most 10 ids of 1..128 chars")
+        }
         val changed = mutableListOf<String>()
         val now = clock()
         val (next, at) = db.tx {
@@ -76,6 +83,7 @@ class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) 
                 autoPublish = req.autoPublish ?: cur.autoPublish,
                 pollMinutes = req.pollMinutes ?: cur.pollMinutes,
                 expectedSigningCertSha256 = pin ?: cur.expectedSigningCertSha256,
+                canaryDeviceIds = canary ?: cur.canaryDeviceIds,
             )
             SettingsRepo.put(KEY, AppJson.encodeToString(ReleaseSettings.serializer(), n), now)
             n to now
@@ -104,6 +112,7 @@ class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) 
         pollMinutes = pollMinutes,
         expectedSigningCertSha256 = expectedSigningCertSha256.ifEmpty { null },
         updatedAt = at,
+        canaryDeviceIds = canaryDeviceIds,
     )
 
     companion object {

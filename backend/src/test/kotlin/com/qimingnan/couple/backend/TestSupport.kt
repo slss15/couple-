@@ -49,6 +49,7 @@ fun testConfig(
     adminStaticDir: String? = null,
     setupToken: String? = null,
     dataDir: String? = null,
+    otaPublicKey: String? = null,
 ) = AppConfig(
     dbUrl = "jdbc:h2:mem:$dbName;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
     dbUser = "sa",
@@ -73,6 +74,7 @@ fun testConfig(
     adminApiBase = "https://api.example.test",
     setupToken = setupToken,
     dataDir = dataDir,
+    otaPublicKey = otaPublicKey,
 )
 
 fun appTest(config: AppConfig = testConfig(), block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {

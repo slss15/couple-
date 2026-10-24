@@ -98,9 +98,18 @@ fun Route.appUpdateRoutes(service: ReleaseService) {
         get("/update") {
             val vc = call.request.queryParameters["versionCode"]?.toIntOrNull()
                 ?: throw badRequest("VALIDATION_ERROR", "versionCode is required and must be an integer")
-            val deviceId = call.request.queryParameters["deviceId"]?.takeIf { it.isNotBlank() }?.take(128)
-                ?: call.authUser().deviceId
-            call.respond(service.checkUpdate(vc, deviceId))
+            val caller = call.authUser()
+            val deviceId = call.request.queryParameters["deviceId"]?.takeIf { it.isNotBlank() }?.take(128) ?: caller.deviceId
+            fun intParam(name: String): Int? = call.request.queryParameters[name]?.let {
+                it.toIntOrNull() ?: throw badRequest("VALIDATION_ERROR", "$name must be an integer")
+            }
+            call.respond(
+                service.checkUpdate(vc, deviceId, caller, intParam("protocolVersion"), intParam("minPeerProtocol"), intParam("sdkInt")),
+            )
+        }
+        post("/health-report") {
+            service.healthReport(call.authUser(), call.receive<HealthReportRequest>())
+            call.respond(HttpStatusCode.NoContent)
         }
         get("/releases/{versionCode}/apk") {
             val vc = call.parameters["versionCode"]?.toIntOrNull() ?: throw notFound()
@@ -184,6 +193,7 @@ fun Route.adminReleaseRoutes(
                 mapOf(
                     "repo" to view.repo, "autoPublish" to view.autoPublish, "pollMinutes" to view.pollMinutes,
                     "changedSecrets" to changed.joinToString(","),
+                    "canaryDeviceIds" to view.canaryDeviceIds.joinToString(","),
                 ),
             )
             call.respond(view)
@@ -200,9 +210,23 @@ fun Route.adminReleaseRoutes(
                     "rolloutPercent" to "${before.rolloutPercent}->${after.rolloutPercent}",
                     "minSupportedVersionCode" to "${before.minSupportedVersionCode}->${after.minSupportedVersionCode}",
                     "notesChanged" to (before.notes != after.notes),
+                    "stage" to "${before.stage}->${after.stage}",
+                    "paused" to "${before.pausedAt != null}->${after.pausedAt != null}",
+                    "overridePeerCheck" to body.overridePeerCheck,
                 ),
             )
             call.respond(after)
+        }
+        get("/releases/{versionCode}/health") {
+            val admin = call.requireAdmin(db, audit)
+            val vc = call.parameters["versionCode"]?.toIntOrNull() ?: throw notFound()
+            audit.log(admin, AuditActions.ADMIN_RELEASE_HEALTH, "release:$vc")
+            call.respond(service.health(vc))
+        }
+        get("/devices") {
+            val admin = call.requireAdmin(db, audit)
+            audit.log(admin, AuditActions.ADMIN_DEVICE_LIST, "devices")
+            call.respond(service.devices())
         }
         get("/server/update-status") {
             val admin = call.requireAdmin(db, audit)

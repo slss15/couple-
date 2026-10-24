@@ -58,6 +58,12 @@ data class AppConfig(
     /** Retry backoff base for outbound GitHub requests (doubles per attempt). */
     val releaseRetryBaseMs: Long = 2_000L,
     val releaseRetryAttempts: Int = 4,
+    /**
+     * OTA release public key (env OTA_PUBLIC_KEY, base64 raw 32-byte Ed25519). When set, the mirror requires
+     * release.json.sig and rejects releases whose manifest signature does not verify (defense in depth; the app's
+     * build-time pin is the trust root).
+     */
+    val otaPublicKey: String? = null,
     /** Backend version reported to the admin (APP_VERSION env, falls back to the build version). */
     val appVersion: String? = null,
     /** Optional VCS revision of the running image (APP_REVISION env). */
@@ -139,6 +145,11 @@ data class AppConfig(
                 releasesDir = opt("RELEASES_DIR") ?: "/data/releases",
                 outboundProxy = opt("HTTPS_PROXY") ?: opt("https_proxy") ?: opt("ALL_PROXY") ?: opt("all_proxy"),
                 noProxy = opt("NO_PROXY") ?: opt("no_proxy"),
+                otaPublicKey = opt("OTA_PUBLIC_KEY")?.also { k ->
+                    require(com.qimingnan.couple.backend.release.ManifestSignature.isValidPublicKey(k)) {
+                        "OTA_PUBLIC_KEY must be standard base64 of a 32-byte Ed25519 public key"
+                    }
+                },
                 appVersion = opt("APP_VERSION") ?: opt("OCI_IMAGE_VERSION"),
                 appRevision = opt("APP_REVISION") ?: opt("OCI_IMAGE_REVISION"),
                 mqttBrokerMode = brokerMode,

@@ -23,6 +23,14 @@ object ReleaseRepo {
         status = runCatching { ReleaseStatus.valueOf(r[AppReleases.status]) }.getOrDefault(ReleaseStatus.WITHDRAWN),
         rolloutPercent = r[AppReleases.rolloutPercent],
         createdAt = r[AppReleases.createdAt],
+        manifestB64 = r[AppReleases.manifestB64],
+        manifestSig = r[AppReleases.manifestSig],
+        protocolVersion = r[AppReleases.protocolVersion],
+        minPeerProtocol = r[AppReleases.minPeerProtocol],
+        minSdk = r[AppReleases.minSdk],
+        stage = runCatching { ReleaseStage.valueOf(r[AppReleases.stage]) }.getOrDefault(ReleaseStage.ALL),
+        pausedAt = r[AppReleases.pausedAt],
+        pauseReason = r[AppReleases.pauseReason],
     )
 
     fun all(): List<AppRelease> =
@@ -55,6 +63,14 @@ object ReleaseRepo {
             it[status] = r.status.name
             it[rolloutPercent] = r.rolloutPercent
             it[createdAt] = r.createdAt
+            it[manifestB64] = r.manifestB64
+            it[manifestSig] = r.manifestSig
+            it[protocolVersion] = r.protocolVersion
+            it[minPeerProtocol] = r.minPeerProtocol
+            it[minSdk] = r.minSdk
+            it[stage] = r.stage.name
+            it[pausedAt] = r.pausedAt
+            it[pauseReason] = r.pauseReason
         }
     }
 
@@ -64,6 +80,9 @@ object ReleaseRepo {
             it[rolloutPercent] = r.rolloutPercent
             it[minSupportedVersionCode] = r.minSupportedVersionCode
             it[notes] = r.notes
+            it[stage] = r.stage.name
+            it[pausedAt] = r.pausedAt
+            it[pauseReason] = r.pauseReason
         }
     }
 }

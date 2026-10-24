@@ -110,6 +110,7 @@ class ReleaseMirror(
             fun asset(name: String) = assets.firstOrNull { it["name"]?.jsonPrimitive?.contentOrNull == name }
             val manifestAsset = asset("release.json") ?: continue
             val apkAsset = asset("couple-$version.apk") ?: continue
+            val sigAsset = asset("release.json.sig")
 
             val manifestBytes = download(manifestAsset, s.githubToken) { it.readNBytes(MAX_MANIFEST + 1) }
             if (manifestBytes.size > MAX_MANIFEST) {
@@ -127,7 +128,12 @@ class ReleaseMirror(
             val key = "${manifest.versionCode}:${manifest.sha256}"
             if (permanentlyRejected.containsKey(key)) continue
             try {
-                val row = mirrorOne(tag, version, manifest, apkAsset, s)
+                val sig = sigAsset?.let { a ->
+                    val b = download(a, s.githubToken) { it.readNBytes(MAX_SIG + 1) }
+                    if (b.size > MAX_SIG) throw Rejected("SIGNATURE_INVALID", "release.json.sig too large")
+                    b.toString(Charsets.UTF_8).trim()
+                }
+                val row = mirrorOne(tag, version, manifest, manifestBytes, sig, apkAsset, s)
                 mirrored += row.versionCode
                 log.info("Mirrored release {} ({}) as {}", row.versionName, row.versionCode, row.status)
             } catch (e: Rejected) {
@@ -155,13 +161,27 @@ class ReleaseMirror(
         return http.getStream(url, ghHeaders(token, "application/octet-stream"), consume)
     }
 
-    private suspend fun mirrorOne(tag: String, version: String, m: ReleaseManifest, apkAsset: JsonObject, s: ReleaseSettings): AppRelease {
+    private suspend fun mirrorOne(
+        tag: String, version: String, m: ReleaseManifest, manifestBytes: ByteArray, sig: String?,
+        apkAsset: JsonObject, s: ReleaseSettings,
+    ): AppRelease {
         val sha = ReleaseSettingsService.normalizeHex(m.sha256) ?: throw Rejected("INVALID_METADATA", "sha256 is not 64 hex chars")
         val claimedCert = ReleaseSettingsService.normalizeHex(m.signingCertSha256) ?: throw Rejected("INVALID_METADATA", "signingCertSha256 is not 64 hex chars")
         if (m.versionName != version) throw Rejected("INVALID_METADATA", "versionName ${m.versionName} does not match tag $tag")
         if (m.versionCode <= 0) throw Rejected("INVALID_METADATA", "versionCode must be positive")
         if (m.size <= 0 || m.size > MAX_APK) throw Rejected("INVALID_METADATA", "size out of range")
         if (m.minSupportedVersionCode < 0 || m.minSupportedVersionCode > m.versionCode) throw Rejected("INVALID_METADATA", "minSupportedVersionCode out of range")
+        if (m.protocolVersion < 1 || m.minPeerProtocol < 1 || m.minPeerProtocol > m.protocolVersion) {
+            throw Rejected("INVALID_METADATA", "need 1 <= minPeerProtocol <= protocolVersion")
+        }
+        if (m.minSdk < 0 || m.minSdk > 1000) throw Rejected("INVALID_METADATA", "minSdk out of range")
+        if (m.rollout != null && m.rollout != "staged" && m.rollout != "all") throw Rejected("INVALID_METADATA", "rollout must be staged or all")
+        if (sig != null && sig.length > MAX_SIG) throw Rejected("SIGNATURE_INVALID", "release.json.sig too large")
+        // Signed manifest (defense in depth; the app re-verifies against its build-time pin).
+        config.otaPublicKey?.let { pub ->
+            if (sig == null) throw Rejected("SIGNATURE_MISSING", "OTA_PUBLIC_KEY is set but the release has no release.json.sig")
+            if (!ManifestSignature.verify(pub, manifestBytes, sig)) throw Rejected("SIGNATURE_INVALID", "release.json.sig does not verify against OTA_PUBLIC_KEY")
+        }
 
         val tmp = File(releasesDir, ".tmp-${m.versionCode}-${System.nanoTime()}.apk")
         try {
@@ -201,9 +221,17 @@ class ReleaseMirror(
                 if (now != apkCert) throw Rejected("CERT_MISMATCH", "APK cert $apkCert does not match pinned cert $now")
             }
 
+            // Anti-downgrade: auto-publish never publishes below the highest version ever published.
+            val highWater = db.tx { HighWater.get() }
+            val publish = s.autoPublish && m.versionCode >= highWater
+            // Staged rollout only makes sense when there is a canary device to go first.
+            val stage = if (m.rollout == "staged" && s.canaryDeviceIds.isNotEmpty()) ReleaseStage.CANARY else ReleaseStage.ALL
+
             val dest = File(releasesDir, "couple-${m.versionName}.apk")
             Files.move(tmp.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-            File(releasesDir, "couple-${m.versionName}.release.json").writeText(AppJson.encodeToString(ReleaseManifest.serializer(), m))
+            // Keep the manifest byte-exact: the signature covers these bytes.
+            File(releasesDir, "couple-${m.versionName}.release.json").writeBytes(manifestBytes)
+            if (sig != null) File(releasesDir, "couple-${m.versionName}.release.json.sig").writeText(sig)
 
             val row = AppRelease(
                 id = Ids.newId(),
@@ -216,14 +244,26 @@ class ReleaseMirror(
                 notes = m.notes,
                 publishedAt = if (m.publishedAt > 0) m.publishedAt else config.clock(),
                 filePath = dest.absolutePath,
-                status = if (s.autoPublish) ReleaseStatus.PUBLISHED else ReleaseStatus.MIRRORED,
+                status = if (publish) ReleaseStatus.PUBLISHED else ReleaseStatus.MIRRORED,
                 rolloutPercent = 100,
                 createdAt = config.clock(),
+                manifestB64 = java.util.Base64.getEncoder().encodeToString(manifestBytes),
+                manifestSig = sig,
+                protocolVersion = m.protocolVersion,
+                minPeerProtocol = m.minPeerProtocol,
+                minSdk = m.minSdk,
+                stage = stage,
             )
-            db.tx { ReleaseRepo.insert(row) }
+            db.tx {
+                ReleaseRepo.insert(row)
+                if (publish) HighWater.raise(row.versionCode, config.clock())
+            }
+            if (s.autoPublish && !publish) {
+                audit.log(null, AuditActions.RELEASE_DOWNGRADE_REFUSED, tag, mapOf("versionCode" to m.versionCode, "highWater" to highWater))
+            }
             audit.log(
                 null, AuditActions.RELEASE_MIRRORED, tag,
-                mapOf("versionCode" to row.versionCode, "sha256" to sha, "size" to row.size, "status" to row.status.name),
+                mapOf("versionCode" to row.versionCode, "sha256" to sha, "size" to row.size, "status" to row.status.name, "signed" to (sig != null), "stage" to row.stage.name),
             )
             return row
         } finally {
@@ -234,6 +274,7 @@ class ReleaseMirror(
     companion object {
         private val TAG = Regex("^v(\\d+\\.\\d+\\.\\d+)$")
         private const val MAX_MANIFEST = 64 * 1024
+        private const val MAX_SIG = 128
         /** Hard ceiling on a mirrored APK. */
         const val MAX_APK = 500L * 1024 * 1024
     }
