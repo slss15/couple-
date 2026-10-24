@@ -20,6 +20,8 @@ import javax.inject.Inject
 
 data class PairingUiState(
     val myCode: PairCode? = null,
+    /** Local-clock deadline of [myCode] (see [pairCodeDeadline]); 0 when there is no code. */
+    val expiresAtLocal: Long = 0,
     val secondsLeft: Long = 0,
     val generating: Boolean = false,
     val input: String = "",
@@ -45,8 +47,9 @@ class PairingViewModel @Inject constructor(
         viewModelScope.launch {
             when (val r = repo.createCode()) {
                 is ApiResult.Ok -> {
-                    _state.update { it.copy(generating = false, myCode = r.value) }
-                    startTicker(r.value)
+                    val deadline = pairCodeDeadline(r.value.expiresAt, System.currentTimeMillis())
+                    _state.update { it.copy(generating = false, myCode = r.value, expiresAtLocal = deadline) }
+                    startTicker(deadline)
                 }
                 is ApiResult.Err -> _state.update { it.copy(generating = false, error = r.error.humanMessage()) }
             }
@@ -54,12 +57,12 @@ class PairingViewModel @Inject constructor(
     }
 
     /** 倒计时 + 每 3 秒查询一次 GET /couple（对方输入成功后这里会变成已配对）。 */
-    private fun startTicker(code: PairCode) {
+    private fun startTicker(deadlineLocal: Long) {
         ticker?.cancel()
         ticker = viewModelScope.launch {
             var tick = 0
             while (isActive) {
-                val left = ((code.expiresAt - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
+                val left = ((deadlineLocal - System.currentTimeMillis() + 999) / 1000).coerceAtLeast(0)
                 _state.update { it.copy(secondsLeft = left) }
                 if (left <= 0) break
                 if (tick % 3 == 0 && repo.pollPaired()) {
@@ -92,3 +95,16 @@ class PairingViewModel @Inject constructor(
 }
 
 fun formatCountdown(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
+
+/** contract: a pairing code lives 10 minutes. */
+const val PAIR_CODE_LIFETIME_MILLIS = 10 * 60_000L
+
+/**
+ * Deadline of a pairing code on this phone's clock. expiresAt is on the server's clock; if the two clocks disagree so
+ * much that the code would look already expired or valid for longer than its 10-minute lifetime, fall back to
+ * "received now + 10 minutes" (the code was just issued).
+ */
+fun pairCodeDeadline(expiresAtServer: Long, receivedAtLocal: Long, lifetimeMillis: Long = PAIR_CODE_LIFETIME_MILLIS): Long {
+    val delta = expiresAtServer - receivedAtLocal
+    return if (delta in 1..lifetimeMillis) expiresAtServer else receivedAtLocal + lifetimeMillis
+}

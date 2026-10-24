@@ -60,7 +60,7 @@ fun BootstrapScreen(
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var scanSession by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(initialUri) { if (!initialUri.isNullOrBlank()) vm.applyUri(initialUri) }
+    LaunchedEffect(initialUri) { if (!initialUri.isNullOrBlank()) vm.inspectUri(initialUri) }
     LaunchedEffect(state) { if (state is BootstrapUiState.Success) onDone() }
 
     Column(
@@ -74,6 +74,11 @@ fun BootstrapScreen(
 
         StatusArea(state)
 
+        (state as? BootstrapUiState.Confirm)?.let { c ->
+            BootstrapConfirmCard(c.preview, onConfirm = vm::confirm, onCancel = { vm.cancelConfirm(); scanSession++ })
+            return@Column
+        }
+
         TabRow(selectedTabIndex = tab, containerColor = t.colors.background, contentColor = t.colors.primary) {
             Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text(stringResource(R.string.bootstrap_tab_scan)) })
             Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.bootstrap_tab_manual)) })
@@ -82,13 +87,13 @@ fun BootstrapScreen(
             ScanTab(
                 active = !vm.busy,
                 sessionKey = scanSession,
-                onResult = { vm.applyUri(it) },
+                onResult = { vm.inspectUri(it) },
             )
             if (state is BootstrapUiState.Failed || state is BootstrapUiState.RolledBack) {
                 SecondaryButton(stringResource(R.string.retry), onClick = { vm.reset(); scanSession++ })
             }
         } else {
-            ManualTab(busy = vm.busy, onUri = vm::applyUri, onManual = vm::applyManual)
+            ManualTab(busy = vm.busy, onUri = vm::inspectUri, onManual = vm::inspectManual)
         }
     }
 }
@@ -96,7 +101,8 @@ fun BootstrapScreen(
 @Composable
 private fun StatusArea(state: BootstrapUiState) {
     when (state) {
-        BootstrapUiState.Idle -> Unit
+        BootstrapUiState.Idle, is BootstrapUiState.Confirm -> Unit
+        BootstrapUiState.Inspecting -> StatusBanner(stringResource(R.string.bootstrap_inspecting), BannerKind.Info)
         BootstrapUiState.Verifying -> StatusBanner(stringResource(R.string.bootstrap_verifying), BannerKind.Info)
         is BootstrapUiState.HealthChecking -> StatusBanner(
             stringResource(R.string.bootstrap_checking, state.secondsLeft) + (state.lastError?.let { "\n$it" } ?: ""),

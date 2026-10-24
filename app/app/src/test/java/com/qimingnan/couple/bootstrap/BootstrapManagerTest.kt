@@ -30,6 +30,9 @@ class BootstrapManagerTest {
         sleeper = { kotlinx.coroutines.delay(it) },
     )
 
+    /** What the confirm page does: preview, then apply with the user's explicit confirmation. */
+    private suspend fun BootstrapManager.applyConfirmed(uri: String) = applyUri(uri, inspectUri(uri).confirmation(acceptChange = true))
+
     @Test fun firstScanPinsKeyAndCommits() = runTest {
         val store = FakeStore()
         val probe = FakeProbe(signer.pubRaw).apply { health[A] = mutableListOf(HealthResult.Ok("1.0", 1)) }
@@ -64,7 +67,7 @@ class BootstrapManagerTest {
         val m = manager(store, probe)
         m.applyUri(signer.uri(A, "wss://a/mqtt", 1))
         val start = currentTime
-        val out = m.applyUri(signer.uri(B, "wss://b/mqtt", 2))
+        val out = m.applyConfirmed(signer.uri(B, "wss://b/mqtt", 2))
         assertTrue(out is ApplyOutcome.RolledBack)
         assertEquals(A, (out as ApplyOutcome.RolledBack).restored?.baseUrl)
         assertEquals(A, store.value.current?.baseUrl)
@@ -104,7 +107,7 @@ class BootstrapManagerTest {
         val m = manager(store, probe)
         m.applyUri(signer.uri(A, "wss://a/mqtt", 1))
         val start = currentTime
-        val out = m.applyUri(signer.uri(B, "wss://b/mqtt", 2))
+        val out = m.applyConfirmed(signer.uri(B, "wss://b/mqtt", 2))
         assertTrue(out is ApplyOutcome.RolledBack)
         assertEquals(0L, currentTime - start)
     }
@@ -116,7 +119,7 @@ class BootstrapManagerTest {
         }
         val m = manager(store, probe)
         m.applyUri(signer.uri(A, "wss://a/mqtt", 5))
-        val out = m.applyUri(signer.uri(B, "wss://b/mqtt", 4))
+        val out = m.applyConfirmed(signer.uri(B, "wss://b/mqtt", 4))
         assertTrue(out is ApplyOutcome.Rejected && out.error is BootstrapError.Downgrade)
     }
 

@@ -22,6 +22,7 @@
     <string name="bootstrap_apply_manual">应用调试配置</string>
     <string name="bootstrap_checking">正在检查服务器连通性… %1$d 秒</string>
     <string name="bootstrap_verifying">正在校验签名…</string>
+    <string name="bootstrap_inspecting">正在读取配置并校验签名…</string>
     <string name="bootstrap_success">配置已生效</string>
     <string name="bootstrap_rolled_back">服务器 30 秒内不可达，已回滚到上一份配置</string>
     <string name="bootstrap_failed">配置失败：%1$s</string>
@@ -42,6 +43,7 @@
     <string name="pair_regenerate">重新生成</string>
     <string name="pair_expires_in">%1$s 后过期</string>
     <string name="pair_expired">已过期</string>
+    <string name="pair_expires_at">有效至 %1$s（10 分钟内有效，仅可使用一次）</string>
     <string name="pair_share_hint">把这 6 位数字告诉 TA，在 TA 的手机上输入</string>
     <string name="pair_enter_code">输入 TA 的配对码</string>
     <string name="pair_join">配对</string>
