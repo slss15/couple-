@@ -18,6 +18,8 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+private val SERVER_VERSION_RE = Regex("^[0-9A-Za-z][0-9A-Za-z._+-]*$")
+
 class AuthTest {
 
     @Test
@@ -27,7 +29,9 @@ class AuthTest {
         val j = res.json()
         assertEquals("ok", j["status"]!!.jsonPrimitive.content)
         assertEquals(1, j["protocolVersion"]!!.jsonPrimitive.int)
-        assertEquals("0.1.0", j["version"]!!.jsonPrimitive.content)
+        // Build version (0.1.0 locally; CI packages pass -PappVersion=X.Y.Z / edge-<sha>).
+        assertEquals(com.qimingnan.couple.backend.health.SERVER_VERSION, j["version"]!!.jsonPrimitive.content)
+        kotlin.test.assertTrue(SERVER_VERSION_RE.matches(j["version"]!!.jsonPrimitive.content))
     }
 
     @Test

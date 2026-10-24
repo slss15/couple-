@@ -1,0 +1,26 @@
+<!--
+  WinSW 2.x config of the couple-updater service, rendered by install.ps1 into @INSTALL_DIR@\services\.
+  The updater runs from its own copy (@INSTALL_DIR@\updater\: jre + lib), so swapping backend releases never touches
+  files it has open. It is NOT self-updating: re-run install.ps1 from a newer zip to update it (see SETUP-windows.md).
+-->
+<service>
+  <id>couple-updater</id>
+  <name>Couple Updater</name>
+  <description>Couple push-to-deploy webhook (127.0.0.1:9000) and release poller</description>
+  <executable>@INSTALL_DIR@\updater\jre\bin\java.exe</executable>
+  <arguments>-Xms16m -Xmx96m -XX:+UseSerialGC -Dfile.encoding=UTF-8 -cp "@INSTALL_DIR@\updater\lib\*" com.qimingnan.couple.updater.MainKt serve</arguments>
+  <workingdirectory>@INSTALL_DIR@</workingdirectory>
+  <env name="COUPLE_HOME" value="@INSTALL_DIR@"/>
+  <env name="COUPLE_ENV_FILE" value="@INSTALL_DIR@\config\couple.env"/>
+  <logpath>@INSTALL_DIR@\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>5120</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>15 sec</stoptimeout>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart/>
+</service>

@@ -3,6 +3,7 @@ package com.qimingnan.couple.backend
 import com.qimingnan.couple.backend.common.AppJson
 import com.qimingnan.couple.backend.common.TokenPair
 import com.qimingnan.couple.backend.config.AppConfig
+import com.qimingnan.couple.backend.config.MqttBrokerMode
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
@@ -39,6 +40,13 @@ fun testConfig(
     adminUsername: String? = null,
     bootstrapPrivateKey: String? = null,
     mqttHookSecret: String? = null,
+    releasesDir: String = java.nio.file.Files.createTempDirectory("releases").toString(),
+    githubApiBase: String = "http://127.0.0.1:9",
+    // Most tests do not need a broker; the embedded broker tests opt in with a free port.
+    brokerMode: MqttBrokerMode = MqttBrokerMode.EXTERNAL,
+    mqttWsPort: Int = 8083,
+    mqttDataDir: String? = null,
+    adminStaticDir: String? = null,
 ) = AppConfig(
     dbUrl = "jdbc:h2:mem:$dbName;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
     dbUser = "sa",
@@ -51,6 +59,16 @@ fun testConfig(
     authRateLimitPerMinute = 10_000,
     dbMaxPoolSize = 4,
     clock = clock::now,
+    releasesDir = releasesDir,
+    githubApiBase = githubApiBase,
+    releasePollEnabled = false,
+    releaseRetryBaseMs = 10,
+    releaseRetryAttempts = 2,
+    mqttBrokerMode = brokerMode,
+    mqttWsPort = mqttWsPort,
+    mqttDataDir = mqttDataDir,
+    adminStaticDir = adminStaticDir,
+    adminApiBase = "https://api.example.test",
 )
 
 fun appTest(config: AppConfig = testConfig(), block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {

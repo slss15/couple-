@@ -5,8 +5,14 @@ import com.qimingnan.couple.backend.common.AppJson
 import com.qimingnan.couple.backend.common.Couple
 import com.qimingnan.couple.backend.common.TokenPair
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.HttpClient
 import io.ktor.client.request.get
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.content.TextContent
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import kotlin.test.Test
@@ -134,5 +140,115 @@ class PairingTest {
             assertEquals(400, res.status.value)
             assertEquals("CODE_EXPIRED", res.errorCode())
         }
+    }
+
+    private suspend fun HttpClient.postRaw(path: String, body: String, token: String): HttpResponse = post(path) {
+        bearerAuth(token)
+        setBody(TextContent(body, ContentType.Application.Json))
+    }
+
+    private data class Pair3(val a: TokenPair, val b: TokenPair, val c: TokenPair)
+
+    /** alice + bob paired, carol unpaired outsider. */
+    private suspend fun HttpClient.pairedTrio(): Pair3 {
+        val a = register("alice")
+        val b = register("bob")
+        val c = register("carol")
+        val code = postJson("/api/v1/pair/code", token = a.accessToken).json()["code"]!!.jsonPrimitive.content
+        assertEquals(200, postJson("/api/v1/pair/join", obj("code" to code), b.accessToken).status.value)
+        return Pair3(a, b, c)
+    }
+
+    private suspend fun HttpClient.assertPaired(token: String, paired: Boolean) {
+        val res = get("/api/v1/couple") { bearerAuth(token) }
+        assertEquals(if (paired) 200 else 404, res.status.value, res.bodyAsText())
+    }
+
+    @Test
+    fun confirmWithoutRequestIdEmptyObject() = appTest { client ->
+        val (a, b) = client.pairedTrio()
+        assertEquals(200, client.postJson("/api/v1/couple/unpair/request", token = a.accessToken).status.value)
+        val ok = client.postJson("/api/v1/couple/unpair/confirm", obj(), b.accessToken)
+        assertEquals(204, ok.status.value, ok.bodyAsText())
+        client.assertPaired(a.accessToken, false)
+        client.assertPaired(b.accessToken, false)
+    }
+
+    @Test
+    fun confirmWithNullRequestId() = appTest { client ->
+        val (a, b) = client.pairedTrio()
+        assertEquals(200, client.postJson("/api/v1/couple/unpair/request", token = a.accessToken).status.value)
+        val ok = client.postRaw("/api/v1/couple/unpair/confirm", """{"requestId":null}""", b.accessToken)
+        assertEquals(204, ok.status.value, ok.bodyAsText())
+        client.assertPaired(a.accessToken, false)
+    }
+
+    @Test
+    fun confirmWithEmptyBody() = appTest { client ->
+        val (a, b) = client.pairedTrio()
+        assertEquals(200, client.postJson("/api/v1/couple/unpair/request", token = a.accessToken).status.value)
+        val ok = client.postRaw("/api/v1/couple/unpair/confirm", "", b.accessToken)
+        assertEquals(204, ok.status.value, ok.bodyAsText())
+        client.assertPaired(b.accessToken, false)
+    }
+
+    @Test
+    fun requesterConfirmWithoutIdIsNotFound() = appTest { client ->
+        val (a, b) = client.pairedTrio()
+        assertEquals(200, client.postJson("/api/v1/couple/unpair/request", token = a.accessToken).status.value)
+        val res = client.postJson("/api/v1/couple/unpair/confirm", obj(), a.accessToken)
+        assertEquals(404, res.status.value)
+        assertEquals("UNPAIR_REQUEST_NOT_FOUND", res.errorCode())
+        client.assertPaired(b.accessToken, true)
+    }
+
+    @Test
+    fun confirmWithoutIdAndNoOpenRequestIsNotFound() = appTest { client ->
+        val (a, b) = client.pairedTrio()
+        val res = client.postJson("/api/v1/couple/unpair/confirm", obj(), b.accessToken)
+        assertEquals(404, res.status.value)
+        assertEquals("UNPAIR_REQUEST_NOT_FOUND", res.errorCode())
+        client.assertPaired(a.accessToken, true)
+    }
+
+    @Test
+    fun confirmWithoutIdExpiredRequestIsNotFound() {
+        val clock = TestClock()
+        val config = testConfig(clock = clock)
+        appTest(config) { client ->
+            val (a, b) = client.pairedTrio()
+            assertEquals(200, client.postJson("/api/v1/couple/unpair/request", token = a.accessToken).status.value)
+            clock.advance(config.unpairRequestTtlMs + 1)
+            // Access tokens are long expired by now; refresh bob at the new clock.
+            val r = client.postJson("/api/v1/auth/refresh", obj("refreshToken" to b.refreshToken, "deviceId" to "dev-bob"))
+            assertEquals(200, r.status.value, r.bodyAsText())
+            val bob = AppJson.decodeFromString(TokenPair.serializer(), r.bodyAsText())
+            val res = client.postJson("/api/v1/couple/unpair/confirm", obj(), bob.accessToken)
+            assertEquals(404, res.status.value)
+            assertEquals("UNPAIR_REQUEST_NOT_FOUND", res.errorCode())
+            client.assertPaired(bob.accessToken, true)
+        }
+    }
+
+    @Test
+    fun outsiderConfirmWithoutIdIsNotFound() = appTest { client ->
+        val (a, b, c) = client.pairedTrio()
+        assertEquals(200, client.postJson("/api/v1/couple/unpair/request", token = a.accessToken).status.value)
+        val res = client.postJson("/api/v1/couple/unpair/confirm", obj(), c.accessToken)
+        assertEquals(404, res.status.value)
+        assertEquals("UNPAIR_REQUEST_NOT_FOUND", res.errorCode())
+        client.assertPaired(b.accessToken, true)
+    }
+
+    @Test
+    fun confirmWithMalformedJsonIsBadRequest() = appTest { client ->
+        val (a, b) = client.pairedTrio()
+        assertEquals(200, client.postJson("/api/v1/couple/unpair/request", token = a.accessToken).status.value)
+        for (body in listOf("{not json", """{"requestId":}""", """{"requestId":[1]}""")) {
+            val res = client.postRaw("/api/v1/couple/unpair/confirm", body, b.accessToken)
+            assertEquals(400, res.status.value, "body=$body -> ${res.bodyAsText()}")
+            assertEquals("BAD_REQUEST", res.errorCode())
+        }
+        client.assertPaired(b.accessToken, true)
     }
 }

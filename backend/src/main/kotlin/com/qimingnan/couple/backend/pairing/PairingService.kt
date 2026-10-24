@@ -19,6 +19,7 @@ import com.qimingnan.couple.backend.db.PairCodes
 import com.qimingnan.couple.backend.db.UnpairRequests
 import com.qimingnan.couple.backend.db.Users
 import kotlinx.serialization.Serializable
+import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.or
@@ -147,12 +148,26 @@ class PairingService(
 
     suspend fun confirmUnpair(userId: String, requestId: String?) {
         try {
-            val rid = requestId?.trim()?.takeIf { it.isNotEmpty() } ?: throw badRequest("VALIDATION_ERROR", "requestId is required")
+            val explicitId = requestId?.trim()?.takeIf { it.isNotEmpty() }
             val now = config.clock()
-            val coupleId = db.tx {
+            val (coupleId, rid) = db.tx {
                 val me = UserRepo.byIdForUpdate(userId) ?: throw unauthorized()
-                val req = UnpairRequests.selectAll().where { UnpairRequests.id eq rid }.forUpdate().firstOrNull()
-                    ?: throw notFound("UNPAIR_REQUEST_NOT_FOUND", "Unpair request not found")
+                val req = if (explicitId != null) {
+                    UnpairRequests.selectAll().where { UnpairRequests.id eq explicitId }.forUpdate().firstOrNull()
+                        ?: throw notFound("UNPAIR_REQUEST_NOT_FOUND", "Unpair request not found")
+                } else {
+                    // No id: the newest open, unexpired request made by the OTHER member of my couple.
+                    val myCid = me.user.coupleId ?: throw notFound("UNPAIR_REQUEST_NOT_FOUND", "Unpair request not found")
+                    UnpairRequests.selectAll().where {
+                        (UnpairRequests.coupleId eq myCid) and
+                            (UnpairRequests.requestedBy neq userId) and
+                            UnpairRequests.confirmedAt.isNull() and
+                            UnpairRequests.cancelledAt.isNull() and
+                            (UnpairRequests.expiresAt greater now)
+                    }.orderBy(UnpairRequests.createdAt, SortOrder.DESC).limit(1).forUpdate().firstOrNull()
+                        ?: throw notFound("UNPAIR_REQUEST_NOT_FOUND", "Unpair request not found")
+                }
+                val rid = req[UnpairRequests.id]
                 val cid = req[UnpairRequests.coupleId]
                 if (me.user.coupleId != cid) throw notFound("UNPAIR_REQUEST_NOT_FOUND", "Unpair request not found")
                 if (req[UnpairRequests.requestedBy] == userId) {
@@ -169,7 +184,7 @@ class PairingService(
                 }
                 Couples.update({ Couples.id eq cid }) { it[deletedAt] = now } // soft delete
                 Users.update({ Users.coupleId eq cid }) { it[Users.coupleId] = null }
-                cid
+                cid to rid
             }
             audit.log(userId, AuditActions.UNPAIR_CONFIRM, coupleId, mapOf("requestId" to rid))
         } catch (e: ApiException) {

@@ -1,0 +1,195 @@
+# Couple production stack for Linux + Docker (optional path; the primary deployment is Windows-native, see
+# deploy/windows/SETUP-windows.md). Pre-built images from GHCR + push/poll auto-updater.
+# Copy this deploy/ directory to the server, create .env from .env.example, put the tunnel credentials in
+# ./cloudflared/credentials.json (see SETUP.md), then:
+#   docker compose up -d                                        # default: Cloudflare Tunnel (outbound only, NAT4-safe)
+#   docker compose --profile aaaa up -d --scale cloudflared=0   # optional: verified public IPv6 + inbound 443 only
+#   docker compose --profile tunnel-token up -d --scale cloudflared=0   # alternative: dashboard (token) tunnel
+# Image tag: COUPLE_TAG (default edge = every push to main; "stable" = tagged releases; or pin X.Y.Z).
+# NOTE: the updater recreates backend/admin with `docker compose up --no-deps` from /compose inside its
+# container, so keep bind mounts OFF those two services (named volumes are fine) and keep name: couple.
+name: couple
+
+x-backend-image: &backend-image ghcr.io/slss15/couple-backend:${COUPLE_TAG:-edge}
+x-admin-image: &admin-image ghcr.io/slss15/couple-admin:${COUPLE_TAG:-edge}
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set in .env}
+      MYSQL_DATABASE: couple
+      MYSQL_USER: ${DB_USER:-couple}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set in .env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [internal]
+
+  backend:
+    image: *backend-image
+    pull_policy: missing        # the updater pulls; `docker compose pull` for manual updates
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/couple?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: ${DB_USER:-couple}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?set in .env}
+      REGISTRATION_CODE: ${REGISTRATION_CODE:-}
+      BOOTSTRAP_PRIVATE_KEY: ${BOOTSTRAP_PRIVATE_KEY:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      # EMQX calls the backend's auth/ACL hooks; the backend refuses to start without the shared secret.
+      MQTT_BROKER_MODE: external
+      MQTT_HOOK_SECRET: ${MQTT_HOOK_SECRET:?set in .env (openssl rand -hex 32)}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-30}
+      RELEASES_DIR: /data/releases
+      # optional outbound proxy for the GitHub release mirror (api.github.com / objects.githubusercontent.com)
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-mysql,emqx,admin,updater,localhost,127.0.0.1}
+      PORT: "8080"
+    volumes:
+      - releases-data:/data/releases   # named volume only (the updater recreates this service)
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [internal]
+
+  admin:
+    image: *admin-image
+    pull_policy: missing
+    restart: unless-stopped
+    environment:
+      COUPLE_API_BASE: ${ADMIN_API_BASE:-}   # empty = same origin (/api proxied to backend)
+      BACKEND_UPSTREAM: backend:8080
+    ports:
+      - "127.0.0.1:8081:8080"
+    networks: [internal]
+
+  emqx:
+    image: emqx/emqx:5.8
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?set in .env}
+      EMQX_AUTHENTICATION: >-
+        [{mechanism = password_based, backend = http, enable = true, method = post,
+          url = "http://backend:8080/api/v1/internal/mqtt/auth",
+          body = {username = "$${username}", password = "$${password}", clientid = "$${clientid}"},
+          headers = {"content-type" = "application/json", "x-internal-token" = "${MQTT_HOOK_SECRET:?set in .env}"},
+          request_timeout = "5s"}]
+      EMQX_AUTHORIZATION__NO_MATCH: deny
+      EMQX_AUTHORIZATION__CACHE__TTL: 30s
+      EMQX_AUTHORIZATION__SOURCES: >-
+        [{type = http, enable = true, method = post,
+          url = "http://backend:8080/api/v1/internal/mqtt/acl",
+          body = {username = "$${username}", topic = "$${topic}", action = "$${action}", clientid = "$${clientid}"},
+          headers = {"content-type" = "application/json", "x-internal-token" = "${MQTT_HOOK_SECRET:?set in .env}"},
+          request_timeout = "5s"}]
+    volumes:
+      - emqx-data:/opt/emqx/data
+    ports:
+      - "127.0.0.1:18083:18083"
+    networks: [internal]
+
+  # Push-to-deploy webhook (/_deploy/* via the ingress) + periodic digest poller with health-check rollback.
+  updater:
+    build: ./updater
+    image: couple-updater:local
+    restart: unless-stopped
+    environment:
+      UPDATE_ENABLED: ${UPDATE_ENABLED:-true}
+      UPDATE_CHANNEL: ${UPDATE_CHANNEL:-${COUPLE_TAG:-edge}}
+      UPDATE_INTERVAL: ${UPDATE_INTERVAL:-300}
+      UPDATE_WINDOW: ${UPDATE_WINDOW:-}
+      HEALTH_TIMEOUT: ${HEALTH_TIMEOUT:-90}
+      GHCR_USER: ${GHCR_USER:-}
+      GHCR_TOKEN: ${GHCR_TOKEN:-}
+      DEPLOY_HOOK_SECRET: ${DEPLOY_HOOK_SECRET:-}
+      MQTT_HOOK_SECRET: ${MQTT_HOOK_SECRET:?set in .env}
+      COMPOSE_PROJECT_NAME: couple
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/compose:ro
+      - updater-state:/state
+    # No published port: reachable only on the internal network, i.e. through Caddy / cloudflared.
+    networks: [internal]
+
+  # ---- Default ingress: Cloudflare Tunnel, locally managed (outbound only; works behind NAT4) ----
+  # Routing lives in git (./cloudflared/config.yml). One-time: `cloudflared tunnel login`,
+  # `cloudflared tunnel create couple` -> copy <UUID>.json to ./cloudflared/credentials.json,
+  # `cloudflared tunnel route dns couple <PUBLIC_HOSTNAME>`; set CLOUDFLARE_TUNNEL_ID=<UUID> in .env.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.3   # pinned; bump deliberately (never latest)
+    restart: unless-stopped
+    depends_on: [backend, emqx, admin, updater]
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run", "${CLOUDFLARE_TUNNEL_ID:-}"]
+    environment:
+      TUNNEL_CRED_FILE: /etc/cloudflared/credentials.json
+      # QUIC (UDP 7844) is often throttled/blocked on NAT4 / CN ISPs; http2 uses outbound TCP 7844.
+      TUNNEL_TRANSPORT_PROTOCOL: ${TUNNEL_TRANSPORT_PROTOCOL:-http2}
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    networks: [internal]
+
+  # ---- Optional: Cloudflare-proxied AAAA record (only with verified public IPv6 + inbound 443) ----
+  caddy:
+    image: caddy:2
+    profiles: ["aaaa"]
+    restart: unless-stopped
+    depends_on: [backend, emqx, admin, updater]
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-}
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro   # Cloudflare Origin CA: origin.pem / origin.key (never commit)
+      - caddy-data:/data
+    networks: [internal]
+
+  ddns:
+    image: favonia/cloudflare-ddns:1
+    profiles: ["aaaa"]
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    cap_drop: [all]
+    security_opt: [no-new-privileges:true]
+    environment:
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      DOMAINS: ${PUBLIC_HOSTNAME:-}
+      PROXIED: "true"
+      IP4_PROVIDER: none
+      IP6_PROVIDER: cloudflare.trace
+
+  # ---- Alternative: remotely-managed (token) tunnel; routes must then be typed in the dashboard ----
+  cloudflared-token:
+    image: cloudflare/cloudflared:2026.10.3
+    profiles: ["tunnel-token"]
+    restart: unless-stopped
+    depends_on: [backend, emqx, admin, updater]
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    environment:
+      TUNNEL_TRANSPORT_PROTOCOL: ${TUNNEL_TRANSPORT_PROTOCOL:-http2}
+    networks: [internal]
+
+networks:
+  internal: {}
+
+volumes:
+  mysql-data: {}
+  releases-data: {}
+  emqx-data: {}
+  caddy-data: {}
+  updater-state: {}

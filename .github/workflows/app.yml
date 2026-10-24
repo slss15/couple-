@@ -12,6 +12,9 @@ on:
       - ".github/workflows/app.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: app-${{ github.ref }}
   cancel-in-progress: true

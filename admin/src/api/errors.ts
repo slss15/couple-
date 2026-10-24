@@ -20,6 +20,8 @@ const ZH: Record<string, string> = {
   DEVICE_MISMATCH: '设备不匹配，请重新登录',
   CONFIG_INCOMPLETE: '请先在“服务器配置”中填写后端地址和 MQTT 地址并保存',
   AUTH_RATE_LIMITED: '尝试次数过多，请稍后再试',
+  RELEASE_NOT_FOUND: '版本不存在',
+  RELEASE_FILE_MISSING: '服务器上的 APK 文件缺失，请先重新同步',
 }
 
 export class ApiError extends Error {

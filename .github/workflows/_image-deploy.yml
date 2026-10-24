@@ -1,0 +1,87 @@
+name: image-deploy (reusable)
+
+# Called by deploy-backend.yml only (workflow_call); builds one component multi-arch, pushes
+# :sha-<short> and :edge, then (inputs.deploy, i.e. vars.DEPLOY_TARGET=docker) triggers the signed deploy webhook
+# and waits for the result.
+on:
+  workflow_call:
+    inputs:
+      component:
+        required: true
+        type: string
+      deploy:
+        description: "Call the deploy webhook (only when the server runs the Docker stack, vars.DEPLOY_TARGET=docker)"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      DEPLOY_HOOK_URL:
+        required: false
+      DEPLOY_HOOK_SECRET:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/couple
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: deploy-${{ inputs.component }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: docker-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ inputs.component }}
+          tags: |
+            type=raw,value=sha-${{ steps.sha.outputs.short }}
+            type=raw,value=edge
+          labels: |
+            org.opencontainers.image.version=edge-${{ steps.sha.outputs.short }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.component }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.docker-meta.outputs.tags }}
+          labels: ${{ steps.docker-meta.outputs.labels }}
+          build-args: |
+            VERSION=edge-${{ steps.sha.outputs.short }}
+            REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=${{ inputs.component }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.component }}
+      - name: Deploy to server (signed webhook) and wait for result
+        if: inputs.deploy
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+          DEPLOY_HOOK_SECRET: ${{ secrets.DEPLOY_HOOK_SECRET }}
+          SERVICE: ${{ inputs.component }}
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ inputs.component }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ] || [ -z "$DEPLOY_HOOK_SECRET" ]; then
+            echo "::warning::DEPLOY_HOOK_URL / DEPLOY_HOOK_SECRET not set; image pushed as :edge, the server poller will pick it up within UPDATE_INTERVAL."
+            exit 0
+          fi
+          bash deploy/scripts/deploy-hook.sh docker "$SERVICE" "$IMAGE" "$DIGEST" "$GITHUB_SHA"

@@ -8,6 +8,7 @@ import com.qimingnan.couple.data.couple.CoupleRepository
 import com.qimingnan.couple.data.couple.CoupleState
 import com.qimingnan.couple.data.mqtt.MqttManager
 import com.qimingnan.couple.data.mqtt.MqttTarget
+import com.qimingnan.couple.data.update.UpdateRepository
 import com.qimingnan.couple.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
@@ -20,6 +21,7 @@ import javax.inject.Singleton
  * 进程级编排：
  * - 启动时补做未完成的配置试用（防止上次在 30 秒窗口内被杀）
  * - 根据 配置 + 登录 + 配对 状态决定 MQTT 是否连接
+ * - 登录后检查 App 更新（最多每 6 小时一次）
  */
 @Singleton
 class AppCoordinator @Inject constructor(
@@ -28,6 +30,7 @@ class AppCoordinator @Inject constructor(
     private val session: SessionManager,
     private val couple: CoupleRepository,
     private val mqtt: MqttManager,
+    private val updates: UpdateRepository,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     fun start() {
@@ -59,6 +62,12 @@ class AppCoordinator @Inject constructor(
         scope.launch {
             // 退出登录 / 会话失效 → 清空配对状态，回到未知
             session.state.collect { if (it is SessionState.LoggedOut) couple.reset() }
+        }
+        scope.launch {
+            // App update check (/app/update needs a session): on start / login, at most once per 6 h.
+            combine(bootstrapStore.state, session.state) { b, s ->
+                b?.pendingSince == null && b?.current != null && s is SessionState.LoggedIn
+            }.distinctUntilChanged().collect { ready -> if (ready) updates.checkIfDue() }
         }
     }
 }

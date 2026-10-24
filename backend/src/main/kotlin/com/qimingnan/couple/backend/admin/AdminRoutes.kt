@@ -20,17 +20,20 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 
+/** Returns the caller's userId if they are an admin (checked against the DB, not just the JWT claim); 403 otherwise. */
+suspend fun ApplicationCall.requireAdmin(db: Db, audit: AuditService): String {
+    val userId = authUser().userId
+    val role = db.tx { UserRepo.byId(userId)?.role }
+    if (role != Roles.ADMIN) {
+        audit.log(userId, AuditActions.ADMIN_DENIED, "${request.httpMethod.value} ${request.path()}")
+        throw forbidden("FORBIDDEN", "Admin role required")
+    }
+    return userId
+}
+
 /** Must be mounted inside authenticate(JWT_AUTH). Role is re-checked against the DB, not just the JWT claim. */
 fun Route.adminRoutes(db: Db, audit: AuditService, configService: AdminConfigService, bootstrap: BootstrapService) {
-    suspend fun ApplicationCall.requireAdmin(): String {
-        val userId = authUser().userId
-        val role = db.tx { UserRepo.byId(userId)?.role }
-        if (role != Roles.ADMIN) {
-            audit.log(userId, AuditActions.ADMIN_DENIED, "${request.httpMethod.value} ${request.path()}")
-            throw forbidden("FORBIDDEN", "Admin role required")
-        }
-        return userId
-    }
+    suspend fun ApplicationCall.requireAdmin(): String = requireAdmin(db, audit)
 
     route("/admin") {
         get("/config") {

@@ -30,6 +30,8 @@ cd app
 # APK：app/build/outputs/apk/debug/app-debug.apk
 ```
 
+发版：打 `vX.Y.Z` tag 后由 `../.github/workflows/release.yml` 构建签名 APK（versionCode = X*10000+Y*100+Z）并发布 GitHub Release，详见 [`../deploy/README.md`](../deploy/README.md)。本地 `assembleRelease` 默认 0.1.0，未设置 `SIGNING_*` 环境变量时产出未签名 APK。
+
 CI：`../.github/workflows/app.yml`，只在 `app/**` 变更时运行 `assembleDebug + testDebugUnitTest`，产物上传 APK 和测试报告。
 
 ## 首次启动流程

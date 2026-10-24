@@ -1,0 +1,24 @@
+<!--
+  WinSW 2.x config of the couple-cloudflared service (locally-managed tunnel), rendered by install.ps1.
+  Ingress rules live in @INSTALL_DIR@\config\cloudflared\config.yml (from deploy/windows/cloudflared/config.yml.in),
+  so routing is reproducible from git instead of hand-typed in the Zero Trust dashboard.
+  protocol is forced to http2 in config.yml (QUIC/UDP 7844 is often throttled behind NAT4 / CN ISPs).
+-->
+<service>
+  <id>couple-cloudflared</id>
+  <name>Couple Cloudflare Tunnel</name>
+  <description>cloudflared @CLOUDFLARED_VERSION@ (outbound-only ingress for Couple)</description>
+  <executable>@INSTALL_DIR@\cloudflared\cloudflared.exe</executable>
+  <arguments>tunnel --no-autoupdate --config "@INSTALL_DIR@\config\cloudflared\config.yml" run</arguments>
+  <workingdirectory>@INSTALL_DIR@</workingdirectory>
+  <logpath>@INSTALL_DIR@\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>15 sec</stoptimeout>
+  <startmode>Automatic</startmode>
+</service>

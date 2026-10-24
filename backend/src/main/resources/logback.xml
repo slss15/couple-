@@ -11,4 +11,8 @@
     <logger name="com.zaxxer.hikari" level="WARN"/>
     <logger name="Exposed" level="WARN"/>
     <logger name="io.netty" level="WARN"/>
+    <!-- Embedded MQTT broker: MQTTMessageLogger logs every packet at INFO. -->
+    <logger name="io.moquette" level="WARN"/>
+    <logger name="io.moquette.broker.Server" level="INFO"/>
+    <logger name="io.moquette.broker.MQTTConnection" level="INFO"/>
 </configuration>

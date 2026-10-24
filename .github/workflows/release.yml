@@ -1,0 +1,287 @@
+name: release
+
+# Tagged release: `git tag -a v0.2.0 -m "notes" && git push origin v0.2.0`
+#  - backend/admin images  -> ghcr.io/<owner>/couple-{backend,admin}:{X.Y.Z, X.Y, stable}
+#  - signed APK + release.json -> GitHub Release
+#  - Windows server package couple-server-windows-x64-X.Y.Z.zip + .sha256 -> same GitHub Release
+#    (Windows servers with UPDATE_CHANNEL=stable pick it up from releases/latest)
+# `stable` is only moved after every job (incl. APK signing and the Windows smoke test) has succeeded.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)release, e.g. v0.2.0"
+        required: true
+      minSupportedVersionCode:
+        description: "Optional minSupportedVersionCode (overrides the tag annotation)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/couple
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      major_minor: ${{ steps.v.outputs.major_minor }}
+      version_code: ${{ steps.v.outputs.version_code }}
+      min_supported: ${{ steps.v.outputs.min_supported }}
+      revision: ${{ steps.v.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - name: Parse version and tag annotation
+        id: v
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          MIN_INPUT: ${{ inputs.minSupportedVersionCode }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "::error::tag '$TAG' must be vX.Y.Z (no pre-release suffix)"; exit 1
+          fi
+          x=${BASH_REMATCH[1]} y=${BASH_REMATCH[2]} z=${BASH_REMATCH[3]}
+          if (( 10#$y > 99 || 10#$z > 99 )); then echo "::error::minor/patch must be <= 99"; exit 1; fi
+          # actions/checkout may turn annotated tags into lightweight ones; refetch the real tag object.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          notes=""
+          if [ "$(git cat-file -t "$TAG")" = tag ]; then
+            notes=$(git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG")
+          fi
+          min=$(printf '%s\n' "$notes" | sed -n 's/^minSupportedVersionCode:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' | tail -n1)
+          [ -n "$MIN_INPUT" ] && min=$MIN_INPUT
+          min=${min:-0}
+          [[ "$min" =~ ^[0-9]+$ ]] || { echo "::error::minSupportedVersionCode must be an integer"; exit 1; }
+          printf '%s\n' "$notes" | grep -v '^minSupportedVersionCode:' > release-notes.md || true
+          {
+            echo "tag=$TAG"
+            echo "version=$((10#$x)).$((10#$y)).$((10#$z))"
+            echo "major_minor=$((10#$x)).$((10#$y))"
+            echo "version_code=$((10#$x * 10000 + 10#$y * 100 + 10#$z))"
+            echo "min_supported=$min"
+            echo "revision=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 7
+
+  images:
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        component: [backend, admin]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.tag }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: docker-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.component }}
+          tags: |
+            type=raw,value=${{ needs.meta.outputs.version }}
+            type=raw,value=${{ needs.meta.outputs.major_minor }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.meta.outputs.revision }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.component }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.docker-meta.outputs.tags }}
+          labels: ${{ steps.docker-meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.meta.outputs.version }}
+            REVISION=${{ needs.meta.outputs.revision }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  app:
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: app
+    env:
+      SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+      COUPLE_VERSION_NAME: ${{ needs.meta.outputs.version }}
+    steps:
+      - name: Require signing secrets
+        working-directory: .
+        run: |
+          missing=""
+          for v in SIGNING_KEYSTORE_BASE64 SIGNING_STORE_PASSWORD SIGNING_KEY_ALIAS SIGNING_KEY_PASSWORD; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them under Settings -> Secrets and variables -> Actions (see deploy/README.md). Refusing to publish an unsigned/debug-signed APK."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.tag }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-35 build-tools;35.0.0 platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Decode keystore
+        run: |
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "SIGNING_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: Build signed release APK
+        run: ./gradlew --no-daemon -Pcouple.requireReleaseSigning=true :app:assembleRelease testReleaseUnitTest --stacktrace
+      - name: Verify signature and collect metadata
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          VERSION_CODE: ${{ needs.meta.outputs.version_code }}
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/release/app-release.apk
+          [ -f "$apk" ] || { echo "::error::signed APK not found (unsigned build?)"; ls -R app/build/outputs/apk; exit 1; }
+          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          aapt2="$ANDROID_HOME/build-tools/35.0.0/aapt2"
+          certs=$("$apksigner" verify --print-certs "$apk")
+          echo "$certs"
+          if echo "$certs" | grep -q 'CN=Android Debug'; then echo "::error::APK is debug-signed"; exit 1; fi
+          cert_sha=$(echo "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: \([0-9a-f]*\)$/\1/p' | head -n1)
+          [ ${#cert_sha} -eq 64 ] || { echo "::error::could not read signing cert SHA-256"; exit 1; }
+          badging=$("$aapt2" dump badging "$apk" | head -n1)
+          echo "$badging"
+          echo "$badging" | grep -q "versionCode='$VERSION_CODE'" || { echo "::error::versionCode mismatch"; exit 1; }
+          echo "$badging" | grep -q "versionName='$VERSION'" || { echo "::error::versionName mismatch"; exit 1; }
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp "$apk" "$GITHUB_WORKSPACE/out/couple-$VERSION.apk"
+          jq -n --arg sha "$(sha256sum "$apk" | cut -d' ' -f1)" --argjson size "$(stat -c %s "$apk")" \
+            --arg cert "$cert_sha" '{sha256:$sha,size:$size,signingCertSha256:$cert}' > "$GITHUB_WORKSPACE/out/apk-meta.json"
+          cat "$GITHUB_WORKSPACE/out/apk-meta.json"
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: out/
+          retention-days: 7
+
+  windows:
+    needs: meta
+    uses: ./.github/workflows/_windows-package.yml
+    permissions:
+      contents: read
+    with:
+      version: ${{ needs.meta.outputs.version }}
+      ref: ${{ needs.meta.outputs.tag }}
+
+  promote:
+    needs: [meta, images, app, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        component: [backend, admin]
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move stable tag
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.component }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: docker buildx imagetools create -t "$IMAGE:stable" "$IMAGE:$VERSION"
+
+  github-release:
+    needs: [meta, app, promote, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: out
+      - name: Assemble release.json and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          VERSION_CODE: ${{ needs.meta.outputs.version_code }}
+          MIN_SUPPORTED: ${{ needs.meta.outputs.min_supported }}
+        run: |
+          set -euo pipefail
+          cd out
+          jq -n \
+            --arg versionName "$VERSION" \
+            --argjson versionCode "$VERSION_CODE" \
+            --argjson minSupported "$MIN_SUPPORTED" \
+            --rawfile notes release-notes.md \
+            --argjson publishedAt "$(date +%s%3N)" \
+            --slurpfile apk apk-meta.json \
+            '{versionName:$versionName, versionCode:$versionCode, sha256:$apk[0].sha256, size:$apk[0].size,
+              signingCertSha256:$apk[0].signingCertSha256, minSupportedVersionCode:$minSupported,
+              notes:($notes|sub("\\s+$";"")), publishedAt:$publishedAt}' > release.json
+          cat release.json
+          win="couple-server-windows-x64-$VERSION.zip"
+          if [ ! -f "$win" ] || [ ! -f "$win.sha256" ]; then echo "::error::Windows package missing"; exit 1; fi
+          sha256sum -c "$win.sha256"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "couple-$VERSION.apk" release.json "$win" "$win.sha256" --clobber
+          else
+            gh release create "$TAG" "couple-$VERSION.apk" release.json "$win" "$win.sha256" --title "$TAG" --notes-file release-notes.md --verify-tag
+          fi

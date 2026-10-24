@@ -1,8 +1,8 @@
-# Couple backend stack: backend + MySQL 8.4 + EMQX 5 (HTTP auth/ACL → backend).
-# 入口二选一：
-#   docker compose --profile aaaa up -d     # Cloudflare 代理的 AAAA 记录 + Caddy（源站证书）
-#   docker compose --profile tunnel up -d   # Cloudflare Tunnel
-#   docker compose up -d                    # 仅内网（调试）
+# Couple 后端开发栈（从源码构建）：backend + MySQL 8.4 + EMQX 5（HTTP auth/ACL → backend，MQTT_BROKER_MODE=external）。
+# 生产请用 Windows 原生方案（deploy/windows/SETUP-windows.md）或 deploy/docker-compose.yml（Linux/Docker，可选）。
+#   docker compose up -d                    # 仅内网（调试，默认）
+#   docker compose --profile tunnel up -d   # Cloudflare Tunnel（推荐入口，本地管理配置见 ../deploy/cloudflared/config.yml）
+#   docker compose --profile aaaa up -d     # 可选：已确认有公网 IPv6 且能放行 443 入站时，Cloudflare 代理的 AAAA + Caddy
 name: couple
 
 services:
@@ -39,9 +39,17 @@ services:
       REGISTRATION_CODE: ${REGISTRATION_CODE:-}
       BOOTSTRAP_PRIVATE_KEY: ${BOOTSTRAP_PRIVATE_KEY:-}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
-      MQTT_HOOK_SECRET: ${MQTT_HOOK_SECRET:-}
+      MQTT_BROKER_MODE: external
+      MQTT_HOOK_SECRET: ${MQTT_HOOK_SECRET:?set in .env (openssl rand -hex 32)}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-30}
+      RELEASES_DIR: /data/releases
+      # optional outbound proxy for the GitHub release mirror (api.github.com / objects.githubusercontent.com)
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-mysql,emqx,admin,updater,localhost,127.0.0.1}
       PORT: "8080"
     # 只绑定本机回环，方便调试；对外一律走 Caddy / cloudflared
+    volumes:
+      - releases-data:/data/releases   # mirrored APKs
     ports:
       - "127.0.0.1:8080:8080"
     networks: [internal]
@@ -60,7 +68,7 @@ services:
         [{mechanism = password_based, backend = http, enable = true, method = post,
           url = "http://backend:8080/api/v1/internal/mqtt/auth",
           body = {username = "$${username}", password = "$${password}", clientid = "$${clientid}"},
-          headers = {"content-type" = "application/json", "x-internal-token" = "${MQTT_HOOK_SECRET:-}"},
+          headers = {"content-type" = "application/json", "x-internal-token" = "${MQTT_HOOK_SECRET:?set in .env}"},
           request_timeout = "5s"}]
       # 授权：只允许 couple/{自己的 coupleId}/...；未匹配一律拒绝
       EMQX_AUTHORIZATION__NO_MATCH: deny
@@ -69,7 +77,7 @@ services:
         [{type = http, enable = true, method = post,
           url = "http://backend:8080/api/v1/internal/mqtt/acl",
           body = {username = "$${username}", topic = "$${topic}", action = "$${action}", clientid = "$${clientid}"},
-          headers = {"content-type" = "application/json", "x-internal-token" = "${MQTT_HOOK_SECRET:-}"},
+          headers = {"content-type" = "application/json", "x-internal-token" = "${MQTT_HOOK_SECRET:?set in .env}"},
           request_timeout = "5s"}]
     volumes:
       - emqx-data:/opt/emqx/data
@@ -78,14 +86,14 @@ services:
       - "127.0.0.1:18083:18083"
     networks: [internal]
 
-  # ---- 方案 A：Cloudflare 代理的 AAAA 记录（服务器有公网 IPv6）----
+  # ---- 可选：Cloudflare 代理的 AAAA 记录（仅在确认有公网 IPv6 且可放行 443 入站时）----
   caddy:
     image: caddy:2
     profiles: ["aaaa"]
     restart: unless-stopped
     depends_on: [backend, emqx]
     environment:
-      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?set in .env}
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-}
     ports:
       - "443:443"
     volumes:
@@ -96,7 +104,7 @@ services:
 
   # 方案 A 配套：把本机当前公网 IPv6 同步到 Cloudflare 的 AAAA 记录（橙云代理）
   ddns:
-    image: favonia/cloudflare-ddns:latest
+    image: favonia/cloudflare-ddns:1
     profiles: ["aaaa"]
     restart: unless-stopped
     network_mode: host          # 需要看到宿主机真实的 IPv6
@@ -104,19 +112,22 @@ services:
     cap_drop: [all]
     security_opt: [no-new-privileges:true]
     environment:
-      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?set in .env}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
       DOMAINS: ${PUBLIC_HOSTNAME}
       PROXIED: "true"
       IP4_PROVIDER: none
       IP6_PROVIDER: cloudflare.trace
 
-  # ---- 方案 B：Cloudflare Tunnel（无公网 IPv6 时的主路，或作为备用）----
+  # ---- 推荐：Cloudflare Tunnel（只出站，NAT4 可用）。开发栈用 token 模式；生产用本地管理配置（deploy/）----
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.3   # 固定版本，不用 latest
     profiles: ["tunnel"]
     restart: unless-stopped
     depends_on: [backend, emqx]
-    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:?set in .env}"]
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    environment:
+      # QUIC/UDP 在 NAT4 / 国内运营商常被限速或阻断，强制 http2（出站 TCP 7844）
+      TUNNEL_TRANSPORT_PROTOCOL: ${TUNNEL_TRANSPORT_PROTOCOL:-http2}
     networks: [internal]
 
 networks:
@@ -124,5 +135,6 @@ networks:
 
 volumes:
   mysql-data: {}
+  releases-data: {}
   emqx-data: {}
   caddy-data: {}

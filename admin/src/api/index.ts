@@ -1,11 +1,17 @@
 import type {
   AdminConfig,
   AdminConfigView,
+  AppReleaseView,
   AuditEntry,
   BootstrapPubkey,
   BootstrapResponse,
   Couple,
   HealthInfo,
+  ReleasePatch,
+  ReleaseSettingsUpdate,
+  ReleaseSettingsView,
+  ServerUpdateStatus,
+  SyncState,
   TokenPair,
 } from '@/types/api'
 import { createHttp } from './http'
@@ -46,4 +52,14 @@ export const api = {
   bootstrap: () => http.post<BootstrapResponse>('/admin/bootstrap').then((r) => r.data),
   audit: (params: { limit: number; before?: number }) =>
     http.get<AuditEntry[]>('/admin/audit', { params }).then((r) => r.data),
+
+  releases: () => http.get<AppReleaseView[]>('/admin/releases').then((r) => r.data),
+  syncReleases: () => http.post<SyncState>('/admin/releases/sync').then((r) => r.data),
+  syncState: () => http.get<SyncState>('/admin/releases/sync').then((r) => r.data),
+  patchRelease: (versionCode: number, patch: ReleasePatch) =>
+    http.patch<AppReleaseView>(`/admin/releases/${versionCode}`, patch).then((r) => r.data),
+  getReleaseSettings: () => http.get<ReleaseSettingsView>('/admin/releases/settings').then((r) => r.data),
+  putReleaseSettings: (s: ReleaseSettingsUpdate) =>
+    http.put<ReleaseSettingsView>('/admin/releases/settings', s).then((r) => r.data),
+  serverUpdateStatus: () => http.get<ServerUpdateStatus>('/admin/server/update-status').then((r) => r.data),
 }
