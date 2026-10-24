@@ -152,16 +152,46 @@ function Initialize-CoupleEnv([string]$EnvFile, [string]$Example, [string[]]$Sec
 
 # Runs a native program, capturing stdout+stderr as text without tripping $ErrorActionPreference = 'Stop'
 # (Windows PowerShell 5.1 turns redirected native stderr into terminating errors otherwise).
+# Stdout and Stderr are kept apart (e.g. `cloudflared ... -o json` logs to stderr); Output has both, in order.
 function Invoke-NativeCapture([string]$Exe, [string[]]$Arguments) {
     $old = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    $all = New-Object System.Collections.Generic.List[string]
+    $stdout = New-Object System.Collections.Generic.List[string]
+    $stderr = New-Object System.Collections.Generic.List[string]
     try {
-        $out = & $Exe @Arguments 2>&1 | ForEach-Object { "$_" }
+        & $Exe @Arguments 2>&1 | ForEach-Object {
+            $line = "$_"
+            $all.Add($line)
+            if ($_ -is [System.Management.Automation.ErrorRecord]) { $stderr.Add($line) } else { $stdout.Add($line) }
+        }
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $old
     }
-    return [pscustomobject]@{ ExitCode = $code; Output = (@($out) -join "`n") }
+    return [pscustomobject]@{
+        ExitCode = $code
+        Output   = ($all -join "`n")
+        Stdout   = ($stdout -join "`n")
+        Stderr   = ($stderr -join "`n")
+    }
+}
+
+function Initialize-CoupleLayout([string]$InstallDir) {
+    foreach ($d in @('config', 'config\cloudflared', 'data\releases', 'data\mqtt', 'data\updater', 'logs', 'releases', 'services', 'updater', 'cloudflared')) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir $d) | Out-Null
+    }
+}
+
+# Reads the tunnel UUID and the (first) public hostname from a rendered config\cloudflared\config.yml (pure).
+function Get-TunnelConfigInfo([string]$Path) {
+    $info = [pscustomobject]@{ TunnelId = ''; Hostname = '' }
+    if (-not (Test-Path -LiteralPath $Path)) { return $info }
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        if (-not $info.TunnelId -and $line -match '^\s*tunnel:\s*([0-9A-Fa-f-]{36})\s*$') { $info.TunnelId = $Matches[1].ToLowerInvariant() }
+        if (-not $info.Hostname -and $line -match '^\s*-?\s*hostname:\s*(\S+)\s*$') { $info.Hostname = $Matches[1].ToLowerInvariant() }
+    }
+    return $info
 }
 
 # ---- sizing (pure) --------------------------------------------------------------------------------------------
@@ -212,7 +242,6 @@ datadir=$d
 port=3306
 bind-address=127.0.0.1
 mysqlx=OFF
-skip-name-resolve
 character-set-server=utf8mb4
 collation-server=utf8mb4_0900_ai_ci
 innodb_buffer_pool_size=$BufferPool

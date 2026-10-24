@@ -95,11 +95,12 @@ cp "$here"/service/*.xml.in "$pkg/service/"
 cp "$here/cloudflared/config.yml.in" "$pkg/cloudflared/"
 cp "$here/config/couple.env.example" "$pkg/config/"
 cp "$here/lib/common.ps1" "$pkg/lib/"
-cp "$here/install.ps1" "$here/uninstall.ps1" "$here/versions.env" "$pkg/"
+cp "$here/setup.ps1" "$here/install.ps1" "$here/uninstall.ps1" "$here/versions.env" "$pkg/"
 printf '%s\n' "$version" > "$pkg/VERSION"
 cat > "$pkg/README.txt" <<TXT
 Couple server $version for Windows x64.
-Install/upgrade (elevated PowerShell):  powershell -ExecutionPolicy Bypass -File .\\install.ps1
+First-time setup (elevated PowerShell):  powershell -ExecutionPolicy Bypass -File .\\setup.ps1
+Upgrade only:                           powershell -ExecutionPolicy Bypass -File .\\install.ps1
 Full guide: https://github.com/slss15/couple-/blob/main/deploy/windows/SETUP-windows.md
 TXT
 

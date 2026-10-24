@@ -79,9 +79,7 @@ if ($CloudflaredOnly) {
 }
 
 Write-Step 'Creating directories'
-foreach ($d in @('config', 'config\cloudflared', 'data\releases', 'data\mqtt', 'data\updater', 'logs', 'releases', 'services', 'updater', 'cloudflared')) {
-    New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir $d) | Out-Null
-}
+Initialize-CoupleLayout $InstallDir
 
 Write-Step 'Configuration (config\couple.env)'
 Initialize-CoupleEnv $envFile (Join-Path $pkg 'config\couple.env.example') @('JWT_SECRET', 'MQTT_HOOK_SECRET', 'DEPLOY_HOOK_SECRET')
@@ -99,7 +97,7 @@ if (Test-Path -LiteralPath $releaseDir) {
     $staging = "$releaseDir.installing"
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     New-Item -ItemType Directory -Path $staging | Out-Null
-    foreach ($item in @('jre', 'app', 'admin', 'service', 'cloudflared', 'config', 'lib', 'winsw', 'VERSION', 'versions.env', 'install.ps1', 'uninstall.ps1')) {
+    foreach ($item in @('jre', 'app', 'admin', 'service', 'cloudflared', 'config', 'lib', 'winsw', 'VERSION', 'versions.env', 'install.ps1', 'setup.ps1', 'uninstall.ps1')) {
         Copy-Item -LiteralPath (Join-Path $pkg $item) -Destination $staging -Recurse -Force
     }
     Rename-Item -LiteralPath $staging -NewName $version

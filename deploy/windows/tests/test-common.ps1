@@ -87,5 +87,24 @@ Assert-Equal $true ($ini -match '(?m)^bind-address=127\.0\.0\.1\r?$') 'my.ini bi
 Assert-Equal $true ($ini -match '(?m)^character-set-server=utf8mb4\r?$') 'my.ini utf8mb4'
 Assert-Equal $false ($ini -match '[^\x00-\x7F]') 'my.ini ASCII only'
 
+# --- Get-TunnelConfigInfo (rendered from the shipped template)
+$yml = Join-Path ([IO.Path]::GetTempPath()) ("couple-test-{0}.yml" -f [guid]::NewGuid().ToString('N'))
+try {
+    Expand-Template (Join-Path (Split-Path -Parent $PSScriptRoot) 'cloudflared/config.yml.in') $yml @{ TUNNEL_ID = '6F1C0000-1111-2222-3333-444455556666'; HOSTNAME = 'couple.example.com'; CREDENTIALS_FILE = 'C:\couple\config\cloudflared\x.json' }
+    $ti = Get-TunnelConfigInfo $yml
+    Assert-Equal '6f1c0000-1111-2222-3333-444455556666' $ti.TunnelId 'tunnel id from config.yml'
+    Assert-Equal 'couple.example.com' $ti.Hostname 'hostname from config.yml'
+} finally {
+    Remove-Item -LiteralPath $yml -ErrorAction SilentlyContinue
+}
+Assert-Equal '' (Get-TunnelConfigInfo 'does-not-exist.yml').Hostname 'missing config.yml'
+
+# --- Invoke-NativeCapture keeps stdout/stderr apart and does not throw under ErrorActionPreference=Stop
+$self = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+$r = Invoke-NativeCapture $self @('-NoProfile', '-Command', "[Console]::Out.WriteLine('out1'); [Console]::Error.WriteLine('err1'); exit 3")
+Assert-Equal 3 $r.ExitCode 'native exit code'
+Assert-Equal 'out1' $r.Stdout 'native stdout'
+Assert-Equal 'err1' $r.Stderr.Trim() 'native stderr'
+
 if ($script:failures) { Write-Host "$script:failures test(s) failed" -ForegroundColor Red; exit 1 }
 Write-Host 'all tests passed' -ForegroundColor Green
