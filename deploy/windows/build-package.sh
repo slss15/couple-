@@ -95,7 +95,7 @@ cp "$here"/service/*.xml.in "$pkg/service/"
 cp "$here/cloudflared/config.yml.in" "$pkg/cloudflared/"
 cp "$here/config/couple.env.example" "$pkg/config/"
 cp "$here/lib/common.ps1" "$pkg/lib/"
-cp "$here/setup.ps1" "$here/install.ps1" "$here/uninstall.ps1" "$here/doctor.ps1" "$here/versions.env" "$pkg/"
+cp "$here/setup.ps1" "$here/install.ps1" "$here/uninstall.ps1" "$here/doctor.ps1" "$here/watchdog.ps1" "$here/versions.env" "$pkg/"
 printf '%s\n' "$version" > "$pkg/VERSION"
 cat > "$pkg/README.txt" <<TXT
 Couple server $version for Windows x64.
