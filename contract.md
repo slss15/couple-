@@ -31,16 +31,26 @@ Placeholder app name: "Couple" (to be renamed). Android package: com.qimingnan.c
 - Admin endpoint: POST /admin/bootstrap -> {uri, json} (role=admin)
 
 ## Admin
-- The first registered user (or env ADMIN_USERNAME) gets role=admin.
+- Preferred: the first admin is created through first-run setup (below). Legacy, still supported: the first registered user (or env ADMIN_USERNAME) gets role=admin.
 - GET /admin/config, PUT /admin/config {baseUrl, mqttUrl, turn:{provider:"cloudflare"|"coturn", ...}, storage:{...}} — secrets are write-only and come back masked.
 - GET /admin/audit?limit&before -> [{id, actorId, action, target, meta, ts}]
+
+## First-run setup
+- Public, rate-limited like /auth. Available only while no user with role=admin exists ("needed").
+- GET /setup/status -> {needed:Boolean, suggested:{publicBaseUrl, mqttUrl}|null}. Once an admin exists: {needed:false, suggested:null} (200).
+- POST /setup {token, username, password, deviceId?, deviceName?} -> TokenPair (same shape as /auth/login; role=admin). Same username/password policy as register (username 3-32 of [A-Za-z0-9_.-], password 8-128); displayName = username; deviceId defaults to "setup-web". Errors: 403 SETUP_TOKEN_INVALID (missing/wrong token, constant-time compare), 400 VALIDATION_ERROR, 409 USERNAME_TAKEN, 410 SETUP_COMPLETED (after success, or once an admin exists). Audit: setup.completed / setup.failed (never the token).
+- Token: env SETUP_TOKEN. If unset and setup is needed, the server generates a random token at startup, logs one WARN line `SETUP TOKEN: <token>  → open https://<host>/setup?token=<token>` and, when a data dir is configured (DATA_DIR, else the parent of RELEASES_DIR), writes it to <dataDir>/setup-token.txt (deleted after setup). The token changes on every restart until setup is done. The admin SPA opens /setup?token=<token> with the token prefilled.
+- On success, empty /admin/config baseUrl / mqttUrl are filled with the derived values (configVersion +1), so POST /admin/bootstrap works immediately. Existing values are never overwritten.
+- Derivation (a suggestion only; forwarded headers are never trusted for security decisions): scheme = first X-Forwarded-Proto value if http|https, else the request scheme; host = first X-Forwarded-Host value, else Host (lowercased, must be a plain hostname/IP with optional port, otherwise no suggestion). publicBaseUrl = scheme://host; mqttUrl = wss://host/mqtt (path = MQTT_WS path, default /mqtt).
+- GET/PUT /admin/config also return `suggested` (same derivation for the current request, may be null).
+- Env addition: SETUP_TOKEN (optional), DATA_DIR (optional). REGISTRATION_CODE / ADMIN_USERNAME become optional.
 
 ## MQTT (P0: connect-only, prove it works)
 - EMQX over WSS. Clients authenticate with username=userId, password=accessToken (EMQX HTTP auth hook -> POST /internal/mqtt/auth; ACL hook -> /internal/mqtt/acl).
 - Topic root: couple/{coupleId}/... ; a client can only pub/sub under its own couple. P0 topic: couple/{cid}/presence (retained, {userId, online, ts}).
 
 ## Env (backend)
-DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET, REGISTRATION_CODE, BOOTSTRAP_PRIVATE_KEY(optional), ADMIN_USERNAME(optional), PORT=8080. Never commit secrets; ship .env.example only.
+DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET, REGISTRATION_CODE(optional), BOOTSTRAP_PRIVATE_KEY(optional), ADMIN_USERNAME(optional), SETUP_TOKEN(optional), DATA_DIR(optional), PORT=8080. Never commit secrets; ship .env.example only.
 
 ## P0 implementation notes (reconciled 2026-10-22)
 - publicKey = standard base64 of raw 32-byte Ed25519 key. Signature covers the decoded bytes of d; d and s are base64url without padding. baseUrl excludes /api/v1, and every route, including /internal/mqtt/*, lives under /api/v1.
