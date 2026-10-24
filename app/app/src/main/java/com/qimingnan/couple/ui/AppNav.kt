@@ -30,6 +30,7 @@ import com.qimingnan.couple.ui.components.BannerKind
 import com.qimingnan.couple.ui.components.FullScreenLoading
 import com.qimingnan.couple.ui.components.PrimaryButton
 import com.qimingnan.couple.ui.components.StatusBanner
+import com.qimingnan.couple.ui.keepalive.KeepAliveScreen
 import com.qimingnan.couple.ui.main.MainShell
 import com.qimingnan.couple.ui.pairing.PairingScreen
 
@@ -42,6 +43,8 @@ object Routes {
     const val ERROR = "error"
     /** 从“我的 / 登录页”进入的重新扫码，可返回 */
     const val RESCAN = "rescan"
+    /** 我的 → 后台保活（只在主界面内可达，返回主界面） */
+    const val KEEPALIVE = "keepalive"
 }
 
 private fun RootDestination.route(): String = when (this) {
@@ -65,7 +68,8 @@ fun CoupleRoot(deepLinkUri: String?, onDeepLinkConsumed: () -> Unit, vm: RootVie
     LaunchedEffect(dest) {
         val route = dest.route()
         val current = nav.currentDestination?.route
-        if (current != route && current != Routes.RESCAN) nav.navigateRoot(route)
+        val stay = current == Routes.RESCAN || (current == Routes.KEEPALIVE && route == Routes.MAIN)
+        if (current != route && !stay) nav.navigateRoot(route)
     }
     // 深链（系统相机扫码打开）总是进入可返回的扫码页
     LaunchedEffect(deepLinkUri) {
@@ -90,7 +94,13 @@ fun CoupleRoot(deepLinkUri: String?, onDeepLinkConsumed: () -> Unit, vm: RootVie
             }
             composable(Routes.AUTH) { AuthScreen(onChangeServer = { nav.navigate(Routes.RESCAN) }) }
             composable(Routes.PAIRING) { PairingScreen() }
-            composable(Routes.MAIN) { MainShell(onRescan = { nav.navigate(Routes.RESCAN) }) }
+            composable(Routes.MAIN) {
+                MainShell(
+                    onRescan = { nav.navigate(Routes.RESCAN) },
+                    onOpenKeepAlive = { nav.navigate(Routes.KEEPALIVE) { launchSingleTop = true } },
+                )
+            }
+            composable(Routes.KEEPALIVE) { KeepAliveScreen(onBack = { nav.popBackStack() }) }
             composable(Routes.ERROR) {
                 Column(
                     Modifier.fillMaxSize().background(t.colors.background).padding(t.spacing.xl),

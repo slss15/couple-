@@ -39,6 +39,7 @@ import java.util.Date
 fun MeScreen(
     onRescan: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenKeepAlive: () -> Unit = {},
     vm: MeViewModel = hiltViewModel(),
     updateVm: UpdateViewModel = hiltViewModel(),
 ) {
@@ -94,6 +95,7 @@ fun MeScreen(
                 Text(label, style = t.typography.body, color = t.colors.onSurface)
             }
             SecondaryButton("重新连接", onClick = vm::reconnectMqtt)
+            SecondaryButton("后台保活 · 连接诊断", onClick = onOpenKeepAlive)
         }
 
         SectionCard(stringResource(R.string.me_server)) {

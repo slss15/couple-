@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 后台保活：可选常驻连接服务（specialUse，Android 14+）与“忽略电池优化”请求 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".CoupleApp"
@@ -60,6 +63,16 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+
+        <!-- 后台保活：用户在 我的 → 后台保活 中手动开启的常驻连接（低重要性通知渠道） -->
+        <service
+            android:name=".data.keepalive.KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the private two-person messaging connection (MQTT over WebSocket to the couple's self-hosted server) open so messages and presence arrive while the app is in the background. Started only after the user turns it on; no other FGS type covers a persistent self-hosted messaging socket." />
+        </service>
 
         <receiver
             android:name=".data.update.InstallResultReceiver"
