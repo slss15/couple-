@@ -127,7 +127,7 @@ jobs:
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
-          $issues = @('install.ps1', 'uninstall.ps1') | ForEach-Object {
+          $issues = @('setup.ps1', 'install.ps1', 'uninstall.ps1', 'lib\common.ps1') | ForEach-Object {
             Invoke-ScriptAnalyzer -Path (Join-Path $env:PKG $_) -Severity Warning, Error `
               -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions
           }
