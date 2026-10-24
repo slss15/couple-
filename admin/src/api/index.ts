@@ -11,6 +11,7 @@ import type {
   ReleaseSettingsUpdate,
   ReleaseSettingsView,
   ServerUpdateStatus,
+  SetupStatus,
   SyncState,
   TokenPair,
 } from '@/types/api'
@@ -37,6 +38,17 @@ export const api = {
   login: (username: string, password: string) =>
     http
       .post<TokenPair>('/auth/login', {
+        username,
+        password,
+        deviceId: tokenStorage.deviceId(),
+        deviceName: deviceName(),
+      })
+      .then((r) => r.data),
+  setupStatus: () => http.get<SetupStatus>('/setup/status').then((r) => r.data),
+  setup: (token: string, username: string, password: string) =>
+    http
+      .post<TokenPair>('/setup', {
+        token,
         username,
         password,
         deviceId: tokenStorage.deviceId(),

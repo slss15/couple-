@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import QRCode from 'qrcode'
 import { ElMessage } from 'element-plus'
 import { Download, DocumentCopy, MagicStick } from '@element-plus/icons-vue'
@@ -9,6 +10,9 @@ import type { BootstrapPayload } from '@/types/api'
 import { parseBootstrapUri, verifyBootstrapSignature, type VerifyResult } from '@/utils/bootstrap'
 import { formatTs, prettyJson } from '@/utils/format'
 
+const route = useRoute()
+/** 初始化向导完成后跳转过来时显示 */
+const fromSetup = route.query.setup === '1'
 const canvas = ref<HTMLCanvasElement>()
 const loading = ref(false)
 const uri = ref('')
@@ -70,6 +74,9 @@ async function copyUri() {
 <template>
   <div>
     <h1 class="page-title">引导二维码</h1>
+    <el-alert v-if="fromSetup" type="success" show-icon class="mb" title="服务器地址已自动配置，可直接扫码" data-test="setup-banner">
+      初始化完成，管理员账号已登录。点击下方“生成二维码”，用 App 扫码即可连接；如需修改地址，可到“服务器配置”页面调整。
+    </el-alert>
     <el-alert type="info" :closable="false" show-icon class="mb">
       App 首次启动扫描此二维码获取服务器配置。二维码内容由服务器用 Ed25519 私钥签名，App 首次扫码时固定公钥，之后只接受同一公钥签名的配置；新配置 30 秒内连不上会自动回滚。
       修改服务器配置后请重新生成。

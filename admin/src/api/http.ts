@@ -8,7 +8,7 @@ import { TokenStorage, tokenStorage } from './tokenStorage'
 import { toApiError } from './errors'
 
 /** 不需要（也不能）带 access token、且 401 时不触发刷新的路径 */
-const AUTH_FREE = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout', '/health', '/bootstrap/pubkey']
+const AUTH_FREE = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout', '/health', '/bootstrap/pubkey', '/setup', '/setup/status']
 
 export function apiRoot(base = import.meta.env.VITE_API_BASE ?? ''): string {
   return `${base.replace(/\/+$/, '')}/api/v1`

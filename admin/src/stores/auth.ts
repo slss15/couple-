@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { api } from '@/api'
 import { ApiError } from '@/api/errors'
 import { decodeJwt, tokenStorage, type StoredTokens } from '@/api/tokenStorage'
+import type { TokenPair } from '@/types/api'
 
 export const useAuthStore = defineStore('auth', () => {
   const tokens = ref<StoredTokens | null>(tokenStorage.get())
@@ -29,6 +30,12 @@ export const useAuthStore = defineStore('auth', () => {
     sync()
   }
 
+  /** 初始化向导创建管理员后直接采用返回的令牌 */
+  function adopt(pair: TokenPair) {
+    tokenStorage.set(pair)
+    sync()
+  }
+
   async function logout() {
     const rt = tokenStorage.refreshToken
     tokenStorage.clear()
@@ -41,5 +48,5 @@ export const useAuthStore = defineStore('auth', () => {
     sync()
   }
 
-  return { tokens, user, claims, isLoggedIn, isAdmin, sync, login, logout, clearLocal }
+  return { tokens, user, claims, isLoggedIn, isAdmin, sync, login, adopt, logout, clearLocal }
 })

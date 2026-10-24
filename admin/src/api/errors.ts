@@ -21,6 +21,10 @@ const ZH: Record<string, string> = {
   CONFIG_INCOMPLETE: '请先在“服务器配置”中填写后端地址和 MQTT 地址并保存',
   AUTH_RATE_LIMITED: '尝试次数过多，请稍后再试',
   RELEASE_NOT_FOUND: '版本不存在',
+  RATE_LIMITED: '请求过于频繁，请稍后再试',
+  SETUP_TOKEN_INVALID: '初始化令牌不正确（请查看服务器日志中的 SETUP TOKEN 或 setup-token.txt）',
+  SETUP_COMPLETED: '服务器已完成初始化，请直接登录',
+  USERNAME_TAKEN: '用户名已存在',
   RELEASE_FILE_MISSING: '服务器上的 APK 文件缺失，请先重新同步',
 }
 

@@ -97,12 +97,25 @@ export interface AdminConfig {
   storage: StorageConfig
 }
 
-/** GET/PUT /admin/config 的响应：后端额外返回 configVersion / updatedAt（契约之外的补充字段） */
+/** 后端根据请求头（X-Forwarded-Proto / X-Forwarded-Host / Host）推导出的建议地址 */
+export interface SuggestedUrls {
+  publicBaseUrl: string
+  mqttUrl: string
+}
+
+/** GET /setup/status */
+export interface SetupStatus {
+  needed: boolean
+  suggested: SuggestedUrls | null
+}
+
+/** GET/PUT /admin/config 的响应：后端额外返回 configVersion / updatedAt / suggested（契约之外的补充字段） */
 export interface AdminConfigView extends Omit<AdminConfig, 'baseUrl' | 'mqttUrl'> {
   baseUrl: string | null
   mqttUrl: string | null
   configVersion?: number
   updatedAt?: number | null
+  suggested?: SuggestedUrls | null
 }
 
 export interface AuditEntry {
