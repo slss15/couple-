@@ -3,6 +3,7 @@
   Installs or upgrades the Couple server on Windows (no Docker/WSL/Hyper-V needed).
 
 .DESCRIPTION
+  First-time setup: use setup.ps1 (wizard: MySQL, secrets, Cloudflare Tunnel, then calls this script).
   Run from the extracted couple-server-windows-x64-<version> folder in an elevated PowerShell (5.1 or 7):
 
     powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -37,105 +38,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
-
-function Test-Admin {
-    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
-    return (New-Object Security.Principal.WindowsPrincipal $id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-function Get-RandomHex([int]$Bytes = 32) {
-    $buf = New-Object byte[] $Bytes
-    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($buf) } finally { $rng.Dispose() }
-    return -join ($buf | ForEach-Object { $_.ToString('x2') })
-}
-
-function Read-KeyValueFile([string]$Path) {
-    $map = @{}
-    if (-not (Test-Path -LiteralPath $Path)) { return $map }
-    foreach ($line in [IO.File]::ReadAllLines($Path)) {
-        $t = $line.Trim()
-        if ($t -eq '' -or $t.StartsWith('#')) { continue }
-        $i = $t.IndexOf('=')
-        if ($i -le 0) { continue }
-        $map[$t.Substring(0, $i).Trim()] = $t.Substring($i + 1).Trim()
-    }
-    return $map
-}
-
-function Write-Utf8NoBom([string]$Path, [string]$Text) {
-    [IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding $false))
-}
-
-# Sets KEY=value only when the key is missing or empty. Never overwrites an existing non-empty value.
-function Set-EnvIfEmpty([string]$Path, [string]$Key, [string]$Value) {
-    $lines = New-Object System.Collections.Generic.List[string]
-    $lines.AddRange([string[]][IO.File]::ReadAllLines($Path))
-    $pattern = '^\s*' + [regex]::Escape($Key) + '\s*='
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match $pattern) {
-            $current = $lines[$i].Substring($lines[$i].IndexOf('=') + 1).Trim()
-            if ($current -ne '') { return $false }
-            $lines[$i] = "$Key=$Value"
-            Write-Utf8NoBom $Path (($lines -join "`r`n") + "`r`n")
-            return $true
-        }
-    }
-    $lines.Add("$Key=$Value")
-    Write-Utf8NoBom $Path (($lines -join "`r`n") + "`r`n")
-    return $true
-}
-
-function Protect-File([string]$Path) {
-    # Administrators + SYSTEM only (well-known SIDs, so this works on localized Windows too).
-    & icacls.exe $Path /inheritance:r /grant:r '*S-1-5-32-544:(F)' '*S-1-5-18:(F)' | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "icacls failed on $Path" }
-}
-
-function Get-ServiceState([string]$Name) {
-    $s = Get-Service -Name $Name -ErrorAction SilentlyContinue
-    if ($null -eq $s) { return 'Missing' }
-    return [string]$s.Status
-}
-
-function Stop-CoupleService([string]$Name) {
-    if ((Get-ServiceState $Name) -eq 'Running') {
-        Write-Host "    stopping $Name"
-        Stop-Service -Name $Name -Force
-        (Get-Service -Name $Name).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(60))
-    }
-}
-
-function Expand-Template([string]$Source, [string]$Dest, [hashtable]$Values) {
-    $text = [IO.File]::ReadAllText($Source)
-    foreach ($k in $Values.Keys) {
-        $v = [Security.SecurityElement]::Escape([string]$Values[$k])
-        if ($Dest -like '*.yml') { $v = [string]$Values[$k] }
-        $text = $text.Replace("@$k@", $v)
-    }
-    Write-Utf8NoBom $Dest $text
-}
-
-function Install-Cloudflared([string]$Dir, [hashtable]$Pins, [string]$Proxy) {
-    $exe = Join-Path $Dir 'cloudflared.exe'
-    $want = $Pins['CLOUDFLARED_WINDOWS_AMD64_SHA256'].ToLowerInvariant()
-    $have = if (Test-Path -LiteralPath $exe) { (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant() } else { '' }
-    if ($have -eq $want) { return $exe }
-    Stop-CoupleService 'couple-cloudflared'
-    New-Item -ItemType Directory -Force -Path $Dir | Out-Null
-    $url = "https://github.com/cloudflare/cloudflared/releases/download/$($Pins['CLOUDFLARED_VERSION'])/cloudflared-windows-amd64.exe"
-    $tmp = "$exe.download"
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $iwr = @{ Uri = $url; OutFile = $tmp; UseBasicParsing = $true }
-    if ($Proxy) { $iwr['Proxy'] = $Proxy }
-    Write-Host "    downloading $url"
-    Invoke-WebRequest @iwr
-    $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
-    if ($got -ne $want) { Remove-Item -LiteralPath $tmp -Force; throw "cloudflared sha256 mismatch: $got" }
-    Move-Item -LiteralPath $tmp -Destination $exe -Force
-    return $exe
-}
+. (Join-Path $PSScriptRoot 'lib\common.ps1')
 
 function Install-WinswService([string]$Name, [string]$WinswExe) {
     $exe = Join-Path $servicesDir "$Name.exe"
@@ -149,7 +52,7 @@ function Install-WinswService([string]$Name, [string]$WinswExe) {
 }
 
 # ---------------------------------------------------------------------------------------------------------------
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Enable-Tls12
 if (-not (Test-Admin)) { throw 'Run this script from an elevated PowerShell (Run as Administrator).' }
 
 $pkg = $PSScriptRoot
@@ -181,17 +84,10 @@ foreach ($d in @('config', 'config\cloudflared', 'data\releases', 'data\mqtt', '
 }
 
 Write-Step 'Configuration (config\couple.env)'
-if (-not (Test-Path -LiteralPath $envFile)) {
-    Copy-Item -LiteralPath (Join-Path $pkg 'config\couple.env.example') -Destination $envFile
-    Write-Host '    created from couple.env.example'
-}
-foreach ($k in @('JWT_SECRET', 'MQTT_HOOK_SECRET', 'DEPLOY_HOOK_SECRET')) {
-    if (Set-EnvIfEmpty $envFile $k (Get-RandomHex 32)) { Write-Host "    generated $k" } else { Write-Host "    kept existing $k" }
-}
-Protect-File $envFile
+Initialize-CoupleEnv $envFile (Join-Path $pkg 'config\couple.env.example') @('JWT_SECRET', 'MQTT_HOOK_SECRET', 'DEPLOY_HOOK_SECRET')
 $cfg = Read-KeyValueFile $envFile
 if (-not $cfg['DB_PASSWORD']) {
-    Write-Warning "DB_PASSWORD is empty in $envFile - set it (see SETUP-windows.md section 4) before starting couple-backend."
+    Write-Warning "DB_PASSWORD is empty in $envFile - run setup.ps1 (creates the MySQL database/user) or set it by hand (SETUP-windows.md appendix) before starting couple-backend."
 }
 $port = if ($cfg['PORT']) { $cfg['PORT'] } else { '8080' }
 
@@ -203,7 +99,7 @@ if (Test-Path -LiteralPath $releaseDir) {
     $staging = "$releaseDir.installing"
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     New-Item -ItemType Directory -Path $staging | Out-Null
-    foreach ($item in @('jre', 'app', 'admin', 'service', 'cloudflared', 'config', 'winsw', 'VERSION', 'versions.env', 'install.ps1', 'uninstall.ps1')) {
+    foreach ($item in @('jre', 'app', 'admin', 'service', 'cloudflared', 'config', 'lib', 'winsw', 'VERSION', 'versions.env', 'install.ps1', 'uninstall.ps1')) {
         Copy-Item -LiteralPath (Join-Path $pkg $item) -Destination $staging -Recurse -Force
     }
     Rename-Item -LiteralPath $staging -NewName $version

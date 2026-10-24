@@ -79,7 +79,7 @@ mkdir -p "$pkg"
   --strip-java-debug-attributes --no-header-files --no-man-pages --compress=zip-6 --output "$pkg/jre"
 [ -f "$pkg/jre/bin/java.exe" ] || { echo "::error::jlink did not produce a Windows JRE" >&2; exit 1; }
 
-mkdir -p "$pkg/app/lib" "$pkg/updater/lib" "$pkg/winsw" "$pkg/service" "$pkg/config" "$pkg/cloudflared"
+mkdir -p "$pkg/app/lib" "$pkg/updater/lib" "$pkg/lib" "$pkg/winsw" "$pkg/service" "$pkg/config" "$pkg/cloudflared"
 cp "$backend_lib"/*.jar "$pkg/app/lib/"
 # Linux/macOS-only native transports are never loaded on Windows.
 rm -f "$pkg"/app/lib/netty-transport-native-epoll-*-linux-*.jar "$pkg"/app/lib/netty-transport-native-kqueue-*.jar
@@ -94,6 +94,7 @@ cp "$cache/WinSW.exe" "$pkg/winsw/WinSW.exe"
 cp "$here"/service/*.xml.in "$pkg/service/"
 cp "$here/cloudflared/config.yml.in" "$pkg/cloudflared/"
 cp "$here/config/couple.env.example" "$pkg/config/"
+cp "$here/lib/common.ps1" "$pkg/lib/"
 cp "$here/install.ps1" "$here/uninstall.ps1" "$here/versions.env" "$pkg/"
 printf '%s\n' "$version" > "$pkg/VERSION"
 cat > "$pkg/README.txt" <<TXT
