@@ -29,7 +29,7 @@ Actions 轮询 GET /_deploy/status（最多约 10 分钟）─► 成功 ✓ / �
 
 | 文件 | 作用 |
 |---|---|
-| `windows/` | **主推：Windows 原生部署**——服务器 zip 打包脚本、WinSW 服务模板、`install.ps1`/`uninstall.ps1`、cloudflared 配置模板、[`SETUP-windows.md`](windows/SETUP-windows.md) |
+| `windows/` | **主推：Windows 原生部署**——服务器 zip 打包脚本、WinSW 服务模板、`setup.ps1`（一键安装向导）/`install.ps1`/`uninstall.ps1`、cloudflared 配置模板、[`SETUP-windows.md`](windows/SETUP-windows.md) |
 | `docker-compose.yml` | Linux/Docker 栈（可选）：mysql、backend、admin、emqx、updater、cloudflared（默认入口）；可选 `aaaa`（Caddy+DDNS）、`tunnel-token` |
 | `.env.example` | 环境变量模板，复制成 `.env` |
 | `cloudflared/config.yml` | 默认隧道的路由（本地管理，已提交；凭证 `cloudflared/credentials.json` 不提交） |

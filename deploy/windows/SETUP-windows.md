@@ -1,4 +1,4 @@
-# 服务器从零配置清单（Windows 原生方案，主推）
+# 服务器从零配置（Windows 原生方案，主推）
 
 适用：一台**全新的云 Windows 主机**——不能虚拟化（跑不了 Docker / WSL2 / Hyper-V）、**没有公网 IPv4/IPv6**，唯一入口是 **Cloudflare Tunnel（只出站）**。
 服务器上跑 3 个 Windows 服务（WinSW 包装）+ 1 个 MySQL：
@@ -8,13 +8,109 @@
 | `couple-backend` | Ktor 后端 + 内置 MQTT broker（Moquette）+ 管理后台网页 | `PORT`（默认 8080）、`MQTT_WS_PORT`（默认 127.0.0.1:8083） |
 | `couple-updater` | 推送即部署 webhook + 轮询 GitHub Release，失败自动回滚 | 127.0.0.1:9000 |
 | `couple-cloudflared` | Cloudflare Tunnel（本地管理，路由写在 `config.yml`） | 127.0.0.1:20241（metrics） |
-| `MySQL84`（自己装） | MySQL 8.4 | 127.0.0.1:3306 |
+| `MySQL84` | MySQL 8.4 LTS（`setup.ps1` 自动安装；已有 MySQL 则直接复用） | 127.0.0.1:3306 |
 
 > Linux + Docker 备选方案见 [`../SETUP.md`](../SETUP.md)；自动更新/发版原理见 [`../README.md`](../README.md)。
-> 约定：域名用 `couple.example.com`，安装目录用默认的 `C:\couple`，换成你自己的。所有命令都在**管理员 PowerShell** 里执行。
+> 约定：域名用 `couple.example.com`，安装目录用默认的 `C:\couple`，换成你自己的。
 > 标注 **（待实机确认）** 的内容是从代码/文档推断、还没在真机上验证过的。
 
-**执行顺序**：0 → 3（先把安装包下载解压，第 1 节要用里面的 `install.ps1 -CloudflaredOnly`）→ 1 → 2 → 4 → 5 → 6 → 7 → 8 → 9。第 10、11 节是日常运维与排查。
+## 快速安装（推荐）：一条命令
+
+整个过程只需要回答一个问题（域名），外加在浏览器里点一次 Cloudflare 授权。
+
+### 0. 前提
+
+- [ ] **管理员 PowerShell**：开始菜单右键 *Windows PowerShell* →「以管理员身份运行」。自带的 Windows PowerShell 5.1 即可（PowerShell 7 也行）。
+- [ ] **Windows Server 2016+ / Windows 10+，x64**，内存 ≥ 2 GB。
+- [ ] **域名已接入 Cloudflare**：在 Cloudflare 上状态为 **Active**（NS 已切过去）。要用的主机名（如 `couple.example.com`）**不需要**提前建 DNS 记录；已有 A/AAAA/CNAME 记录时脚本会问你要不要覆盖。
+- [ ] 服务器能访问外网（GitHub、cdn.mysql.com、Cloudflare，以及隧道用的出站 TCP 7844）。不需要任何入站端口。国内网络拉 GitHub 慢：见附录第 4 节 `HTTPS_PROXY`。
+
+### 1. 下载安装包并解压
+
+在管理员 PowerShell 里整段粘贴（下载滚动预发布 `edge` 上最新的 `couple-server-windows-x64-<版本>.zip` 并校验 sha256）：
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$ProgressPreference = 'SilentlyContinue'
+$rel = Invoke-RestMethod https://api.github.com/repos/slss15/couple-/releases/tags/edge -Headers @{ 'User-Agent' = 'couple-setup' }
+$zip = $rel.assets | Where-Object { $_.name -match '^couple-server-windows-x64-.+\.zip$' } | Select-Object -First 1
+$sum = $rel.assets | Where-Object { $_.name -eq "$($zip.name).sha256" } | Select-Object -First 1
+New-Item -ItemType Directory -Force C:\couple-install | Out-Null; Set-Location C:\couple-install
+Invoke-WebRequest $zip.browser_download_url -OutFile $zip.name -UseBasicParsing
+Invoke-WebRequest $sum.browser_download_url -OutFile "$($zip.name).sha256" -UseBasicParsing
+$want = ((Get-Content "$($zip.name).sha256" -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+if ((Get-FileHash -Algorithm SHA256 $zip.name).Hash.ToLowerInvariant() -ne $want) { throw 'sha256 不一致' } else { 'sha256 OK' }
+Expand-Archive $zip.name -DestinationPath . -Force
+Set-Location (Join-Path C:\couple-install ($zip.name -replace '\.zip$', ''))
+Get-ChildItem -Recurse | Unblock-File
+```
+
+也可以用浏览器从 <https://github.com/slss15/couple-/releases> 下载 zip，右键“全部解压缩”，再在 PowerShell 里 `cd` 进解压出来的目录。正式版、代理下载等见附录第 3 节。
+
+### 2. 运行 `setup.ps1`
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+它只问一句：**服务器域名**（例如 `couple.example.com`）。接着全自动完成下面 7 步，每步都打印中文进度：
+
+1. **准备**：检查管理员权限、建 `C:\couple\…` 目录、生成 `config\couple.env` 和各项密钥（`JWT_SECRET`、`MQTT_HOOK_SECRET`、`DEPLOY_HOOK_SECRET`）。
+2. **MySQL**：
+   - 没装过 MySQL → 下载固定版本的 **MySQL 8.4 LTS** ZIP（sha256 校验，约 270 MB），缺 VC++ 运行库时自动安装；装到 `C:\mysql`，数据在 `C:\mysql-data`；按内存写 `my.ini`（utf8mb4、只监听 127.0.0.1、`performance_schema=OFF`、缓冲池 ≤2.5 GB→256M / ≤5 GB→512M / 更大→1G）；注册服务 `MySQL84`；root 设随机密码，保存在 `C:\couple\config\mysql-root.txt`（仅管理员可读）。
+   - 已经有 MySQL 服务 → 只问**一次** root 密码（用来建库建用户，不保存）。
+   - 然后建库 `couple` + 用户 `couple`（随机密码），写进 `couple.env` 的 `DB_PASSWORD`。
+3. **JVM 内存**：按内存设置 `JAVA_OPTS` 的 `-Xmx`（≤2.5 GB→384m / ≤5 GB→640m / 更大→1024m）；你改过 `JAVA_OPTS` 就不动它。
+4. **首次设置令牌**：生成 `SETUP_TOKEN`。
+5. **Cloudflare Tunnel**：下载固定版本的 cloudflared；第一次会打印一个**授权链接**（有浏览器时自动打开）——在任意电脑上打开、登录 Cloudflare、**选中这个域名**、点 *Authorize*，脚本自动继续；然后创建（或复用）名为 `couple` 的隧道，把域名的 DNS 指向隧道（CNAME，橙云）。
+6. **安装服务**：调用 `install.ps1` 注册并启动 `couple-backend` / `couple-updater` / `couple-cloudflared`，等本机健康检查通过，再经 Cloudflare 检查 `https://<域名>/api/v1/health`（最多 60 秒）。
+7. **完成**：打印一个结果框，并保存到 `C:\couple\SETUP-RESULT.txt`（仅管理员可读，含密钥）：
+   ```text
+   ① 管理后台首次设置：https://couple.example.com/setup?token=<SETUP_TOKEN>
+   ② GitHub Secrets：DEPLOY_HOOK_URL = https://couple.example.com
+                     DEPLOY_HOOK_SECRET = <64 位十六进制>
+   ③ Cloudflare 控制台关闭 Bot Fight Mode
+   ```
+
+- **可以重复运行**：每一步都会先检查现状，已完成的保留（已有的密钥、密码、隧道、DNS、`my.ini` 都不会被覆盖）。中途失败时会打印**失败的步骤**和**日志路径**（`C:\couple\logs\setup-<时间>.log`），修好原因后直接再运行一次即可。
+- 换域名：重新运行并输入新域名，脚本会改 DNS 并重新生成隧道配置（旧的存为 `config.yml.bak`）。
+- 常用参数：
+
+  | 参数 | 说明 |
+  |---|---|
+  | `-Hostname couple.example.com` | 不再询问域名（非交互） |
+  | `-MysqlRootPassword (Read-Host -AsSecureString)` | 已有 MySQL 时提前给 root 密码 |
+  | `-OverwriteDns` | 域名已有其他 DNS 记录时直接覆盖，不再询问 |
+  | `-SkipMysql` | 不碰 MySQL（`couple.env` 里的 `DB_*` 自己填好） |
+  | `-SkipTunnel` | 不配 Cloudflare Tunnel（只本机可访问） |
+  | `-InstallDir` / `-MysqlDir` / `-MysqlDataDir` / `-TunnelName` | 默认 `C:\couple` / `C:\mysql` / `C:\mysql-data` / `couple` |
+
+### 3. 打开输出的链接，设置管理员
+
+浏览器打开结果框 ① 里的 `https://<域名>/setup?token=…`，按页面提示创建管理员账号。之后用这个账号登录 `https://<域名>/` 管理后台。
+链接忘了：在服务器上 `notepad C:\couple\SETUP-RESULT.txt`（管理员 PowerShell 里打开）。
+
+### 4. 把两个值填进 GitHub Secrets，并关闭 Bot Fight Mode
+
+- [ ] GitHub 仓库 → **Settings → Secrets and variables → Actions → New repository secret**，照结果框 ② 新建两个：
+  - `DEPLOY_HOOK_URL` = `https://<域名>`（**只填域名**，部署脚本自己会加 `/_deploy/hook`）
+  - `DEPLOY_HOOK_SECRET` = 结果框里的那串
+- [ ] **Cloudflare 控制台 → Security → Bots → Bot Fight Mode：关闭（必须）**：<https://dash.cloudflare.com/?to=/:account/:zone/security/bots>。否则 GitHub Actions 的部署请求和 App 的连接会被质询拦截。建议同时看一眼附录第 1.1 节的其他安全设置。
+- 发版用的 APK 签名 Secrets 见附录第 9 节。
+
+### 5. 手机扫码
+
+管理后台 → **服务器配置**：后端地址 `https://<域名>`、MQTT 地址 `wss://<域名>/mqtt`（TURN、存储按需）→ **引导二维码** → 生成 → 两台手机装好 APK 后扫码、注册、配对。逐项说明见附录第 8 节。
+
+完成。之后每次推 `main` 服务器会自动更新（附录第 10 节）。
+
+---
+
+# 附录：手动安装 / 排障
+
+下面是 `setup.ps1` 背后每一步的手动做法、每个配置项的说明和日常运维。用 `setup.ps1` 装好的服务器一般只需要看第 6（验证）、10（运维）、11（排障）节。
+
+**手动安装的执行顺序**：0 → 3（先把安装包下载解压，第 1 节要用里面的 `install.ps1 -CloudflaredOnly`）→ 1 → 2 → 4 → 5 → 6 → 7 → 8 → 9。第 10、11 节是日常运维与排查。
 
 ---
 
@@ -124,7 +220,6 @@ $cf = 'C:\couple\cloudflared\cloudflared.exe'
   port=3306
   bind-address=127.0.0.1
   mysqlx=OFF
-  skip-name-resolve
   character-set-server=utf8mb4
   collation-server=utf8mb4_0900_ai_ci
   # 2 GB host: 256M, 4 GB host: 512M
@@ -164,7 +259,7 @@ MySQL Installer / `mysql-8.4.x-winx64.msi` → 只装 *MySQL Server* → 配置�
   function New-Secret([int]$Bytes = 32) { $b = New-Object byte[] $Bytes; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') }) }
   $dbPass = New-Secret 24; $dbPass     # 复制下来
   ```
-- [ ] 建库建用户（`skip-name-resolve` 下 TCP 127.0.0.1 匹配 `'couple'@'127.0.0.1'`，`localhost` 那条留作命令行用）：
+- [ ] 建库建用户（两条都建：JDBC 走 TCP 127.0.0.1，命令行客户端默认走 `localhost`）：
   ```powershell
   @"
   CREATE DATABASE IF NOT EXISTS couple CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -238,12 +333,13 @@ New-Secret 32                                             # 64 位十六进制
 |---|---|---|---|---|
 | `DB_URL` | ✅ | `jdbc:mysql://127.0.0.1:3306/couple?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC` | JDBC 地址，模板里已填好 | 一般不改 |
 | `DB_USER` | ✅ | `couple` | MySQL 用户 | 第 2.3 节 |
-| `DB_PASSWORD` | ✅ | 空 | 上述用户的密码；为空时 `install.ps1` 会警告 | 第 2.3 节的 `$dbPass` |
+| `DB_PASSWORD` | ✅ | 空 → `setup.ps1` 建库后写入 | 上述用户的密码；为空时 `install.ps1` 会警告 | `setup.ps1` 自动，或第 2.3 节的 `$dbPass` |
 
 ### 4.2 后端（`couple-backend`，改后 `Restart-Service couple-backend`）
 
 | 名称 | 必填 | 默认 | 说明 | 如何生成 |
 |---|---|---|---|---|
+| `SETUP_TOKEN` | 自动 | 空 → `setup.ps1` 生成 | 首次设置页 `https://<域名>/setup?token=<SETUP_TOKEN>` 的令牌 | 留空让 `setup.ps1` 生成 |
 | `JWT_SECRET` | ✅ | 空 → install 自动生成 | HS256 签名密钥，**≥ 32 字符**否则后端拒绝启动；改后所有人重新登录 | 留空让 `install.ps1` 生成 |
 | `REGISTRATION_CODE` | 建议 | 空 | 注册邀请码；**留空 = 关闭注册**。首次部署必须填（第 7 节要用），两人都注册完后清空 | `New-Secret 4` 或自定 |
 | `MQTT_HOOK_SECRET` | ✅ | 空 → install 自动生成 | updater 向后端上报状态时的 `X-Internal-Token`（Windows 用内置 broker，不涉及 EMQX）；改后**两个服务都要重启** | 留空让 `install.ps1` 生成 |
@@ -253,7 +349,7 @@ New-Secret 32                                             # 64 位十六进制
 | `HTTPS_PROXY` | 可选 | 空 | 出站代理（后端镜像 APK、updater 查询/下载 GitHub、`install.ps1` 下载 cloudflared），如 `http://127.0.0.1:7890`，支持 `http://user:pass@host:port` | — |
 | `NO_PROXY` | | `localhost,127.0.0.1` | 不走代理的主机 | — |
 | `PORT` | | `8080` | 后端 HTTP 端口；updater 的健康检查也用它。改了要同步改 cloudflared `config.yml` | — |
-| `JAVA_OPTS` | | `-Xms64m -Xmx512m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError` | 后端 JVM 参数，写进服务配置；2 GB 主机改 `-Xmx384m`，4 GB 主机 `-Xmx512m`～`-Xmx768m`。下次部署/重跑 `install.ps1` 生效（立即生效见 10.6） | — |
+| `JAVA_OPTS` | | 空 = `-Xms64m -Xmx512m -XX:MaxMetaspaceSize=192m -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError` | 后端 JVM 参数，写进服务配置；`setup.ps1` 按内存自动填（≤2.5 GB `-Xmx384m`，≤5 GB `-Xmx640m`，更大 `-Xmx1024m`），改成其他值后不再自动改。下次部署/重跑 `install.ps1` 生效（立即生效见 10.6） | — |
 | `COUPLE_API_BASE` | | 空 | 管理后台调 API 的地址，留空 = 同域（推荐）。旧名 `ADMIN_API_BASE` 也认 | — |
 
 ### 4.3 MQTT（内置 broker）
@@ -356,6 +452,8 @@ try { Invoke-WebRequest https://couple.example.com/api/v1/internal/mqtt/auth -Us
 - [ ] 若 `BOOTSTRAP_PRIVATE_KEY` 留空：`Select-String -Path C:\couple\logs\couple-backend.out.log -Pattern 'Generated a new bootstrap'` 会看到警告——私钥已存进数据库，第 10.7 节的 MySQL 备份包含它。
 
 ## 7. 创建首个管理员
+
+> 用 `setup.ps1` 安装时，直接打开它输出的 `https://<域名>/setup?token=<SETUP_TOKEN>` 创建管理员即可（快速安装第 3 步），不需要本节。下面是不用首次设置页时的 API 做法。
 
 管理后台只有登录页、没有注册入口；App 要扫管理员生成的二维码才能连服务器——所以第一个账号用 API 注册。没设 `ADMIN_USERNAME` 时**第一个注册的用户自动成为管理员**，请自己先注册。需要 `REGISTRATION_CODE` 非空（第 4 节）。
 
@@ -527,7 +625,7 @@ New-Item -ItemType Directory -Force C:\couple-backup | Out-Null
 @'
 [client]
 user=root
-password=<ROOT密码>
+password=<ROOT密码>      # setup.ps1 装的 MySQL：见 C:\couple\config\mysql-root.txt
 host=127.0.0.1
 '@ | Set-Content C:\couple-backup\mysqldump.cnf -Encoding ASCII
 
@@ -563,6 +661,9 @@ Start-ScheduledTask couple-backup; Start-Sleep 20; Get-ChildItem C:\couple-backu
 
 | 现象 | 排查 |
 |---|---|
+| `setup.ps1` 报“安装失败，步骤：[x/7 …]” | 按提示看 `C:\couple\logs\setup-<时间>.log`；修好后直接重新运行 `setup.ps1`（已完成的步骤会跳过）。MySQL 步骤失败看 `C:\mysql-data\mysqld.err`；隧道步骤失败多半是授权时选错了域名（删掉 `%USERPROFILE%\.cloudflared\cert.pem` 后重跑，授权时选 `<域名>` 所属的那个）或出站被拦 |
+| `setup.ps1` 一直停在 Cloudflare 授权 | 把打印出的链接复制到任意电脑的浏览器打开并点 *Authorize*；超时后重新运行即可 |
+| 中文显示成乱码/方块 | 控制台字体不支持中文（不影响安装）；看 `C:\couple\SETUP-RESULT.txt` 或日志文件。不要用记事本另存 `setup.ps1`（它必须保持 UTF-8 带 BOM） |
 | `install.ps1` 报 `Run this script from an elevated PowerShell` | 没用管理员 PowerShell |
 | `install.ps1` 报“无法加载，因为在此系统上禁止运行脚本” | 用 `powershell -ExecutionPolicy Bypass -File .\install.ps1` 启动，或 `Get-ChildItem -Recurse \| Unblock-File` |
 | `couple-backend` 起不来 / 反复重启 | 看 `C:\couple\logs\couple-backend.err.log`、`.out.log`、`.wrapper.log`：`Missing required environment variable DB_URL`（`couple.env` 缺行）、`JWT_SECRET must be at least 32 characters`、`Communications link failure`（MySQL 没启动：`Get-Service MySQL84`；后端是延迟自动启动 + 失败自动重启，开机时一般会自愈）、`Access denied for user`（`DB_PASSWORD` 与 2.3 不一致）、`OutOfMemoryError`（调 `JAVA_OPTS`，见 10.6） |
