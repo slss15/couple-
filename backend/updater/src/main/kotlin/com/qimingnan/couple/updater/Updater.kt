@@ -28,6 +28,8 @@ data class State(
     val current: Map<String, String?> = mapOf("server" to null),
     val currentSha256: String? = null,
     val bad: Map<String, List<String>> = mapOf("server" to emptyList()),
+    /** sha256s the poller refused as downgrades (never downloaded again by the poller; a signed hook may override). */
+    val refused: Map<String, List<String>> = mapOf("server" to emptyList()),
     val deploys: Map<String, DeployRecord> = emptyMap(),
     val lastCheck: Long? = null,
     val lastResult: String? = null,
@@ -80,8 +82,12 @@ class Updater(
         state = runCatching { StateJson.decodeFromString(State.serializer(), Files.readString(statePath)) }.getOrDefault(State())
             .copy(channel = cfg.channel)
         replay = ReplayCache(cfg.stateDir.resolve("hook-replay.json"), cfg.hookMaxSkew)
-        // CURRENT (written by install.ps1 or a previous deploy) is the truth about what runs.
-        releases.current()?.let { cur -> if (state.current["server"] != cur) state = state.copy(current = mapOf("server" to cur)) }
+        // CURRENT (written by install.ps1 or a previous deploy) is the truth about what runs. When install.ps1 switched
+        // releases by hand, the remembered sha256 belongs to the old build: forget it (the next matching remote build
+        // is adopted as a noop instead of failing forever with version_in_use).
+        releases.current()?.let { cur ->
+            if (state.current["server"] != cur) state = state.copy(current = mapOf("server" to cur), currentSha256 = null)
+        }
     }
 
     fun currentVersion(): String? = state.current["server"]
@@ -122,6 +128,20 @@ class Updater(
         s.copy(bad = s.bad + ("server" to list))
     }
 
+    private fun markRefused(sha256: String) = update { s ->
+        val list = (s.refused["server"].orEmpty() + sha256).distinct().takeLast(20)
+        s.copy(refused = s.refused + ("server" to list))
+    }
+
+    private class DowngradeRefused(msg: String) : Exception(msg)
+
+    private fun refuseDowngrade(job: DeployJob, source: String, why: String): String {
+        log("refusing ${job.version} ($source): $why. Older builds are only deployed for a pinned UPDATE_CHANNEL=<version> or a hook with allowDowngrade=true")
+        if (source == "poll") markRefused(job.sha256)
+        finish("failed", "downgrade_refused")
+        return "failed"
+    }
+
     private fun waitHealthy(): Boolean {
         val deadline = clock() + cfg.healthTimeoutSeconds * 1000
         while (clock() < deadline) {
@@ -144,6 +164,11 @@ class Updater(
             // Same version name but different bytes (e.g. re-run of a tag build): never overwrite the running copy.
             finish("failed", "version_in_use"); return "failed"
         }
+        // 0) anti-downgrade, by name first (no download needed for X.Y.Z versions)
+        val currentEpoch = prev?.let { BuildInfo.read(releases.dir(it))?.commitEpoch }
+        if (!job.allowDowngrade && VersionOrder.relation(job.version, null, prev, null) == VersionOrder.Relation.DOWNGRADE) {
+            return refuseDowngrade(job, source, "${job.version} is older than the running $prev")
+        }
         // 1) download + verify (nothing on the running system is touched yet)
         val dl = cfg.stateDir.resolve("downloads").also { Files.createDirectories(it) }.resolve("server-${job.version}.zip")
         try {
@@ -154,7 +179,17 @@ class Updater(
                 markBad(job.sha256)
                 finish("failed", "sha256_mismatch"); return "failed"
             }
-            releases.install(dl, job.version, keep = prev)
+            releases.install(dl, job.version, keep = prev) { staging ->
+                // ... then by build time (edge-<sha> names carry no order): BUILD_INFO of the new vs the running release.
+                if (!job.allowDowngrade) {
+                    val newEpoch = BuildInfo.read(staging)?.commitEpoch
+                    if (VersionOrder.relation(job.version, newEpoch, prev, currentEpoch) == VersionOrder.Relation.DOWNGRADE) {
+                        throw DowngradeRefused("${job.version} (commit time $newEpoch) is older than the running $prev ($currentEpoch)")
+                    }
+                }
+            }
+        } catch (e: DowngradeRefused) {
+            return refuseDowngrade(job, source, e.message ?: "older build")
         } catch (e: Exception) {
             log("download/extract ${job.version} failed: ${e.message}")
             finish("failed", if (e is java.io.IOException && e.message?.contains("incomplete") == true) "bad_package" else "download_failed")
@@ -178,6 +213,7 @@ class Updater(
                 finish("success", null)
                 log("server -> ${job.version} ($source) healthy")
                 runCatching { releases.prune(alsoKeep = prev) }
+                logUpdaterRuntime(job.version)
                 return "success"
             }
             "health_timeout"
@@ -214,12 +250,26 @@ class Updater(
             log("remote ${remote.version} (${remote.sha256.take(12)}) is marked bad; waiting for a newer build")
             return
         }
+        val pinned = VersionOrder.isPinnedChannel(cfg.channel)
+        if (!pinned && remote.sha256 in state.refused["server"].orEmpty()) return
         val err = assetUrlError(cfg, remote.assetUrl)
         if (err != null) {
             update { it.copy(lastError = "server:$err") }
             return
         }
-        deploy(DeployJob(remote.version, remote.assetUrl, remote.sha256, remote.sha), "poll")
+        // A pinned UPDATE_CHANNEL=<version> is an explicit manual choice: it may go back to an older version.
+        deploy(DeployJob(remote.version, remote.assetUrl, remote.sha256, remote.sha, allowDowngrade = pinned), "poll")
+    }
+
+    /**
+     * The updater does not replace itself (its jars are locked while it runs): install.ps1 refreshes updater\jre and
+     * updater\lib. Log when the runtime is older than the release just deployed so the operator knows to re-run it.
+     */
+    private fun logUpdaterRuntime(deployed: String) {
+        val runtime = runCatching { Files.readString(cfg.installDir.resolve("updater").resolve("VERSION")).trim() }.getOrNull() ?: return
+        if (runtime != deployed) {
+            log("updater runtime is from $runtime; to update the updater itself run releases\\$deployed\\install.ps1 (SETUP-windows.md 10.4)")
+        }
     }
 
     fun enqueueHook(job: DeployJob) {

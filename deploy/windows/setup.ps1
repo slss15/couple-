@@ -10,6 +10,7 @@
 
   The only question is the public hostname (a domain already active on Cloudflare). Everything else is automatic
   and idempotent, so re-running after a failure (or later, to repair) is safe:
+    0. doctor.ps1 preflight (read-only; stops on FAIL unless -IgnoreDoctor)
     1. admin check, TLS 1.2, <InstallDir> layout, config\couple.env with generated secrets
     2. MySQL: if no MySQL service exists, installs the pinned MySQL 8.4 LTS ZIP (sha256-verified, VC++ runtime if
        missing) as service MySQL84 with a random root password (config\mysql-root.txt), then creates database and
@@ -38,7 +39,11 @@ param(
     # Use a database configured by hand (DB_* in couple.env); do not install or touch MySQL.
     [switch]$SkipMysql,
     # Do not set up the Cloudflare Tunnel (local-only install).
-    [switch]$SkipTunnel
+    [switch]$SkipTunnel,
+    # Continue even when doctor.ps1 reports FAIL (it still runs and prints its table).
+    [switch]$IgnoreDoctor,
+    # Passed to install.ps1: allow installing this package over a newer installed release (manual rollback).
+    [switch]$AllowDowngrade
 )
 
 Set-StrictMode -Version 2.0
@@ -403,6 +408,21 @@ if (-not (Test-Admin)) {
 }
 Enable-Tls12
 
+# Preflight (read-only). A FAIL stops here, before anything is installed.
+$doctorArgs = @{ InstallDir = $InstallDir }
+if ($SkipTunnel) { $doctorArgs['SkipTunnel'] = $true }
+if ($SkipMysql) { $doctorArgs['SkipMysql'] = $true }
+& (Join-Path $PSScriptRoot 'doctor.ps1') @doctorArgs
+$doctorExit = $LASTEXITCODE
+if ($doctorExit -ne 0) {
+    if ($IgnoreDoctor) {
+        Write-Warning '环境检查有 FAIL 项，因为 -IgnoreDoctor 继续安装'
+    } else {
+        Write-Host '环境检查有 FAIL 项，没有做任何改动。按表格里的“修复建议”处理后重新运行 setup.ps1（确认无碍可加 -IgnoreDoctor 跳过）。' -ForegroundColor Red
+        exit 1
+    }
+}
+
 $pkg = $PSScriptRoot
 $version = ([IO.File]::ReadAllText((Join-Path $pkg 'VERSION'))).Trim()
 $pins = Read-KeyValueFile (Join-Path $pkg 'versions.env')
@@ -421,7 +441,7 @@ Write-Host "Couple 服务器 $version 一键安装 → $InstallDir" -ForegroundC
 $prevHost = (Get-TunnelConfigInfo (Join-Path $script:configDir 'cloudflared\config.yml')).Hostname
 $hostInput = $Hostname
 for ($try = 1; -not (ConvertTo-Hostname $hostInput); $try++) {
-    if ($try -gt 1 -or $Hostname) { Write-Warning "“$hostInput” 不是有效的域名（例：couple.example.com，不带 https:// 和路径）" }
+    if ($try -gt 1 -or $Hostname) { Write-Warning "「$hostInput」 不是有效的域名（例：couple.example.com，不带 https:// 和路径）" }
     if ($try -gt 3) { exit 1 }
     $prompt = '请输入服务器域名（必须是已接入 Cloudflare 的域名，例如 couple.example.com）'
     if ($prevHost) { $prompt += "，直接回车 = $prevHost" }
@@ -464,6 +484,7 @@ try {
 
     Enter-Step 5 'Cloudflare Tunnel'
     $installArgs = @{ InstallDir = $InstallDir }
+    if ($AllowDowngrade) { $installArgs['AllowDowngrade'] = $true }
     if ($SkipTunnel) {
         Write-Info '-SkipTunnel：跳过（只在本机 127.0.0.1 可访问）'
     } else {

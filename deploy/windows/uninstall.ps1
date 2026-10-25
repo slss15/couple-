@@ -22,6 +22,20 @@ if (-not (New-Object Security.Principal.WindowsPrincipal $id).IsInRole([Security
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 
+# The watchdog would restart the services we are about to remove.
+$old = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    & schtasks.exe /Query /TN '\Couple\couple-watchdog' 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        & schtasks.exe /Delete /TN '\Couple\couple-watchdog' /F 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { Write-Host 'removed scheduled task \Couple\couple-watchdog' } else { Write-Warning "schtasks /Delete returned $LASTEXITCODE" }
+    }
+    & schtasks.exe /Delete /TN '\Couple\' /F 2>&1 | Out-Null   # empty task folder (fails harmlessly when not empty/missing)
+} finally {
+    $ErrorActionPreference = $old
+}
+
 foreach ($name in @('couple-cloudflared', 'couple-updater', 'couple-backend')) {
     $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
     if ($null -eq $svc) { continue }

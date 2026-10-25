@@ -46,17 +46,18 @@ private fun usage(): Nothing {
 
 fun serve(cfg: Config) {
     val http = Http(cfg.proxy, cfg.noProxy)
+    val api = GitHubApi(cfg, http)
     val up = Updater(
         cfg,
         service = WinswServiceControl(cfg.serviceExe),
         health = http.health(),
-        downloader = http.downloader(),
-        source = GitHubReleaseSource(cfg, http),
+        downloader = GitHubDownloader(api, http.downloader()),
+        source = GitHubReleaseSource(cfg, http, api),
         postStatus = { body -> http.postStatus(cfg.statusPostUrl, cfg.internalToken, body) },
     )
     log(
         "start channel=${cfg.channel} enabled=${cfg.enabled} interval=${cfg.intervalSeconds}s current=${up.currentVersion()} " +
-            "hook=${if (cfg.hookSecret.isNotEmpty()) "on" else "off"} listen=${cfg.hookBind}:${cfg.hookPort} window=${cfg.window.ifEmpty { "-" }}",
+            "hook=${if (cfg.hookSecret.isNotEmpty()) "on" else "off"} github=${if (api.authenticated) "token" else "anonymous"} listen=${cfg.hookBind}:${cfg.hookPort} window=${cfg.window.ifEmpty { "-" }}",
     )
     http.postStatus(cfg.statusPostUrl, cfg.internalToken, up.publicStatusJson())
     Thread(up::workerLoop, "updater-worker").apply { isDaemon = true }.start()

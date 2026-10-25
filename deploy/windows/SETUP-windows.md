@@ -106,6 +106,15 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
 ---
 
+### 6. 自动体检、看门狗与防降级（了解即可）
+
+- **安装前体检 `doctor.ps1`**：`setup.ps1` 会先运行它，逐项列出 PASS / WARN / FAIL 和修复提示（管理员权限、PowerShell/系统版本、内存与 C 盘空间、端口占用、代理、到 GitHub / MySQL / Cloudflare 的连通性、时钟偏差、控制台代码页、Defender/AppLocker）。有 FAIL 时停止；确认无碍可加 `-IgnoreDoctor`。单独运行：`powershell -ExecutionPolicy Bypass -File .\doctor.ps1`。
+- **看门狗**：计划任务 `\Couple\couple-watchdog`（SYSTEM，每 2 分钟 + 开机）。服务停了就拉起；后端健康检查连续 2 次失败就重启后端；隧道连接数为 0 或经 Cloudflare 的公网健康检查连续 2 次失败就重启 `couple-cloudflared`；C 盘剩余 < 2 GB 告警。日志 `C:\couple\logs\watchdog.log`（1 MB 轮转，留 5 份）。暂停：新建空文件 `C:\couple\config\watchdog.pause`，或在 `couple.env` 写 `WATCHDOG_ENABLED=false`。
+- **防降级**：自动更新不会装比当前旧的版本；`install.ps1` 遇到更旧的安装包会拒绝，确需回退加 `-AllowDowngrade`（`setup.ps1` 也支持透传）。固定频道 `UPDATE_CHANNEL=<版本号>` 或签名 webhook 里的 `allowDowngrade:true` 视为有意回退。
+- **只监听本机**：后端默认 `BIND_HOST=127.0.0.1`，外部只能经 Cloudflare Tunnel 访问。
+- **权限**：`C:\couple` 只允许 Administrators 和 SYSTEM 修改。
+- **私有仓库**：在 `couple.env` 设置 `UPDATE_GITHUB_TOKEN`（只读 contents 的 fine-grained token），updater 就能下载私有仓库的发布包。
+
 # 附录：手动安装 / 排障
 
 下面是 `setup.ps1` 背后每一步的手动做法、每个配置项的说明和日常运维。用 `setup.ps1` 装好的服务器一般只需要看第 6（验证）、10（运维）、11（排障）节。

@@ -18,6 +18,8 @@
   <env name="RELEASES_DIR" value="@INSTALL_DIR@\data\releases"/>
   <env name="MQTT_DATA_DIR" value="@INSTALL_DIR@\data\mqtt"/>
   <env name="APP_VERSION" value="@VERSION@"/>
+  <!-- Loopback only: cloudflared on this host is the only ingress. BIND_HOST=0.0.0.0 in couple.env opens it to the LAN. -->
+  <env name="BIND_HOST" value="127.0.0.1"/>
   <logpath>@INSTALL_DIR@\logs</logpath>
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>
