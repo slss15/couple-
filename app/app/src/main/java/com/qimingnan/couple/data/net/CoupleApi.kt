@@ -5,6 +5,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Query
+import com.qimingnan.couple.data.update.HealthReport
 import com.qimingnan.couple.data.update.UpdateResponse
 
 /** contract.md 的 REST 接口（相对 {baseUrl}/api/v1/）。 */
@@ -33,8 +34,18 @@ interface CoupleApi {
     @POST("couple/unpair/confirm")
     suspend fun confirmUnpair(@Body body: UnpairConfirmRequest): Response<Unit>
 
+    /** Also reports this device's app/partner-protocol versions to the server (OTA v2 partner gate). */
     @GET("app/update")
-    suspend fun checkUpdate(@Query("versionCode") versionCode: Int, @Query("deviceId") deviceId: String): UpdateResponse
+    suspend fun checkUpdate(
+        @Query("versionCode") versionCode: Int,
+        @Query("deviceId") deviceId: String,
+        @Query("protocolVersion") protocolVersion: Int,
+        @Query("minPeerProtocol") minPeerProtocol: Int,
+        @Query("sdkInt") sdkInt: Int,
+    ): UpdateResponse
+
+    @POST("app/health-report")
+    suspend fun healthReport(@Body body: HealthReport): Response<Unit>
 
     companion object {
         /** Retrofit 需要一个固定 baseUrl；真实地址由 [BaseUrlInterceptor] 按当前配置改写。 */

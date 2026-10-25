@@ -7,12 +7,14 @@ import com.qimingnan.couple.data.bootstrap.BootstrapStore
 import com.qimingnan.couple.data.couple.CoupleRepository
 import com.qimingnan.couple.data.couple.CoupleState
 import com.qimingnan.couple.data.mqtt.MqttManager
+import com.qimingnan.couple.data.mqtt.MqttState
 import com.qimingnan.couple.data.mqtt.MqttTarget
 import com.qimingnan.couple.data.update.UpdateRepository
 import com.qimingnan.couple.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -67,7 +69,13 @@ class AppCoordinator @Inject constructor(
             // App update check (/app/update needs a session): on start / login, at most once per 6 h.
             combine(bootstrapStore.state, session.state) { b, s ->
                 b?.pendingSince == null && b?.current != null && s is SessionState.LoggedIn
-            }.distinctUntilChanged().collect { ready -> if (ready) updates.checkIfDue() }
+            }.distinctUntilChanged().collect { ready ->
+                if (ready) {
+                    updates.checkIfDue()
+                    // OTA v2: first run of a self-installed version reports OK on the first MQTT connect.
+                    updates.startHealthWatch(mqtt.state.map { it is MqttState.Connected })
+                }
+            }
         }
     }
 }

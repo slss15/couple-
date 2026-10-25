@@ -49,7 +49,7 @@
 
 - **发布密钥**：Ed25519，32 字节 seed，GitHub secret `OTA_SIGNING_KEY`（base64）。与 bootstrap 二维码密钥（后端 `BOOTSTRAP_PRIVATE_KEY`，在服务器上）**完全独立**：服务器被攻破不能签发布清单。
 - **公钥**：GitHub 仓库 variable `OTA_PUBLIC_KEY`（base64 raw 32 字节，公开信息）。构建时通过 gradle property `couple.otaPublicKey` 或环境变量 `OTA_PUBLIC_KEY` 写进 `BuildConfig.OTA_PUBLIC_KEY`。release 构建要求必须有；debug 构建没有时跳过验签并打一行日志。
-- 生成：`deploy/ota-keygen.sh`（openssl，输出 seed 和公钥，seed 不落盘）。
+- 生成：`deploy/scripts/ota-keygen.sh`（openssl，输出 seed 和公钥，seed 不落盘）；签名：`deploy/scripts/ota-sign.sh`（CI 调用，本地也能跑）。
 - 后端可选设置环境变量 `OTA_PUBLIC_KEY`：设置后镜像时也验签（纵深防御，**不是**信任根；信任根是 App 里编译期 pin 的公钥）。
 
 ### 2.2 清单格式
@@ -97,7 +97,8 @@
 
 ## 4. 伴侣兼容（protocol gate）【本 PR 实现】
 
-- 每个构建带两个整数：`PROTOCOL_VERSION`（我说的协议）和 `MIN_PEER_PROTOCOL`（我能听懂的最低对端协议），定义在 `app/gradle.properties`，CI 从同一处读出写进清单。
+- 每个构建带两个整数：`PEER_PROTOCOL_VERSION`（我对伴侣说的协议）和 `MIN_PEER_PROTOCOL`（我能听懂的最低对端协议），定义在 `app/gradle.properties`（`couple.protocolVersion` / `couple.minPeerProtocol`），CI 从同一处读出写进清单的 `protocolVersion` / `minPeerProtocol`。
+- 注意：这是 **App↔App** 协议，与 `/health` 里的 `protocolVersion`（客户端↔服务器，`BuildConfig.PROTOCOL_VERSION`）是两回事，互不影响。
 - 兼容 ⇔ `A.protocol >= B.minPeer && B.protocol >= A.minPeer`。
 - **上报**：复用 `GET /app/update`（启动/登录时本来就调用），加参数 `protocolVersion`、`minPeerProtocol`、`sdkInt`；健康上报（§5）也会刷新。服务器以 **token 里的 did** 记到 `device_reports`（不信任 query 里的 deviceId，防止替别人上报）。
 - **响应**多出 `reason` 与 `peer`：
@@ -161,14 +162,15 @@
 
 | 层 | 用例 | 文件 |
 |---|---|---|
-| 后端 JUnit | 签名清单：带签名镜像成功且原样返回；配置公钥后缺签名/坏签名拒收 | `ReleaseTest`（新增用例） |
+| 后端 JUnit | 签名清单：带签名镜像成功且字节级原样返回；配置公钥后缺签名/坏签名/重新序列化拒收；OpenSSL 脚本产出的测试向量能被 JDK 验证 | `OtaV2Test` |
 | 后端 | 防降级：高水位以下 PATCH PUBLISHED → 409 | `OtaV2Test` |
 | 后端 | 设备上报 + peer：`/app/update` 返回 peer；伴侣协议更高 → `PEER_PROTOCOL` 强更；伴侣版本新 → `PEER_NEWER` | `OtaV2Test` |
 | 后端 | PEER_CANNOT_FOLLOW：minSdk 高于设备 sdkInt 的强更被拒，override 放行 | `OtaV2Test` |
-| 后端 | 健康上报：CRASH → 自动暂停，暂停版本不再下发；canary OK → 晋级 ALL；非 canary 在 CANARY 阶段看不到 | `OtaV2Test` |
+| 后端 | 健康上报：CRASH → 自动暂停，暂停版本不再下发，admin 恢复/手动暂停；canary OK → 晋级 ALL，非 canary 的 OK 不晋级；没配 canary 时 staged 直接 ALL | `OtaV2Test` |
 | App JVM | 清单验签（正确/篡改/错钥/字段不一致/未 pin 跳过） | `ManifestVerifierTest` |
 | App | 防降级 highestSeen 规则 | `UpdateLogicTest` |
-| App | 健康上报状态机（pending→OK、崩溃标记→CRASH、超时→FAILED） | `HealthReportLogicTest` |
+| App | 健康上报状态机（pending→WATCH、崩溃标记→CRASH、未安装/过期/已装更新→清理；崩溃详情不含消息文本） | `HealthLogicTest` |
+| App | OpenSSL 测试向量能被 BouncyCastle 验证（CI 签、App 验，跨实现一致） | `ManifestVerifierTest` |
 | CI | 签名脚本自检：签完立刻用 `OTA_PUBLIC_KEY` 回验，不匹配则发布失败 | `release.yml` |
 
 ### 8.2 手工 / 实机（发布前一次，ROM 大版本升级后再跑）

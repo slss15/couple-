@@ -94,4 +94,28 @@ class UpdateLogicTest {
         assertTrue(UpdateLogic.checkCertificates(setOf(a), setOf(a, b), a) is CertCheck.Rejected)
         assertEquals(CertCheck.Ok, UpdateLogic.checkCertificates(setOf(a, b), setOf(b, a), b))
     }
+
+    @Test
+    fun antiDowngradeHighestSeen() {
+        // Installed 100, never saw anything newer: 101 ok, 100/99 rejected.
+        assertTrue(UpdateLogic.acceptOffer(101, 100, 100))
+        assertFalse(UpdateLogic.acceptOffer(100, 100, 100))
+        assertFalse(UpdateLogic.acceptOffer(99, 100, 100))
+        // A verified manifest for 105 was seen; a (replayed, older but still newer-than-installed) 103 is refused.
+        val seen = UpdateLogic.nextHighestSeen(100, 100, 105)
+        assertEquals(105, seen)
+        assertFalse(UpdateLogic.acceptOffer(103, 100, seen))
+        assertTrue(UpdateLogic.acceptOffer(105, 100, seen))
+        assertTrue(UpdateLogic.acceptOffer(106, 100, seen))
+        // Unverified offers never raise the mark; installing raises it.
+        assertEquals(105, UpdateLogic.nextHighestSeen(105, 100, null))
+        assertEquals(110, UpdateLogic.nextHighestSeen(105, 110, null))
+    }
+
+    @Test
+    fun reasonTexts() {
+        assertTrue(UpdateLogic.reasonText("PEER_PROTOCOL", null)!!.contains("通信协议"))
+        assertTrue(UpdateLogic.reasonText("PEER_NEWER", null)!!.contains("对方"))
+        assertNull(UpdateLogic.reasonText(null, null))
+    }
 }
