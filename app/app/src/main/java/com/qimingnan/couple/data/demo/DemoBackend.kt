@@ -60,9 +60,12 @@ object DemoBackend {
     const val COUPLE_ID = "demo-couple"
     fun couple(): Couple = Couple(id = COUPLE_ID, members = listOf(self(), partner), pairedAt = 1_735_689_600_000)
 
-    fun tokens(now: Long): TokenPair = TokenPair(
-        accessToken = "demo-access", refreshToken = "demo-refresh", accessExpiresAt = now + 24 * 3600_000L, user = self(),
-    )
+    /** 每次登录/刷新都发一对新的演示 token（和真后端一样会轮换，App 侧的换 token 路径在演示里也被真实走到）。 */
+    fun tokens(now: Long): TokenPair {
+        val at = "demo-access-$now"
+        val rt = "demo-refresh-$now"
+        return TokenPair(accessToken = at, refreshToken = rt, accessExpiresAt = now + 24 * 3600_000L, user = self())
+    }
 
     /** 纯函数：根据方法 + 路径给出 (HTTP 状态码, JSON body)。方便 JVM 单测。 */
     fun respond(method: String, path: String, now: Long): Pair<Int, String> {

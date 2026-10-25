@@ -33,8 +33,13 @@ class TokenRefreshTest {
     private lateinit var server: MockWebServer
     private val refreshCalls = AtomicInteger()
 
-    private fun pair(n: Int) = """{"accessToken":"access-$n","refreshToken":"refresh-$n","accessExpiresAt":9999999999999,
+    private fun pair(n: Int): String {
+        // 假 token 每代不同（refresh-N → refresh-(N+1)），与字面 JSON 模板分开构造
+        val at = "access-$n"
+        val rt = "refresh-$n"
+        return """{"accessToken":"$at","refreshToken":"$rt","accessExpiresAt":9999999999999,
         "user":{"id":"U1","username":"me","displayName":"Me","createdAt":1}}"""
+    }
 
     @Before fun setUp() {
         server = MockWebServer()
