@@ -7,7 +7,12 @@ import com.qimingnan.couple.data.bootstrap.ApplyProgress
 import com.qimingnan.couple.data.bootstrap.BootstrapError
 import com.qimingnan.couple.data.bootstrap.BootstrapManager
 import com.qimingnan.couple.data.bootstrap.BootstrapPreview
+import com.qimingnan.couple.data.auth.SessionManager
+import com.qimingnan.couple.data.bootstrap.BootstrapStore
+import com.qimingnan.couple.data.demo.DemoBackend
+import com.qimingnan.couple.data.net.ApiResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +40,8 @@ sealed interface BootstrapUiState {
 @HiltViewModel
 class BootstrapViewModel @Inject constructor(
     private val manager: BootstrapManager,
+    private val store: BootstrapStore,
+    private val session: SessionManager,
 ) : ViewModel() {
     private val _state = MutableStateFlow<BootstrapUiState>(BootstrapUiState.Idle)
     val state: StateFlow<BootstrapUiState> = _state.asStateFlow()
@@ -98,6 +105,28 @@ class BootstrapViewModel @Inject constructor(
 
     fun cancelConfirm() {
         if (_state.value is BootstrapUiState.Confirm) _state.value = BootstrapUiState.Idle
+    }
+
+    /**
+     * debug 包的「调试账号」：不经扫码、不连服务器，直接切到进程内假后端（[DemoBackend]）并登录。
+     * 之后在「我的 → 重新扫码」就能换回真实服务器。
+     */
+    fun enterDemo() {
+        if (!DemoBackend.available || busy) return
+        _state.value = BootstrapUiState.Verifying
+        viewModelScope.launch {
+            session.clearLocal()
+            val st = store.load()
+            val now = System.currentTimeMillis()
+            val keepPrevious = st.current?.takeUnless { DemoBackend.isDemo(it.baseUrl) } ?: st.previous
+            store.save(st.copy(current = DemoBackend.config(now), previous = keepPrevious, pendingSince = null))
+            DemoBackend.paired = true
+            delay(300) // 让“已切换服务器”的清理先跑完，再登录
+            _state.value = when (val r = session.login(DemoBackend.USERNAME, DemoBackend.PASSWORD)) {
+                is ApiResult.Ok -> BootstrapUiState.Success
+                is ApiResult.Err -> BootstrapUiState.Failed(r.error.message)
+            }
+        }
     }
 
     fun reset() {

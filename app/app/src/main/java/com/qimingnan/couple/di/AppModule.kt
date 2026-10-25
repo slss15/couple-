@@ -19,6 +19,7 @@ import com.qimingnan.couple.data.bootstrap.ServerProbe
 import com.qimingnan.couple.data.bootstrap.apiRoot
 import com.qimingnan.couple.data.db.AppDatabase
 import com.qimingnan.couple.data.db.ProfileDao
+import com.qimingnan.couple.data.demo.DemoInterceptor
 import com.qimingnan.couple.data.net.AuthHeaderInterceptor
 import com.qimingnan.couple.data.net.BaseUrlInterceptor
 import com.qimingnan.couple.data.net.CoupleApi
@@ -75,6 +76,7 @@ object AppModule {
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
+        .addInterceptor(DemoInterceptor()) // debug 调试账号：只拦截 demo.couple.local
         .addInterceptor(logging())
         .build()
 
@@ -103,6 +105,7 @@ object AppModule {
         .apply { interceptors().clear() }
         .addInterceptor(BaseUrlInterceptor.fromStore(bootstrapStore))
         .addInterceptor(AuthHeaderInterceptor(tokenStore))
+        .addInterceptor(DemoInterceptor())
         .addInterceptor(logging())
         .authenticator(TokenAuthenticator(refresher))
         .build()

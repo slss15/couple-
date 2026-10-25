@@ -36,6 +36,7 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.R
+import com.qimingnan.couple.data.demo.DemoBackend
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.components.BannerKind
 import com.qimingnan.couple.ui.components.CoupleTextField
@@ -94,6 +95,12 @@ fun BootstrapScreen(
             }
         } else {
             ManualTab(busy = vm.busy, onUri = vm::inspectUri, onManual = vm::inspectManual)
+        }
+
+        if (DemoBackend.available) {
+            Text(stringResource(R.string.demo_title), style = t.typography.title, color = t.colors.onBackground)
+            Text(stringResource(R.string.demo_hint), style = t.typography.caption, color = t.colors.onSurfaceVariant)
+            SecondaryButton(stringResource(R.string.demo_enter), onClick = vm::enterDemo, enabled = !vm.busy)
         }
     }
 }

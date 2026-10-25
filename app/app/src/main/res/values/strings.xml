@@ -67,4 +67,7 @@
     <string name="back">返回</string>
     <string name="online">在线</string>
     <string name="offline">离线</string>
+    <string name="demo_title">调试账号（仅 debug 包）</string>
+    <string name="demo_hint">不需要服务器：使用内置的离线假后端登录账号 demo，并与“TA（演示）”配对。可以调试登录、配对、解绑、我的、后台保活等页面；不会发出任何网络请求。换回真实服务器：我的 → 重新扫码。</string>
+    <string name="demo_enter">使用调试账号进入</string>
 </resources>

@@ -6,7 +6,9 @@ import com.qimingnan.couple.data.bootstrap.BootstrapManager
 import com.qimingnan.couple.data.bootstrap.BootstrapStore
 import com.qimingnan.couple.data.couple.CoupleRepository
 import com.qimingnan.couple.data.couple.CoupleState
+import com.qimingnan.couple.data.demo.DemoBackend
 import com.qimingnan.couple.data.mqtt.MqttManager
+import com.qimingnan.couple.data.mqtt.Presence
 import com.qimingnan.couple.data.mqtt.MqttState
 import com.qimingnan.couple.data.mqtt.MqttTarget
 import com.qimingnan.couple.data.update.UpdateRepository
@@ -46,7 +48,15 @@ class AppCoordinator @Inject constructor(
                 val user = (s as? SessionState.LoggedIn)?.user
                 val cid = (c as? CoupleState.Paired)?.couple?.id
                 if (url != null && user != null && cid != null) MqttTarget(url, user.id, cid) else null
-            }.distinctUntilChanged().collect { mqtt.setTarget(it) }
+            }.distinctUntilChanged().collect { target ->
+                if (target != null && DemoBackend.isDemoUrl(target.url)) {
+                    // 调试账号：没有 broker，伴侣永远“在线”
+                    mqtt.setTarget(null)
+                    mqtt.setDemoPresence(mapOf(DemoBackend.partner.id to Presence(DemoBackend.partner.id, true, System.currentTimeMillis())))
+                } else {
+                    mqtt.setTarget(target)
+                }
+            }
         }
         scope.launch {
             // 已确认生效的服务器地址变了 → 旧服务器的 token 作废，回到登录页

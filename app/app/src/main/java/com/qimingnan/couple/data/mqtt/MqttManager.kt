@@ -152,6 +152,12 @@ class MqttManager @Inject constructor(
         }
     }
 
+    /** 调试账号（离线演示）：不连 broker，直接给出伴侣在线状态。 */
+    fun setDemoPresence(presence: Map<String, Presence>) {
+        _presence.value = presence
+        _state.value = MqttState.Idle
+    }
+
     fun reconnectNow(reason: String = "手动重连") {
         val t = target ?: return
         scope.launch(Dispatchers.IO) {
