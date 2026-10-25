@@ -57,6 +57,9 @@ import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
@@ -108,10 +111,23 @@ fun Application.module(config: AppConfig) {
     val bootstrapService = BootstrapService(keys, adminConfigService, config)
     log.info("Bootstrap Ed25519 public key: {}", keys.publicKeyBase64)
     val releaseSettings = ReleaseSettingsService(db, config.clock)
-    val releaseService = ReleaseService(db, config, releaseSettings, audit)
+    val wxPusher = com.qimingnan.couple.backend.notify.WxPusherService(
+        config,
+        settingsProvider = {
+            com.qimingnan.couple.backend.notify.WxPusherSettings.fromConfig(adminConfigService.snapshot().stored.notify)
+        },
+    )
+    val releaseService = ReleaseService(db, config, releaseSettings, audit, wxPusher)
     val releaseMirror = ReleaseMirror(db, config, releaseSettings, audit)
     attributes.put(ReleaseMirrorKey, releaseMirror)
     if (config.releasePollEnabled) releaseMirror.startScheduler(this)
+    // OTA design §9-5: periodically auto-pause canary releases that got no OK health report in time (2 h).
+    launch(Dispatchers.IO) {
+        while (true) {
+            runCatching { releaseService.sweepStaleCanaries() }
+            delay(30 * 60_000L)
+        }
+    }
 
     install(ContentNegotiation) { json(AppJson) }
     install(CallLogging) {

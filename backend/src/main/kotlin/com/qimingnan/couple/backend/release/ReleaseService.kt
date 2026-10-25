@@ -14,8 +14,12 @@ import com.qimingnan.couple.backend.db.SettingsRepo
 import com.qimingnan.couple.backend.health.SERVER_VERSION
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import java.io.File
 import java.security.MessageDigest
+
+/** §9-5: a CANARY release with no OK health report this long after publish is presumed bad and auto-paused. */
+private const val CANARY_GRACE_MS = 2 * 60 * 60_000L
 
 /** Pure update-selection rules (contract "Auto-update"), kept free of I/O so they are unit-testable. */
 object UpdatePolicy {
@@ -82,6 +86,8 @@ class ReleaseService(
     private val config: AppConfig,
     private val settings: ReleaseSettingsService? = null,
     private val audit: AuditService? = null,
+    /** Out-of-band operator alerts (WxPusher); null in tests that construct the service bare. */
+    private val notify: com.qimingnan.couple.backend.notify.WxPusherService? = null,
 ) {
 
     fun downloadPath(versionCode: Int) = "/api/v1/app/releases/$versionCode/apk"
@@ -176,6 +182,11 @@ class ReleaseService(
             "paused" -> {
                 log.warn("Auto-paused release {}: {}", req.versionCode, event.second)
                 audit?.log(null, AuditActions.RELEASE_AUTO_PAUSED, target, meta + ("reason" to event.second))
+                notify?.notify(
+                    "release-paused",
+                    "App 发版已自动暂停",
+                    "版本 ${req.versionCode} 收到 ${req.status} 健康上报（${caller.deviceId}），已自动暂停：${event.second}",
+                )
             }
             "promoted" -> audit?.log(null, AuditActions.RELEASE_PROMOTED, target, mapOf("deviceId" to caller.deviceId))
         }
@@ -186,6 +197,43 @@ class ReleaseService(
     }
 
     suspend fun health(versionCode: Int): List<HealthView> = db.tx { ReleaseHealthRepo.forVersion(versionCode) }
+
+    /**
+     * OTA design §9-5: a CANARY-stage published release exists so the canary devices can try it first — when none
+     * of them has reported OK within [CANARY_GRACE_MS], something is wrong even though nobody sent a failure report
+     * (the app may not even start). Auto-pause such releases. ALL-stage releases are never swept: with a normal
+     * gradual rollout "no report yet" is indistinguishable from "nobody updated".
+     */
+    suspend fun sweepStaleCanaries(): List<Int> {
+        val canaryIds = settings?.get()?.canaryDeviceIds.orEmpty()
+        if (canaryIds.isEmpty()) return emptyList()
+        val now = config.clock()
+        val stale = db.tx {
+            ReleaseRepo.all().filter { r ->
+                r.status == ReleaseStatus.PUBLISHED && r.stage == ReleaseStage.CANARY && r.pausedAt == null &&
+                    (if (r.publishedAt > 0) r.publishedAt else r.createdAt) <= now - CANARY_GRACE_MS
+            }
+        }
+        val paused = mutableListOf<Int>()
+        for (r in stale) {
+            if (db.tx { ReleaseHealthRepo.hasOk(r.versionCode) }) continue
+            val reason = "canary timeout: no OK health report within ${CANARY_GRACE_MS / 60_000} min"
+            val done = db.tx {
+                // Re-check under the row lock: a report may have landed (or been paused) since the read above.
+                val cur = ReleaseRepo.byVersionCode(r.versionCode, forUpdate = true)
+                val should = cur != null && cur.status == ReleaseStatus.PUBLISHED && cur.stage == ReleaseStage.CANARY &&
+                    cur.pausedAt == null && !ReleaseHealthRepo.hasOk(r.versionCode)
+                if (should) ReleaseRepo.update(cur!!.copy(pausedAt = now, pauseReason = reason))
+                should
+            }
+            if (!done) continue
+            log.warn("Auto-paused canary release {} ({}): {}", r.versionCode, r.versionName, reason)
+            audit?.log(null, AuditActions.RELEASE_AUTO_PAUSED, "release:${r.versionCode}", mapOf("reason" to reason))
+            notify?.notify("release-paused", "App 发版已自动暂停", "canary 版本 ${r.versionName}（${r.versionCode}）超过 ${CANARY_GRACE_MS / 60_000} 分钟没有任何 OK 健康上报，已自动暂停。")
+            paused += r.versionCode
+        }
+        return paused
+    }
 
     /** The published release's file, or 404. */
     suspend fun publishedFile(versionCode: Int): Pair<AppRelease, File> {
@@ -256,12 +304,21 @@ class ReleaseService(
     /** Stores the updater's JSON; returns true when something other than lastCheck changed (worth an audit entry). */
     suspend fun storeUpdaterStatus(body: JsonObject): Boolean {
         val now = config.clock()
-        return db.tx {
+        val changed = db.tx {
             val prev = SettingsRepo.get(KEY_UPDATER)?.let { runCatching { AppJson.parseToJsonElement(it) as? JsonObject }.getOrNull() }
             SettingsRepo.put(KEY_UPDATER, AppJson.encodeToString(JsonObject.serializer(), body), now)
             fun sig(o: JsonObject?) = o?.let { listOf(it["current"], it["lastResult"], it["lastError"]) }
             sig(prev) != sig(body)
         }
+        if (changed) {
+            val lastResult = (body["lastResult"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+            val lastError = (body["lastError"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+            val trouble = lastError != null || lastResult?.contains("failed") == true || lastResult?.contains("rolled_back") == true
+            if (trouble) {
+                notify?.notify("updater", "服务器部署异常", "server-updater 上报异常：result=$lastResult error=$lastError")
+            }
+        }
+        return changed
     }
 
     suspend fun serverUpdateStatus(): ServerUpdateStatus {

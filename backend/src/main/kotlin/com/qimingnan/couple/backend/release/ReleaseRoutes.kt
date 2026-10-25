@@ -179,6 +179,12 @@ fun Route.adminReleaseRoutes(
                 call.respond(HttpStatusCode.Accepted, mirror.state.copy(running = true))
             }
         }
+        post("/releases/sweep") {
+            val admin = call.requireAdmin(db, audit)
+            val paused = service.sweepStaleCanaries()
+            audit.log(admin, AuditActions.ADMIN_RELEASE_SWEEP, "releases", mapOf("paused" to paused.joinToString(",")))
+            call.respond(mapOf("paused" to paused))
+        }
         get("/releases/settings") {
             val admin = call.requireAdmin(db, audit)
             val view = settings.view()

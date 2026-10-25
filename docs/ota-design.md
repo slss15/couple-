@@ -186,17 +186,18 @@
 | 协议断代（minPeerProtocol+1） | 先升 | 后升 | 伴侣收到不可关闭的强更，理由“对方已升级，需要更新才能继续通信” |
 | 发布更低版本 | admin | | 409 DOWNGRADE_REFUSED |
 
-每次实机结果记到 `docs/ota-device-matrix.md`（品牌、ROM 版本、Android 版本、结果、截图）。【缺口：首轮实机数据待填】
+每次实机结果记到 `docs/ota-device-matrix.md`（品牌、ROM 版本、Android 版本、结果、截图）。【文档已建：docs/ota-device-matrix.md，首轮实机数据待填】
 
 ---
 
 ## 9. 本 PR 之后剩下的缺口（按价值排序）
 
-1. GitHub Environment 保护 `OTA_SIGNING_KEY`（required reviewer）——用户操作，零代码。
-2. Shizuku `pm install -i <pkg>` 保持 installer of record。
-3. 主动通知 admin（Bark/Server 酱 webhook）。
-4. 后台预下载 + Wi-Fi/充电偏好。
-5. 健康上报超时的服务端定时判定。
-6. 通用 feature flag。
-7. 实机矩阵首轮数据。
-8. 发布公钥轮换演练（文档化步骤：新版本内置新旧两把公钥 → 下个版本移除旧钥）。
+1. 【已完成，剩用户操作】GitHub Environment 保护 `OTA_SIGNING_KEY`（required reviewer）——release.yml 已挂 `environment: ota-release`；需在 GitHub 设置页创建该 Environment 并把自己设为 required reviewer。
+2. 【待做（App 批次）】Shizuku `pm install -i <pkg>` 保持 installer of record。
+3. 【已完成】主动通知 admin——改为 WxPusher（微信）：部署失败/回滚、发版自动暂停、canary 超时都会推给 `admin config` `notify.wxpusher` 里配置的 UIDs（去抖 10 分钟，见 contract.md Admin 节）。
+4. 【待做（App 批次）】后台预下载 + Wi-Fi/充电偏好。
+5. 【已完成】健康上报超时的服务端定时判定——CANARY 阶段已发布版本 2 小时内没有任何 OK 上报即自动暂停（后台每 30 分钟 sweep + `POST /admin/releases/sweep` 手动触发，管理后台后续可加按钮）。
+6. 【待做】通用 feature flag。
+7. 【文档已建，数据待填】实机矩阵首轮数据 → `docs/ota-device-matrix.md`。
+8. 【已完成】发布公钥轮换演练 → `docs/ota-key-rotation.md`（计划轮换 + 泄漏应急三情形 + 半年演练清单）。
+

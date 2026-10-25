@@ -56,6 +56,7 @@ object AuditActions {
     const val RELEASE_SYNC_FAILED = "release.sync_failed"
     const val ADMIN_RELEASE_LIST = "admin.release.list"
     const val ADMIN_RELEASE_SYNC = "admin.release.sync"
+    const val ADMIN_RELEASE_SWEEP = "admin.release.sweep"
     const val ADMIN_RELEASE_UPDATE = "admin.release.update"
     const val ADMIN_RELEASE_SETTINGS_VIEW = "admin.release.settings.view"
     const val ADMIN_RELEASE_SETTINGS_UPDATE = "admin.release.settings.update"

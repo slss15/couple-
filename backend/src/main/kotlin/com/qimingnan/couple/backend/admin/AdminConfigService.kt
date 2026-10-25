@@ -19,6 +19,8 @@ data class StoredConfig(
     val mqttUrl: String? = null,
     val turn: JsonObject = JsonObject(emptyMap()),
     val storage: JsonObject = JsonObject(emptyMap()),
+    /** Out-of-band alert channel config, e.g. {"wxpusher": {"appToken": "<secret>", "uids": [...]}}. */
+    val notify: JsonObject = JsonObject(emptyMap()),
 )
 
 /** Body of PUT /admin/config. */
@@ -28,6 +30,7 @@ data class AdminConfigUpdate(
     val mqttUrl: String? = null,
     val turn: JsonObject? = null,
     val storage: JsonObject? = null,
+    val notify: JsonObject? = null,
 )
 
 /**
@@ -40,6 +43,7 @@ data class AdminConfigView(
     val mqttUrl: String?,
     val turn: JsonObject,
     val storage: JsonObject,
+    val notify: JsonObject,
     val configVersion: Long,
     val updatedAt: Long?,
     /** Values derived from the request (forwarded headers) for empty fields; see contract "First-run setup". */
@@ -81,6 +85,7 @@ class AdminConfigService(private val db: Db, private val config: AppConfig) {
                 mqttUrl = req.mqttUrl ?: cur.stored.mqttUrl,
                 turn = req.turn?.let { mergeSecrets(cur.stored.turn, it, "turn", changedSecrets) } ?: cur.stored.turn,
                 storage = req.storage?.let { mergeSecrets(cur.stored.storage, it, "storage", changedSecrets) } ?: cur.stored.storage,
+                notify = req.notify?.let { mergeSecrets(cur.stored.notify, it, "notify", changedSecrets) } ?: cur.stored.notify,
             )
             val version = cur.version + 1
             SettingsRepo.put(KEY_CONFIG, AppJson.encodeToString(StoredConfig.serializer(), next), now)
@@ -126,6 +131,7 @@ class AdminConfigService(private val db: Db, private val config: AppConfig) {
         mqttUrl = stored.mqttUrl,
         turn = mask(stored.turn),
         storage = mask(stored.storage),
+        notify = mask(stored.notify),
         configVersion = version,
         updatedAt = updatedAt,
     )

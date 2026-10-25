@@ -33,6 +33,7 @@ Placeholder app name: "Couple" (to be renamed). Android package: com.qimingnan.c
 ## Admin
 - Preferred: the first admin is created through first-run setup (below). Legacy, still supported: the first registered user (or env ADMIN_USERNAME) gets role=admin.
 - GET /admin/config, PUT /admin/config {baseUrl, mqttUrl, turn:{provider:"cloudflare"|"coturn", ...}, storage:{...}} — secrets are write-only and come back masked.
+- Admin config also carries `notify`: `{"wxpusher": {"appToken": "<secret>", "uids": ["UID_..."]}}` (appToken is write-only/masked like other secrets; uids are plain). When configured, the backend sends best-effort operator alerts via WxPusher (`POST https://wxpusher.zjiecode.com/api/send/message`): deploy failure/rollback reported by the server-updater, a release auto-paused by a failed health report, and a canary release with no OK health report within 2 h (auto-paused by the periodic sweep / POST /admin/releases/sweep). Sends are debounced per alert key (10 min); unconfigured = disabled; failures never affect the API path. Content is operator-level only — never message bodies.
 - GET /admin/audit?limit&before -> [{id, actorId, action, target, meta, ts}]
 
 ## First-run setup
