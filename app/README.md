@@ -50,6 +50,10 @@ CI：`../.github/workflows/app.yml`，只在 `app/**` 变更时运行 `assembleD
 - **30 秒回滚**：新配置先写入为“试用”，同时保留上一份；每 2 秒请求一次 `/health`，30 秒内成功才提交，否则自动回滚。
   协议版本不一致（`protocolVersion != 1`）立即回滚。首次配置失败时连同暂定的公钥一起撤销。
   App 在试用期被杀也没关系：下次启动和 WorkManager 兜底任务都会补做判断。
+- **确认页（R7）**：扫码、深链或粘贴链接后先进确认页，显示服务器主机名、API/MQTT 地址和公钥指纹
+  （SHA-256 前 8 字节，四位一组 `ab12 cd34 ef56 7890`，与管理后台首页显示的字节相同），确认后才写入。
+  健康检查通过后本机记住“已信任的主机名 + 公钥指纹”。之后若主机名或公钥不同，显示红色强提醒，必须勾选明确确认才可继续；
+  不经确认，其他公钥签名的配置仍按 TOFU 规则拒绝。确认更换公钥后若 30 秒试用失败，恢复原公钥。
 - 除了 App 内扫码，系统相机扫到 `couple://bootstrap` 链接也能直接拉起 App。
 - **调试入口**：“手动输入”页可以粘贴 couple:// 链接，或者直接填写后端/MQTT 地址（不校验签名，但仍做健康检查与回滚）。
   debug 包允许 `http://` / `ws://`（方便连模拟器里的 `10.0.2.2`），release 包只允许 `https://` / `wss://`。
@@ -65,7 +69,8 @@ CI：`../.github/workflows/app.yml`，只在 `app/**` 变更时运行 `assembleD
 
 ### 3. 配对
 
-- 一方点“生成配对码”，显示 6 位数字和 10 分钟倒计时，并每 3 秒查询一次 `GET /couple`；
+- 一方点“生成配对码”，显示 6 位数字、10 分钟倒计时和“有效至 HH:mm”，并每 3 秒查询一次 `GET /couple`；
+  服务器与手机时钟相差过大时按“收到时刻 + 10 分钟”计算；
 - 另一方输入配对码 → `POST /pair/join`；
 - 配对成功后强制刷新 token（拿到带 `cid` 的 access token）。
 - 解绑：“我的 → 解除配对”，一方“申请解绑”得到申请编号，另一方“确认 TA 的解绑申请”（编号可留空，由服务端取最新一条）。
@@ -75,11 +80,26 @@ CI：`../.github/workflows/app.yml`，只在 `app/**` 变更时运行 `assembleD
 底部四个 Tab：**聊天 / 动态 / TA / 我的**。P0 只有“我的”是真页面：资料、配对信息与 TA 在线状态、
 MQTT 连接状态、服务器配置（地址、版本、签名状态、公钥指纹、重新扫码）、解绑、退出登录。
 
-### 5. MQTT（P0：只验证连通）
+### 5. MQTT（R6：可靠连接）
 
-- `username = userId`，`password = accessToken`，clientId = `a-{userId}-{deviceId}`；
-- 连上后订阅并发布 retained 的 `couple/{cid}/presence`：`{userId, online:true, ts}`；遗嘱消息为 `online:false`；
-- 不用 Paho 自带的自动重连（每次重连都要换最新 token），自己做指数退避（2s → 60s），鉴权失败时先强制刷新 token。
+- `username = userId`，`password = accessToken`，clientId = `a-{userId}-{deviceId}`（固定，符合服务端 clientId 绑定规则）；
+- `cleanSession=false` + QoS1 订阅：离线期间（Doze、切网、进程被杀）服务端保留会话并排队 QoS1 消息；在途 QoS1 发送落盘，重启后补发；
+- `keepAlive = 30s`（Cloudflare 约 100 秒断开空闲 WebSocket）；
+- 默认网络变化（Wi-Fi ↔ 移动数据、断网恢复）立即重连；其他失败按 1s → 60s 指数退避，±20% 抖动；断网时不空转重试；
+- 连上后订阅并发布 retained 的 `couple/{cid}/presence`：`{userId, online:true, ts, mid}`；遗嘱消息为 `online:false`；
+  `mid` 为 ULID 消息 ID（可选字段，旧客户端缺省时用确定性 ID），接收端按 mid 去重、按发送者保持顺序（过期状态丢弃）；
+- 每条消息记录发送 ts / 接收 ts：回环（自己发出的）与 TA→我 两组 p50/p95，以及重连、切网、去重计数，
+  显示在“我的 → 后台保活 · 连接诊断”，并写入 logcat（tag `CoupleMqtt`）；
+- 不用 Paho 自带的自动重连（每次重连都要换最新 token），鉴权失败时先强制刷新 token。
+
+### 6. 后台保活（我的 → 后台保活）
+
+- 体检：通知权限、忽略电池优化、后台限制、流量节省、待机分组、精确闹钟（当前未使用）；返回页面自动重新检查；
+- 识别厂商（小米/HyperOS、华为、荣耀、OPPO/一加/realme、vivo、三星），一键跳转自启动 / 电池设置，失败回落到应用详情；
+- Shizuku 已授权时一键执行 `dumpsys deviceidle whitelist +<pkg>` 与 `cmd appops set <pkg> RUN_ANY_IN_BACKGROUND allow`；
+- 可选“常驻连接”前台服务（`specialUse`，低重要性静音通知），默认关闭。
+- 真机测试脚本：`app/scripts/reliability-test.sh -a <发送方序列号> -b <接收方序列号>`（debug 包，USB 连接），
+  依次测 Doze（force-idle）、待机分组、后台限制、Wi-Fi/飞行模式/移动数据切换下的送达率与延迟，结果写入 CSV。
 
 ## 主题 token
 
@@ -132,10 +152,14 @@ app/src/main/java/com/qimingnan/couple/
 | `TokenRefreshTest` | 401 自动刷新与轮换、5 个并发 401 只刷新一次、刷新被拒清空会话、baseUrl 改写（MockWebServer） |
 | `LayoutValidatorTest` | 默认布局合法、锁定项隐藏/删除/移动、重复、容量与网格宽度、未知区、非法 JSON、回退默认 |
 | `ThemeTokensTest` | 对比度、48dp、禁止硬编码颜色 |
+| `MqttReliabilityTest` | 退避与 ±20% 抖动边界、去重与顺序、p50/p95、clientId、网络切换判定 |
+| `TrustCheckTest` | 指纹格式（与管理后台同字节）、主机名规范化、主机/公钥变化判定、确认页流程、换钥失败回滚 |
+| `PairCodeExpiryTest` | 配对码过期时间与时钟偏差 |
+| `OemKeepAliveTest` | 厂商识别、自启动/电池页面候选、Shizuku 命令（拒绝注入） |
 
 ## 已知限制（P0）
 
 - 聊天 / 动态 / TA 三个 Tab 只是占位。
-- 没有 FCM，也没有前台服务保活；MQTT 只在进程存活时连接。
+- 没有 FCM；MQTT 只在进程存活时连接（可在“后台保活”中开启常驻连接前台服务）。
 - 发码方通过轮询 `GET /couple` 发现配对成功（P1 改为 MQTT 通知）。
 - 解绑申请编号需要口头告诉对方（P1 通过 MQTT 推送给对方）。

@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.util.Log
+import com.qimingnan.couple.BuildConfig
 import com.qimingnan.couple.core.Clock
 import com.qimingnan.couple.core.CoupleJson
 import com.qimingnan.couple.core.Ulid
@@ -46,11 +47,20 @@ import kotlin.coroutines.suspendCoroutine
 
 /**
  * contract: couple/{cid}/presence (retained) {userId, online, ts}.
- * mid (ULID, optional) is the messageId used for dedup/ordering; ts is the send timestamp used for latency.
- * Older clients omit mid; the receiver then derives a deterministic id (see [InboundFilter.legacyId]).
+ * Optional additions (older clients omit them): mid = ULID messageId for dedup/ordering; sess = the sender's connection
+ * start, and will = true on the Last Will, so the receiver can order a will (built at connect time, sent by the broker
+ * much later) after the rest of its session. ts is the send timestamp used for latency.
+ * Without mid the receiver derives a deterministic id (see [InboundFilter.legacyId]).
  */
 @Serializable
-data class Presence(val userId: String, val online: Boolean, val ts: Long, val mid: String? = null)
+data class Presence(
+    val userId: String,
+    val online: Boolean,
+    val ts: Long,
+    val mid: String? = null,
+    val sess: Long? = null,
+    val will: Boolean? = null,
+)
 
 sealed interface MqttState {
     data object Idle : MqttState
@@ -96,6 +106,8 @@ class MqttManager @Inject constructor(
     private var attempt = 0
     private var connectedBefore = false
     private var networkAvailable = true
+    /** Start of the current connection attempt; sent as `sess` so receivers can order our Last Will correctly. */
+    @Volatile private var sessionStart = 0L
 
     private val backoff = Backoff()
     private val inbound = InboundFilter()
@@ -153,6 +165,28 @@ class MqttManager @Inject constructor(
         }
     }
 
+    /**
+     * Debug/measurement hook (used by app/scripts/reliability-test.sh through a debug-only broadcast): publishes the
+     * current presence (online) once more with a fresh messageId and logs it as `tx mid=… ts=… tag=…`.
+     */
+    fun publishProbe(tag: String?) {
+        scope.launch(Dispatchers.IO) {
+            mutex.withLock {
+                val t = target
+                val c = client
+                if (t == null || c == null || !c.isConnected) {
+                    Log.i(TAG, "tx skipped (not connected) tag=$tag")
+                    return@withLock
+                }
+                val bytes = presenceBytes(t.userId, online = true, track = true)
+                val p = CoupleJson.decodeFromString(Presence.serializer(), bytes.toString(Charsets.UTF_8))
+                runCatching { c.publish(MqttTopics.presence(t.coupleId), bytes, 1, true) }
+                    .onSuccess { Log.i(TAG, "tx mid=${p.mid} ts=${p.ts} tag=${tag ?: "-"}") }
+                    .onFailure { Log.w(TAG, "tx failed tag=$tag: $it") }
+            }
+        }
+    }
+
     private suspend fun connectLocked(t: MqttTarget) {
         reconnectJob?.cancel()
         _state.value = MqttState.Connecting
@@ -169,6 +203,7 @@ class MqttManager @Inject constructor(
             return
         }
         val topic = MqttTopics.presence(t.coupleId)
+        sessionStart = clock.nowMillis()
         val opts = MqttConnectOptions().apply {
             userName = t.userId
             password = token.toCharArray()
@@ -178,7 +213,7 @@ class MqttManager @Inject constructor(
             isAutomaticReconnect = false
             maxInflight = 50
             mqttVersion = MqttConnectOptions.MQTT_VERSION_3_1_1
-            setWill(topic, presenceBytes(t.userId, online = false, track = false), 1, true)
+            setWill(topic, presenceBytes(t.userId, online = false, track = false, will = true), 1, true)
         }
         c.setCallback(object : MqttCallback {
             override fun connectionLost(cause: Throwable?) {
@@ -213,6 +248,7 @@ class MqttManager @Inject constructor(
             _state.value = MqttState.Connected(t.url)
             publishStats("connected")
         } catch (e: MqttException) {
+            if (client === c) client = null
             runCatching { c.close(true) }
             val authFailed = e.reasonCode == MqttException.REASON_CODE_FAILED_AUTHENTICATION.toInt() ||
                 e.reasonCode == MqttException.REASON_CODE_NOT_AUTHORIZED.toInt()
@@ -222,6 +258,7 @@ class MqttManager @Inject constructor(
             }
             scheduleReconnect(t, "${e.reasonCode} ${e.message}")
         } catch (e: Exception) {
+            if (client === c) client = null
             runCatching { c.close(true) }
             scheduleReconnect(t, e.message)
         }
@@ -233,7 +270,13 @@ class MqttManager @Inject constructor(
             CoupleJson.decodeFromString(Presence.serializer(), message.payload.toString(Charsets.UTF_8))
         }.getOrNull() ?: return
         val mid = p.mid ?: InboundFilter.legacyId(p.userId, p.ts, p.online.toString())
-        when (inbound.offer(p.userId, mid, p.ts)) {
+        val verdict = inbound.offer(p.userId, mid, p.ts, session = p.sess ?: p.ts, isWill = p.will == true)
+        if (BuildConfig.DEBUG) {
+            // Per-message trace for the real-device reliability script (debug builds only).
+            Log.i(TAG, "rx mid=$mid from=${p.userId} sendTs=${p.ts} rxTs=$now retained=${message.isRetained} " +
+                "dup=${message.isDuplicate} verdict=$verdict")
+        }
+        when (verdict) {
             InboundFilter.Verdict.DUPLICATE -> latency.recordDuplicate()
             // Presence is a state topic: an older state must never overwrite a newer one.
             InboundFilter.Verdict.STALE -> latency.recordStale()
@@ -241,8 +284,8 @@ class MqttManager @Inject constructor(
                 val mine = p.mid?.let { sentByMe.remove(it) }
                 when {
                     mine != null -> latency.recordEcho(mine, now)
-                    // A retained replay says nothing about delivery latency.
-                    !message.isRetained && p.userId != t.userId -> latency.recordPeer(p.ts, now)
+                    // A retained replay or a Last Will (built at connect time) says nothing about delivery latency.
+                    !message.isRetained && p.will != true && p.userId != t.userId -> latency.recordPeer(p.ts, now)
                 }
                 _presence.update { it + (p.userId to p) }
             }
@@ -360,14 +403,15 @@ class MqttManager @Inject constructor(
         }
     }
 
-    private fun presenceBytes(userId: String, online: Boolean, track: Boolean): ByteArray {
+    private fun presenceBytes(userId: String, online: Boolean, track: Boolean, will: Boolean = false): ByteArray {
         val ts = clock.nowMillis()
         val mid = Ulid.next(ts)
         if (track) {
             sentByMe[mid] = ts
             if (sentByMe.size > 256) sentByMe.keys.take(sentByMe.size - 256).forEach(sentByMe::remove)
         }
-        return CoupleJson.encodeToString(Presence.serializer(), Presence(userId, online, ts, mid)).toByteArray()
+        val p = Presence(userId, online, ts, mid, sess = sessionStart, will = if (will) true else null)
+        return CoupleJson.encodeToString(Presence.serializer(), p).toByteArray()
     }
 
     companion object {
