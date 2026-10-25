@@ -86,6 +86,18 @@ class InboundFilterTest {
     }
 
     @Test
+    fun lastWillSortsAfterItsSessionButBeforeTheNext() {
+        val f = InboundFilter()
+        // Session 1 starts at 1000: the will is built at 1000, "online" is published at 1005.
+        assertEquals(Verdict.ACCEPT, f.offer("u1", "on1", 1_005, session = 1_000))
+        assertEquals(Verdict.ACCEPT, f.offer("u1", "will1", 1_000, session = 1_000, isWill = true))
+        // Session 2 (reconnect at 2000) beats the old will...
+        assertEquals(Verdict.ACCEPT, f.offer("u1", "on2", 2_003, session = 2_000))
+        // ...and a late redelivery of session 1's will is stale.
+        assertEquals(Verdict.STALE, f.offer("u1", "will1b", 1_000, session = 1_000, isWill = true))
+    }
+
+    @Test
     fun orderIsPerSender() {
         val f = InboundFilter()
         assertEquals(Verdict.ACCEPT, f.offer("u1", "a2", 200))
