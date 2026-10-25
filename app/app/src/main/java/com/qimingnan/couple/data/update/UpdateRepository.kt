@@ -227,11 +227,39 @@ class UpdateRepository @Inject constructor(
             }
         }
         _state.update { it.copy(lastCheckMessage = msg) }
+        // OTA §9-4：自动检查（非手动）发现可选更新时，Wi-Fi + 电量充足就顺手预下载，用户点更新时已就绪。
+        if (!manual) prefetchIfCheap()
         msg
     }
 
     /** Show the prompt again (「查看更新」 in 我的). */
     fun reopen() = _state.update { it.copy(dismissedVersionCode = null) }
+
+    /**
+     * OTA §9-4 后台预下载：自动检查发现可选更新且当前 非计费网络 + 电量不低 时，只下载不安装
+     * （[installWhenReady] 保持 false，下载校验完成后停在 Ready，用户点「立即更新」才安装）。
+     */
+    fun prefetchIfCheap() {
+        val s = _state.value
+        val info = s.available ?: return
+        if (s.force) return // 强更弹窗本身就会引导下载
+        if (s.phase is UpdatePhase.Downloading || s.phase is UpdatePhase.Ready) return
+        if (!isUnmetered()) return
+        if (!batteryNotLow()) return
+        Log.i(TAG, "prefetching v${info.versionCode} in the background (unmetered, battery ok)")
+        startDownloadOnly(info)
+    }
+
+    private fun isUnmetered(): Boolean = runCatching {
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        cm.isActiveNetworkMetered == false
+    }.getOrDefault(false)
+
+    private fun batteryNotLow(): Boolean = runCatching {
+        val bm = context.getSystemService(android.os.BatteryManager::class.java) ?: return true
+        val level = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        level <= 0 || level >= 30 // 未知(-1)视为不低
+    }.getOrDefault(true)
 
     fun dismiss() = _state.update { s ->
         if (s.force || s.available == null) s else s.copy(dismissedVersionCode = s.available.versionCode)
@@ -247,6 +275,16 @@ class UpdateRepository @Inject constructor(
             install()
             return
         }
+        enqueueDownload(info, running = phase is UpdatePhase.Downloading)
+    }
+
+    /** 预下载：同 [enqueueDownload]，但绝不置 installWhenReady。 */
+    private fun startDownloadOnly(info: UpdateInfo) {
+        installWhenReady = false
+        enqueueDownload(info, running = _state.value.phase is UpdatePhase.Downloading)
+    }
+
+    private fun enqueueDownload(info: UpdateInfo, running: Boolean) {
         val base = bootstrapStore.currentConfigBlocking()?.baseUrl
         val url = base?.let { UpdateLogic.resolveDownloadUrl(it, info.downloadUrl) }
         if (url == null) {
@@ -268,7 +306,6 @@ class UpdateRepository @Inject constructor(
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
             .addTag("v${info.versionCode}")
             .build()
-        val running = phase is UpdatePhase.Downloading
         WorkManager.getInstance(context).enqueueUniqueWork(
             UpdateDownloadWorker.UNIQUE_NAME,
             if (running) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE,

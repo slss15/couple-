@@ -28,7 +28,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import com.qimingnan.couple.R
 import com.qimingnan.couple.theme.LocalCoupleTokens
+import com.qimingnan.couple.ui.feed.FeedScreen
+import com.qimingnan.couple.ui.feed.FeedViewModel
 import com.qimingnan.couple.ui.me.MeScreen
+import androidx.hilt.navigation.compose.hiltViewModel
 
 /** 底部四个 Tab；id 与布局 JSON 的 bottomBar 条目一致（me_entry 为锁定项）。 */
 enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: ImageVector) {
@@ -67,6 +70,7 @@ fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
     ) { padding ->
         when (tab) {
             MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, modifier = Modifier.padding(padding))
+            MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             else -> Placeholder(tab, Modifier.padding(padding))
         }
     }

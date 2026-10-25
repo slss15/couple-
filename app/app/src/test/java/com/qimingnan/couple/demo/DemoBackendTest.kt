@@ -2,7 +2,10 @@ package com.qimingnan.couple.demo
 
 import com.qimingnan.couple.core.CoupleJson
 import com.qimingnan.couple.data.demo.DemoBackend
+import com.qimingnan.couple.data.net.CommentView
 import com.qimingnan.couple.data.net.Couple
+import com.qimingnan.couple.data.net.FeedPage
+import com.qimingnan.couple.data.net.PostView
 import com.qimingnan.couple.data.net.TokenPair
 import com.qimingnan.couple.data.update.UpdateLogic
 import org.junit.After
@@ -62,5 +65,56 @@ class DemoBackendTest {
     @Test fun `foreign download urls are dropped`() {
         val src = """{"latest":{"versionName":"x","versionCode":2,"sha256":"","size":1,"signingCertSha256":"","downloadUrl":"https://evil.example/a.apk"}}"""
         assertNull(UpdateLogic.parseResponse(DemoBackend.rewriteUpdate(src)).latest)
+    }
+
+    @Test fun `feed lists seeded posts and create is idempotent`() {
+        val list = DemoBackend.respond("GET", "/api/v1/feed/posts", now)
+        assertEquals(200, list.first)
+        val page = CoupleJson.decodeFromString(FeedPage.serializer(), list.second)
+        assertTrue(page.posts.isNotEmpty())
+        assertTrue(page.posts.all { it.authorId == DemoBackend.partner.id })
+
+        val id = "01TESTPOST0000000000000000"
+        DemoBackend.demoBody = """{"id":"$id","text":"第一条"}"""
+        val create = DemoBackend.respond("POST", "/api/v1/feed/posts", now)
+        assertEquals(200, create.first)
+        val created = CoupleJson.decodeFromString(PostView.serializer(), create.second)
+        assertEquals(id, created.id)
+        assertEquals(0, created.likes.count)
+
+        DemoBackend.demoBody = """{"id":"$id","text":"第一条"}"""
+        val again = DemoBackend.respond("POST", "/api/v1/feed/posts", now)
+        assertEquals(create.second, again.second) // 同 id 幂等：返回同一帖子
+
+        assertEquals(204, DemoBackend.respond("DELETE", "/api/v1/feed/posts/$id", now).first)
+        assertEquals(404, DemoBackend.respond("DELETE", "/api/v1/feed/posts/$id", now).first)
+    }
+
+    @Test fun `feed like and comments round trip`() {
+        val id = "01TESTLIKE00000000000000000"
+        DemoBackend.demoBody = """{"id":"$id","text":"hi"}"""
+        assertEquals(200, DemoBackend.respond("POST", "/api/v1/feed/posts", now).first)
+
+        assertEquals("""{"count":1}""", DemoBackend.respond("POST", "/api/v1/feed/posts/$id/like", now).second)
+        assertEquals("""{"count":0}""", DemoBackend.respond("DELETE", "/api/v1/feed/posts/$id/like", now).second)
+
+        val cid = "01TESTCMT00000000000000000"
+        DemoBackend.demoBody = """{"id":"$cid","text":"好看"}"""
+        val c = DemoBackend.respond("POST", "/api/v1/feed/posts/$id/comments", now)
+        assertEquals(200, c.first)
+        assertEquals("好看", CoupleJson.decodeFromString(CommentView.serializer(), c.second).text)
+        // 幂等：同评论 id 返回同一条
+        DemoBackend.demoBody = """{"id":"$cid","text":"好看"}"""
+        assertEquals(c.second, DemoBackend.respond("POST", "/api/v1/feed/posts/$id/comments", now).second)
+        // 空文本 400
+        DemoBackend.demoBody = """{"id":"${cid}x","text":"  "}"""
+        assertEquals(400, DemoBackend.respond("POST", "/api/v1/feed/posts/$id/comments", now).first)
+        assertEquals(204, DemoBackend.respond("DELETE", "/api/v1/feed/comments/$cid", now).first)
+        assertEquals(204, DemoBackend.respond("DELETE", "/api/v1/feed/posts/$id", now).first)
+    }
+
+    @Test fun `post requires text or media`() {
+        DemoBackend.demoBody = """{"id":"01TESTEMPTY000000000000000","text":"  "}"""
+        assertEquals(400, DemoBackend.respond("POST", "/api/v1/feed/posts", now).first)
     }
 }

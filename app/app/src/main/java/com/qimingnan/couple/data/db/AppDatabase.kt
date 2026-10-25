@@ -48,6 +48,9 @@ interface ProfileDao {
     @Query("SELECT * FROM users WHERE isSelf = 1 LIMIT 1")
     fun observeSelf(): Flow<UserEntity?>
 
+    @Query("SELECT * FROM users")
+    fun observeAll(): Flow<List<UserEntity>>
+
     @Query("SELECT * FROM users WHERE id = :id")
     suspend fun user(id: String): UserEntity?
 
@@ -94,7 +97,36 @@ interface ProfileDao {
     }
 }
 
-@Database(entities = [UserEntity::class, CoupleEntity::class], version = 1, exportSchema = true)
+@Database(
+    entities = [UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class],
+    version = 2,
+    exportSchema = true,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun profileDao(): ProfileDao
+    abstract fun feedDao(): FeedDao
+
+    companion object {
+        /** v1 → v2：feed 缓存表（纯新增，旧表不动）。 */
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `posts` (`id` TEXT NOT NULL, `authorId` TEXT NOT NULL, `text` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, `likeCount` INTEGER NOT NULL, `likedByMe` INTEGER NOT NULL, " +
+                        "`pendingState` TEXT, `pendingImages` TEXT, PRIMARY KEY(`id`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `post_media` (`postId` TEXT NOT NULL, `sortOrder` INTEGER NOT NULL, " +
+                        "`storageKey` TEXT NOT NULL, `thumbKey` TEXT, `mimeType` TEXT NOT NULL, `width` INTEGER NOT NULL, " +
+                        "`height` INTEGER NOT NULL, `size` INTEGER NOT NULL, PRIMARY KEY(`postId`, `sortOrder`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `post_comments` (`id` TEXT NOT NULL, `postId` TEXT NOT NULL, " +
+                        "`authorId` TEXT NOT NULL, `text` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`), " +
+                        "FOREIGN KEY(`postId`) REFERENCES `posts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_post_comments_postId` ON `post_comments` (`postId`)")
+            }
+        }
+    }
 }
