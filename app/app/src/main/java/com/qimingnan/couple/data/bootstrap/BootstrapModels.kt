@@ -30,7 +30,10 @@ data class ServerConfig(
  * - previous：试用期内可回滚到的上一份配置
  * - pendingSince：非空表示 current 还在 30 秒健康检查试用期内
  * - pinnedPublicKey：TOFU 固定的 Ed25519 公钥（raw 32 字节的标准 base64）
- * - pinIsProvisional：公钥是本次试用时才首次固定的，试用失败需要一起撤销
+ * - pinIsProvisional：公钥是本次试用时才首次固定（或经用户明确确认后更换）的，试用失败需要一起撤销
+ * - previousPinnedPublicKey：用户确认更换公钥时被替换掉的旧公钥，试用失败时恢复
+ * - trustedHost / trustedKeyFingerprint：最近一次健康检查通过、已确认生效的服务器主机名与公钥指纹。
+ *   之后扫码或手动配置若主机名或公钥不同，必须先强提醒并让用户明确确认。
  */
 @Serializable
 data class BootstrapState(
@@ -39,7 +42,18 @@ data class BootstrapState(
     val pendingSince: Long? = null,
     val pinnedPublicKey: String? = null,
     val pinIsProvisional: Boolean = false,
-)
+    val previousPinnedPublicKey: String? = null,
+    val trustedHost: String? = null,
+    val trustedKeyFingerprint: String? = null,
+) {
+    /** Trust anchors, falling back to the committed config / pin for state written by older app versions. */
+    fun effectiveTrustedHost(): String? =
+        trustedHost ?: current?.takeIf { pendingSince == null }?.let { TrustedHost.of(it.baseUrl) }
+
+    fun effectiveTrustedFingerprint(): String? =
+        trustedKeyFingerprint ?: pinnedPublicKey?.takeIf { !pinIsProvisional }
+            ?.let { runCatching { KeyFingerprint.of(com.qimingnan.couple.core.Base64Url.decode(it)) }.getOrNull() }
+}
 
 @Serializable
 data class PubkeyResponse(val alg: String, val publicKey: String)

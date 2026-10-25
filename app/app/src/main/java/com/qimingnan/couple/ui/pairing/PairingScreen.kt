@@ -28,6 +28,8 @@ import com.qimingnan.couple.ui.components.PrimaryButton
 import com.qimingnan.couple.ui.components.SectionCard
 import com.qimingnan.couple.ui.components.SecondaryButton
 import com.qimingnan.couple.ui.components.StatusBanner
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun PairingScreen(vm: PairingViewModel = hiltViewModel()) {
@@ -59,6 +61,16 @@ fun PairingScreen(vm: PairingViewModel = hiltViewModel()) {
                     style = t.typography.caption,
                     color = if (s.codeExpired) t.colors.error else t.colors.onSurfaceVariant,
                 )
+                if (!s.codeExpired && s.expiresAtLocal > 0) {
+                    Text(
+                        stringResource(
+                            R.string.pair_expires_at,
+                            DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(s.expiresAtLocal)),
+                        ),
+                        style = t.typography.caption,
+                        color = t.colors.onSurfaceVariant,
+                    )
+                }
                 Text(stringResource(R.string.pair_share_hint), style = t.typography.body, color = t.colors.onSurfaceVariant)
             }
             SecondaryButton(

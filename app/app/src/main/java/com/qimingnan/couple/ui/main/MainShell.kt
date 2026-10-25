@@ -39,7 +39,7 @@ enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: Im
 }
 
 @Composable
-fun MainShell(onRescan: () -> Unit) {
+fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
     val t = LocalCoupleTokens.current
     var tab by rememberSaveable { mutableStateOf(MainTab.Chat) }
     Scaffold(
@@ -66,7 +66,7 @@ fun MainShell(onRescan: () -> Unit) {
         },
     ) { padding ->
         when (tab) {
-            MainTab.Me -> MeScreen(onRescan = onRescan, modifier = Modifier.padding(padding))
+            MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, modifier = Modifier.padding(padding))
             else -> Placeholder(tab, Modifier.padding(padding))
         }
     }

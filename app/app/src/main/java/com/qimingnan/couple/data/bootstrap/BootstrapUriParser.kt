@@ -19,6 +19,8 @@ sealed class BootstrapError(val code: String, message: String) : Exception(messa
     class SignatureInvalid : BootstrapError("SIGNATURE_INVALID", "签名校验失败，配置可能被篡改或来自其他服务器")
     class PubkeyUnavailable(msg: String) : BootstrapError("PUBKEY_UNAVAILABLE", "无法获取服务器公钥：$msg")
     class Downgrade(cur: Long, new: Long) : BootstrapError("VERSION_DOWNGRADE", "配置版本 $new 低于当前版本 $cur")
+    /** Host or key differs from the trusted one and the user did not explicitly confirm exactly this change. */
+    class TrustChangeUnconfirmed(val trust: TrustCheck?, msg: String) : BootstrapError("TRUST_CHANGE_UNCONFIRMED", msg)
 }
 
 object BootstrapUriParser {

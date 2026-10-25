@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.qimingnan.couple.data.bootstrap.ApplyOutcome
 import com.qimingnan.couple.data.bootstrap.ApplyProgress
+import com.qimingnan.couple.data.bootstrap.BootstrapError
 import com.qimingnan.couple.data.bootstrap.BootstrapManager
+import com.qimingnan.couple.data.bootstrap.BootstrapPreview
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,8 +14,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/** Where a config on the confirm page came from. */
+sealed interface PendingSource {
+    data class Uri(val raw: String) : PendingSource
+    data class Manual(val baseUrl: String, val mqttUrl: String) : PendingSource
+}
+
 sealed interface BootstrapUiState {
     data object Idle : BootstrapUiState
+    data object Inspecting : BootstrapUiState
+    /** Confirm page: host + key fingerprint; strong warning when they differ from what is trusted. */
+    data class Confirm(val preview: BootstrapPreview, val source: PendingSource) : BootstrapUiState
     data object Verifying : BootstrapUiState
     data class HealthChecking(val secondsLeft: Int, val lastError: String?) : BootstrapUiState
     data object Success : BootstrapUiState
@@ -29,7 +40,11 @@ class BootstrapViewModel @Inject constructor(
     val state: StateFlow<BootstrapUiState> = _state.asStateFlow()
 
     val busy: Boolean
-        get() = _state.value is BootstrapUiState.Verifying || _state.value is BootstrapUiState.HealthChecking
+        get() = when (_state.value) {
+            BootstrapUiState.Inspecting, BootstrapUiState.Verifying, is BootstrapUiState.HealthChecking,
+            is BootstrapUiState.Confirm -> true
+            else -> false
+        }
 
     private val progress: (ApplyProgress) -> Unit = { p ->
         _state.value = when (p) {
@@ -38,16 +53,51 @@ class BootstrapViewModel @Inject constructor(
         }
     }
 
-    fun applyUri(raw: String) {
+    /** Scan result / deep link / pasted link: verify and show the confirm page; nothing is stored yet. */
+    fun inspectUri(raw: String) {
         if (busy) return
-        _state.value = BootstrapUiState.Verifying
-        viewModelScope.launch { _state.value = map(manager.applyUri(raw, progress)) }
+        _state.value = BootstrapUiState.Inspecting
+        viewModelScope.launch {
+            _state.value = try {
+                BootstrapUiState.Confirm(manager.inspectUri(raw), PendingSource.Uri(raw))
+            } catch (e: BootstrapError) {
+                BootstrapUiState.Failed(e.message ?: e.code)
+            } catch (e: Exception) {
+                BootstrapUiState.Failed(e.message ?: e.javaClass.simpleName)
+            }
+        }
     }
 
-    fun applyManual(baseUrl: String, mqttUrl: String) {
+    fun inspectManual(baseUrl: String, mqttUrl: String) {
         if (busy) return
+        _state.value = BootstrapUiState.Inspecting
+        viewModelScope.launch {
+            _state.value = try {
+                BootstrapUiState.Confirm(manager.inspectManual(baseUrl, mqttUrl), PendingSource.Manual(baseUrl, mqttUrl))
+            } catch (e: BootstrapError) {
+                BootstrapUiState.Failed(e.message ?: e.code)
+            }
+        }
+    }
+
+    /** The user pressed confirm; [acceptChange] is the explicit "trust the changed server" checkbox. */
+    fun confirm(acceptChange: Boolean) {
+        val c = _state.value as? BootstrapUiState.Confirm ?: return
+        if (c.preview.trust.needsExplicitConfirm && !acceptChange) return
         _state.value = BootstrapUiState.Verifying
-        viewModelScope.launch { _state.value = map(manager.applyManual(baseUrl, mqttUrl, progress)) }
+        val confirmation = c.preview.confirmation(acceptChange)
+        viewModelScope.launch {
+            _state.value = map(
+                when (val s = c.source) {
+                    is PendingSource.Uri -> manager.applyUri(s.raw, confirmation, progress)
+                    is PendingSource.Manual -> manager.applyManual(s.baseUrl, s.mqttUrl, confirmation, progress)
+                },
+            )
+        }
+    }
+
+    fun cancelConfirm() {
+        if (_state.value is BootstrapUiState.Confirm) _state.value = BootstrapUiState.Idle
     }
 
     fun reset() {

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only: measurement hook for app/scripts/reliability-test.sh. android.permission.DUMP is held by the adb shell
+     and the system only, so no other app can trigger it. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name=".debug.MqttProbeReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.qimingnan.couple.debug.MQTT_PROBE" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

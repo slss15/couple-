@@ -41,22 +41,88 @@ class BootstrapManager(
 ) {
     private val mutex = Mutex()
 
-    suspend fun applyUri(raw: String, onProgress: (ApplyProgress) -> Unit = {}): ApplyOutcome {
+    /**
+     * Reads a couple://bootstrap link without storing anything: verifies the signature (against the pinned key, or —
+     * to be able to show the user what changed — against the key the config's server now serves) and compares host
+     * and key fingerprint with what this phone trusts. The confirm page shows the result.
+     */
+    suspend fun inspectUri(raw: String): BootstrapPreview = mutex.withLock {
+        val parsed = BootstrapUriParser.parse(raw)
+        val p = parsed.payload
+        BootstrapUriParser.checkUrls(p.baseUrl, p.mqttUrl, allowCleartext)
+        val state = store.load()
+        val newHost = TrustedHost.of(p.baseUrl) ?: throw BootstrapError.InvalidUri("无法识别服务器主机名")
+        val pinned = state.pinnedPublicKey?.let(Base64Url::decode)
+        val key = when {
+            pinned != null && Ed25519Verifier.verify(pinned, parsed.dBytes, parsed.signature) -> pinned
+            else -> {
+                val fetched = probe.fetchPublicKey(p.baseUrl)
+                if (!Ed25519Verifier.verify(fetched, parsed.dBytes, parsed.signature)) throw BootstrapError.SignatureInvalid()
+                fetched
+            }
+        }
+        val fp = KeyFingerprint.of(key)
+        BootstrapPreview(
+            baseUrl = p.baseUrl.trimEnd('/'),
+            mqttUrl = p.mqttUrl,
+            host = newHost,
+            fingerprint = fp,
+            configVersion = p.configVersion,
+            signed = true,
+            trust = TrustCheck.evaluate(state.effectiveTrustedHost(), state.effectiveTrustedFingerprint(), newHost, fp),
+        )
+    }
+
+    /** Same as [inspectUri] for the debug manual form (no signature, so only the host can change). */
+    suspend fun inspectManual(baseUrl: String, mqttUrl: String): BootstrapPreview = mutex.withLock {
+        BootstrapUriParser.checkUrls(baseUrl, mqttUrl, allowCleartext)
+        val state = store.load()
+        val newHost = TrustedHost.of(baseUrl) ?: throw BootstrapError.InvalidUri("无法识别服务器主机名")
+        BootstrapPreview(
+            baseUrl = baseUrl.trim().trimEnd('/'),
+            mqttUrl = mqttUrl.trim(),
+            host = newHost,
+            fingerprint = null,
+            configVersion = null,
+            signed = false,
+            trust = TrustCheck.evaluate(state.effectiveTrustedHost(), state.effectiveTrustedFingerprint(), newHost, null),
+        )
+    }
+
+    /**
+     * @param confirmation what the user confirmed on the confirm page. Required whenever host or key differ from the
+     * trusted ones (otherwise [BootstrapError.TrustChangeUnconfirmed]); a different key is only ever accepted with
+     * acceptChange=true and the exact fingerprint the user saw. Without it a config signed by another key is rejected
+     * as before (contract: TOFU pin).
+     */
+    suspend fun applyUri(
+        raw: String,
+        confirmation: TrustConfirmation? = null,
+        onProgress: (ApplyProgress) -> Unit = {},
+    ): ApplyOutcome {
         onProgress(ApplyProgress.VerifyingSignature)
         val staged = try {
-            mutex.withLock { stageSigned(raw) }
+            mutex.withLock { stageSigned(raw, confirmation) }
         } catch (e: BootstrapError) {
             return ApplyOutcome.Rejected(e)
         }
         return verifyPending(onProgress) ?: ApplyOutcome.Applied(staged)
     }
 
-    /** 调试入口：手动填写地址，不做签名校验，但同样走健康检查与回滚。 */
-    suspend fun applyManual(baseUrl: String, mqttUrl: String, onProgress: (ApplyProgress) -> Unit = {}): ApplyOutcome {
+    /** 调试入口：手动填写地址，不做签名校验，但同样走主机名确认、健康检查与回滚。 */
+    suspend fun applyManual(
+        baseUrl: String,
+        mqttUrl: String,
+        confirmation: TrustConfirmation? = null,
+        onProgress: (ApplyProgress) -> Unit = {},
+    ): ApplyOutcome {
         val staged = try {
             mutex.withLock {
                 BootstrapUriParser.checkUrls(baseUrl, mqttUrl, allowCleartext)
                 val state = store.load()
+                val newHost = TrustedHost.of(baseUrl) ?: throw BootstrapError.InvalidUri("无法识别服务器主机名")
+                val trust = TrustCheck.evaluate(state.effectiveTrustedHost(), state.effectiveTrustedFingerprint(), newHost, null)
+                requireConfirmed(trust, newHost, null, confirmation)
                 val cfg = ServerConfig(
                     baseUrl = baseUrl.trim().trimEnd('/'),
                     mqttUrl = mqttUrl.trim(),
@@ -65,7 +131,7 @@ class BootstrapManager(
                     signed = false,
                     appliedAt = clock.nowMillis(),
                 )
-                stage(state, cfg, state.pinnedPublicKey, state.pinIsProvisional)
+                stage(state, cfg, state.pinnedPublicKey, state.pinIsProvisional, state.previousPinnedPublicKey)
                 cfg
             }
         } catch (e: BootstrapError) {
@@ -74,24 +140,62 @@ class BootstrapManager(
         return verifyPending(onProgress) ?: ApplyOutcome.Applied(staged)
     }
 
-    private suspend fun stageSigned(raw: String): ServerConfig {
+    private fun requireConfirmed(trust: TrustCheck, host: String, fp: String?, c: TrustConfirmation?) {
+        if (c != null) {
+            // The config must still be exactly what the user looked at.
+            val sameHost = c.host == host
+            val sameKey = c.fingerprint == null || fp == null ||
+                KeyFingerprint.normalize(c.fingerprint) == KeyFingerprint.normalize(fp)
+            if (!sameHost || !sameKey) throw BootstrapError.TrustChangeUnconfirmed(trust, "配置与确认页显示的不一致，请重新扫码")
+        }
+        if (trust.needsExplicitConfirm && c?.acceptChange != true) {
+            throw BootstrapError.TrustChangeUnconfirmed(trust, "服务器地址或公钥与已信任的不同，需要明确确认")
+        }
+    }
+
+    private suspend fun stageSigned(raw: String, confirmation: TrustConfirmation?): ServerConfig {
         val parsed = BootstrapUriParser.parse(raw)
         val p = parsed.payload
         BootstrapUriParser.checkUrls(p.baseUrl, p.mqttUrl, allowCleartext)
         val state = store.load()
+        val newHost = TrustedHost.of(p.baseUrl) ?: throw BootstrapError.InvalidUri("无法识别服务器主机名")
 
         // TOFU：已固定就只认它；否则从配置里的服务器取公钥并（暂定地）固定。
+        // 唯一的例外：用户在确认页看到“公钥已变化”的强提醒并明确确认了新指纹（等同于先重置再首次信任）。
         val pinned = state.pinnedPublicKey
-        val (keyBytes, provisional) = if (pinned != null) {
-            Base64Url.decode(pinned) to state.pinIsProvisional
+        var previousPin = state.previousPinnedPublicKey
+        val keyBytes: ByteArray
+        val provisional: Boolean
+        if (pinned != null) {
+            val pinnedBytes = Base64Url.decode(pinned)
+            if (Ed25519Verifier.verify(pinnedBytes, parsed.dBytes, parsed.signature)) {
+                keyBytes = pinnedBytes
+                provisional = state.pinIsProvisional
+            } else if (confirmation?.acceptChange == true && confirmation.fingerprint != null) {
+                val fetched = probe.fetchPublicKey(p.baseUrl)
+                if (KeyFingerprint.normalize(KeyFingerprint.of(fetched)) != KeyFingerprint.normalize(confirmation.fingerprint)) {
+                    throw BootstrapError.TrustChangeUnconfirmed(null, "服务器公钥与确认页显示的指纹不一致，已拒绝")
+                }
+                if (!Ed25519Verifier.verify(fetched, parsed.dBytes, parsed.signature)) throw BootstrapError.SignatureInvalid()
+                keyBytes = fetched
+                provisional = true
+                // Keep the confirmed key to restore if this trial fails (and not a pin that was itself only provisional).
+                previousPin = if (state.pinIsProvisional) state.previousPinnedPublicKey else pinned
+            } else {
+                throw BootstrapError.SignatureInvalid()
+            }
         } else {
-            probe.fetchPublicKey(p.baseUrl) to true
+            keyBytes = probe.fetchPublicKey(p.baseUrl)
+            if (!Ed25519Verifier.verify(keyBytes, parsed.dBytes, parsed.signature)) throw BootstrapError.SignatureInvalid()
+            provisional = true
         }
-        if (!Ed25519Verifier.verify(keyBytes, parsed.dBytes, parsed.signature)) {
-            throw BootstrapError.SignatureInvalid()
-        }
+        val fp = KeyFingerprint.of(keyBytes)
+        val trust = TrustCheck.evaluate(state.effectiveTrustedHost(), state.effectiveTrustedFingerprint(), newHost, fp)
+        requireConfirmed(trust, newHost, fp, confirmation)
+
         val cur = state.current
-        if (cur != null && cur.signed && p.configVersion < cur.configVersion) {
+        // configVersion only increases per server key; a confirmed key change starts a new sequence.
+        if (!trust.keyChanged && cur != null && cur.signed && p.configVersion < cur.configVersion) {
             throw BootstrapError.Downgrade(cur.configVersion, p.configVersion)
         }
         val cfg = ServerConfig(
@@ -102,11 +206,17 @@ class BootstrapManager(
             signed = true,
             appliedAt = clock.nowMillis(),
         )
-        stage(state, cfg, Base64Url.encodeStd(keyBytes), provisional)
+        stage(state, cfg, Base64Url.encodeStd(keyBytes), provisional, previousPin)
         return cfg
     }
 
-    private suspend fun stage(state: BootstrapState, cfg: ServerConfig, pin: String?, provisional: Boolean) {
+    private suspend fun stage(
+        state: BootstrapState,
+        cfg: ServerConfig,
+        pin: String?,
+        provisional: Boolean,
+        previousPin: String?,
+    ) {
         // 若上一份还在试用期，就保留更早的“已确认”配置作为回滚目标。
         val rollbackTarget = if (state.pendingSince != null) state.previous else state.current
         store.save(
@@ -116,6 +226,7 @@ class BootstrapManager(
                 pendingSince = clock.nowMillis(),
                 pinnedPublicKey = pin,
                 pinIsProvisional = provisional,
+                previousPinnedPublicKey = if (provisional) previousPin else null,
             ),
         )
         scheduler.schedule(healthWindowMillis + 5_000)
@@ -142,8 +253,19 @@ class BootstrapManager(
             onProgress(ApplyProgress.HealthChecking(left.toInt(), lastError))
             when (val r = probe.health(cfg.baseUrl)) {
                 is HealthResult.Ok -> {
+                    val committed = store.load()
                     store.save(
-                        store.load().copy(pendingSince = null, previous = null, pinIsProvisional = false),
+                        committed.copy(
+                            pendingSince = null,
+                            previous = null,
+                            pinIsProvisional = false,
+                            previousPinnedPublicKey = null,
+                            // Now trusted: later scans/configs with another host or key get the strong warning.
+                            trustedHost = TrustedHost.of(cfg.baseUrl) ?: committed.trustedHost,
+                            trustedKeyFingerprint = committed.pinnedPublicKey
+                                ?.let { runCatching { KeyFingerprint.of(Base64Url.decode(it)) }.getOrNull() }
+                                ?: committed.trustedKeyFingerprint,
+                        ),
                     )
                     return@withLock null
                 }
@@ -165,9 +287,10 @@ class BootstrapManager(
                 current = restored,
                 previous = null,
                 pendingSince = null,
-                // 公钥若是这次才首次固定的，从未被确认过，一并撤销。
-                pinnedPublicKey = if (state.pinIsProvisional) null else state.pinnedPublicKey,
+                // 公钥若是这次才首次固定（或刚被用户确认更换）的，从未被确认过：恢复到之前的公钥（首次则为空）。
+                pinnedPublicKey = if (state.pinIsProvisional) state.previousPinnedPublicKey else state.pinnedPublicKey,
                 pinIsProvisional = false,
+                previousPinnedPublicKey = null,
             ),
         )
         return ApplyOutcome.RolledBack(reason, restored)
@@ -175,7 +298,8 @@ class BootstrapManager(
 
     /** 调试/换服务器：清除固定的公钥（需用户在“我的”里明确操作）。 */
     suspend fun resetPin() = mutex.withLock {
-        store.save(store.load().copy(pinnedPublicKey = null, pinIsProvisional = false))
+        // trustedHost / trustedKeyFingerprint stay: the next scan of another server still gets the strong warning.
+        store.save(store.load().copy(pinnedPublicKey = null, pinIsProvisional = false, previousPinnedPublicKey = null))
     }
 
     companion object {
