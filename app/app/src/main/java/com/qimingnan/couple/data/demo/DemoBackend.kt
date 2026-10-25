@@ -259,6 +259,26 @@ object DemoBackend {
 
     fun media(key: String): DemoMedia? = mediaStore[key]
 
+    const val NO_UPDATE = """{"latest":null,"force":false}"""
+
+    /** 只代理本仓库 GitHub Release 上的 APK，别的地址一律拒绝。 */
+    const val APK_PREFIX = "https://github.com/slss15/couple-/releases/download/"
+    const val APK_PROXY_PATH = "app/demo-apk"
+
+    /**
+     * 调试 OTA 通道：CI 每次推 main 都把 debug APK 和 update.json 发到 `app-debug-edge` 预发布。这里把
+     * update.json 的 downloadUrl 改写成演示后端同源的代理地址（App 只允许同源下载），返回给 UpdateRepository。
+     */
+    fun rewriteUpdate(updateJson: String): String {
+        val root = CoupleJson.parseToJsonElement(updateJson).jsonObject
+        val latest = root["latest"] as? JsonObject ?: return NO_UPDATE
+        val url = latest["downloadUrl"]?.jsonPrimitive?.contentOrNull ?: return NO_UPDATE
+        if (!url.startsWith(APK_PREFIX)) return NO_UPDATE
+        val proxied = "/api/v1/$APK_PROXY_PATH?u=" + java.net.URLEncoder.encode(url, "UTF-8")
+        val newLatest = JsonObject(latest + ("downloadUrl" to JsonPrimitive(proxied)))
+        return JsonObject(root + ("latest" to newLatest)).toString()
+    }
+
     private fun err(code: String, message: String) = buildJsonObject { put("code", code); put("message", message) }.toString()
 }
 
@@ -281,7 +301,8 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
         if (req.method == "POST" && path == "media") {
             val body = req.body ?: return json(req, 400, """{"code":"VALIDATION_ERROR","message":"empty body"}""")
             val (code, resp) = runCatching {
-                val buf = okio.Buffer().also { body.writeTo(buf) }
+                val buf = okio.Buffer()
+                body.writeTo(buf)
                 DemoBackend.handleMediaUpload(buf, now())
             }.getOrElse { e -> 400 to """{"code":"VALIDATION_ERROR","message":"bad multipart: ${e.message}"}""" }
             return json(req, code, resp)
