@@ -13,3 +13,5 @@ cert.pem
 dist-windows/
 # Mimosa hook local state (scanner artifacts)
 .mimosa/
+# ZCode session artifacts
+.zcode/
