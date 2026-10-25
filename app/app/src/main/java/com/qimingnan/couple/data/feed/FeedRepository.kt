@@ -65,7 +65,7 @@ object ImageCompression {
 
     fun decodeUris(s: String?): List<Uri> = s?.let {
         runCatching { uriListJson.decodeFromString(ListSerializer(String.serializer()), it) }.getOrNull()
-    }.orEmpty().map(::Uri.parse)
+    }.orEmpty().map { Uri.parse(it) }
 }
 
 /**

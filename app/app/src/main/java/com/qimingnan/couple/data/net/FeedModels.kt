@@ -81,7 +81,7 @@ sealed interface FeedEvent {
         fun parse(payload: String): FeedEvent? = runCatching {
             val obj = json.parseToJsonElement(payload) as? kotlinx.serialization.json.JsonObject ?: return null
             when (obj["kind"].str()) {
-                "post" -> obj["post"]?.toString()?.let { Post(json.decodeFromString(Post.serializer(), it)) }
+                "post" -> obj["post"]?.toString()?.let { Post(json.decodeFromString(PostView.serializer(), it)) }
                 "delete" -> obj["id"].str()?.let(::Delete)
                 "like" -> {
                     val postId = obj["postId"].str() ?: return null

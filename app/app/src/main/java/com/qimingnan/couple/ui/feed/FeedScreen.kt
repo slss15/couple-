@@ -183,7 +183,7 @@ fun FeedScreen(vm: FeedViewModel, modifier: Modifier = Modifier) {
 private fun AnniversaryCard(days: Long) {
     val t = LocalCoupleTokens.current
     Surface(
-        shape = RoundedCornerShape(t.shapes.medium),
+        shape = t.shapes.medium,
         color = t.colors.primaryContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -229,7 +229,7 @@ private fun PostCard(
     val pending = row.post.pendingState
 
     Surface(
-        shape = RoundedCornerShape(t.shapes.medium),
+        shape = t.shapes.medium,
         color = t.colors.surfaceContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -266,7 +266,7 @@ private fun PostCard(
                 Spacer(Modifier.height(t.spacing.sm))
                 Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
                     row.displayMedia().take(3).forEach { m ->
-                        val thumb = mediaUrl(m.thumbKey ?: m.storageKey, thumb = m.thumbKey != null) ?: return@forEach
+                        val thumb = mediaUrl(m.thumbKey ?: m.storageKey, m.thumbKey != null) ?: return@forEach
                         AsyncImage(
                             model = thumb,
                             contentDescription = null,

@@ -229,7 +229,7 @@ object DemoBackend {
     @Volatile var demoBody: String = "{}"
 
     /** multipart 上传：解析第一个 file part，内存存字节，返回 MediaView。 */
-    fun handleMediaUpload(body: okio.BufferedSource, now: Long): Pair<Int, String> {
+    fun handleMediaUpload(body: okhttp3.ResponseBody, now: Long): Pair<Int, String> {
         return try {
             val reader = MultipartReader(body)
             var bytes: ByteArray? = null
@@ -300,11 +300,8 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
         if (req.method == "GET" && path == DemoBackend.APK_PROXY_PATH) return proxyApk(req)
         if (req.method == "POST" && path == "media") {
             val body = req.body ?: return json(req, 400, """{"code":"VALIDATION_ERROR","message":"empty body"}""")
-            val (code, resp) = runCatching {
-                val buf = okio.Buffer()
-                body.writeTo(buf)
-                DemoBackend.handleMediaUpload(buf, now())
-            }.getOrElse { e -> 400 to """{"code":"VALIDATION_ERROR","message":"bad multipart: ${e.message}"}""" }
+            val (code, resp) = runCatching { DemoBackend.handleMediaUpload(body, now()) }
+                .getOrElse { e -> 400 to """{"code":"VALIDATION_ERROR","message":"bad multipart: ${e.message}"}""" }
             return json(req, code, resp)
         }
         val mediaMatch = Regex("^media/([^/]+)(/thumb)?$").find(path)
