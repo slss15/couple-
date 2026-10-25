@@ -153,3 +153,41 @@ Scope of P1a: text only, reply/quote, recall, read receipts, offline outbox. Ima
 - Room is the source the UI renders. Sending = insert locally with state=PENDING → outbox worker POSTs (retry with backoff while offline, survives process death) → SENT with server createdAt. 4xx other than 409/429 → FAILED (tap to retry). Duplicate events (MQTT + catch-up) are merged by id.
 - Read: when the chat screen is visible, POST /chat/read with the newest partner message id (debounced). Show "已读" under my last message that is ≤ partnerReadUpTo.
 - Debug demo account: DemoBackend implements these endpoints in memory and the partner "TA（演示）" auto-replies ~1.5 s later; events reach the app through an in-process flow instead of MQTT.
+
+## Feed (P1: 动态) — authoritative for backend + app
+Scope of P1 feed: posts with text + images, likes, comments, deletion. Video/voice posts come later. Uses the shared media storage below.
+
+### Media storage (shared by feed / avatar / later chat images)
+- Providers come from admin config `storage` (local | minio | r2). Buckets are **always private**: every download goes through the backend.
+- POST /api/v1/media (Bearer, multipart/form-data, single `file` field) -> {storageKey, mimeType, size, width, height, thumbKey|null}. Only images in P1: image/jpeg, image/png, image/webp; ≤ 10 MB; EXIF/GPS metadata is stripped server-side on ingest; thumbnails (≤ 512 px JPEG) are generated server-side when width or height > 512.
+- GET /api/v1/media/{storageKey} and GET /api/v1/media/{storageKey}/thumb (Bearer): streams the bytes, `ETag: "<sha256>"`, If-None-Match → 304, Cache-Control private. **403 MEDIA_FORBIDDEN unless the media belongs to the caller's couple** (or is an avatar of the couple's members). Unknown key → 404 MEDIA_NOT_FOUND.
+- Uploads are couple-scoped by the uploader's coupleId. Uploads not referenced by any post/avatar within 24 h are deleted by a periodic orphan sweep; deleting a post deletes its media files immediately.
+- POST /api/v1/users/me/avatar {storageKey} -> 204. Sets the caller's avatarUrl to "/api/v1/media/{storageKey}" (relative; clients resolve against baseUrl). The previous avatar file is deleted.
+
+### Model
+- Post = {id (client ULID, server idempotent on id: re-POSTing the same id returns the stored post 200; a different couple reusing an id → 409 ID_CONFLICT), coupleId, authorId, text (0..4000 chars after trim; at least one of text/media must be non-empty, else VALIDATION_ERROR), media: [PostMedia] (0..9), createdAt, likes: {count, likedByMe}, comments: [Comment] (full list — the couple has 2 people), commentCount}
+- PostMedia = {storageKey, thumbKey|null, mimeType, width, height, size}. Every referenced storageKey must be an upload of the same couple, else VALIDATION_ERROR; a key may be used by only one post ever (409 MEDIA_ALREADY_USED otherwise).
+- Comment = {id (client ULID, same idempotency rule as posts), postId, authorId, text (1..1000 chars after trim), createdAt}
+- Likes: PK (postId, userId); liking twice is a no-op (200).
+
+### REST (under /api/v1, Bearer, requires a paired user 403 NOT_PAIRED)
+- POST /feed/posts {id, text, mediaKeys?: [storageKey...]} -> Post
+- GET /feed/posts?before=<id>&limit=N -> {posts: [Post...] (desc by createdAt, ties by id), hasMore}. Omit before for the newest page. limit default 20, max 50.
+- DELETE /feed/posts/{id} -> 204. Only the author (403 NOT_AUTHOR).
+- POST /feed/posts/{id}/like -> 200 {count}; DELETE /feed/posts/{id}/like -> 200 {count}
+- POST /feed/posts/{id}/comments {id, text} -> Comment; DELETE /feed/comments/{id} -> 204 (comment author only)
+
+### MQTT push (server → clients)
+- Topic couple/{cid}/feed, QoS 1, not retained. Clients subscribe; client publishes denied by ACL. Payloads:
+  - {kind:"post", post:Post} — sent after the DB commit, post includes likes/comments as of send time
+  - {kind:"delete", id}
+  - {kind:"like", postId, userId, count}
+  - {kind:"comment", postId, comment:Comment}
+  - {kind:"comment_delete", postId, id}
+- MQTT is a hint: clients merge by id and may refetch. Catch-up on (re)connect/foreground = GET /feed/posts (newest page) + merge.
+- Server→client publish infra: embedded broker uses internalPublish; external EMQX uses its HTTP publish API (env EMQX_API_URL/EMQX_API_KEY/EMQX_API_SECRET — missing config just disables push, catch-up still works).
+
+### App rules
+- Room caches posts/comments/likes; UI renders from Room. Publish = insert locally (author view) → upload media (already done via the publish flow) → POST /feed/posts → replace local row with the server Post. Offline publish queues like the chat outbox.
+- 空状态：未发过任何动态时显示引导卡（「发第一条动态」）。
+
