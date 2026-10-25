@@ -205,7 +205,7 @@ $cf = 'C:\couple\cloudflared\cloudflared.exe'
 | `/mqtt*` | 127.0.0.1:8083（内置 broker） | App 填 `wss://couple.example.com/mqtt` |
 | 其余 | 127.0.0.1:8080（couple-backend） | REST API + 管理后台网页（后端直接托管） |
 
-`protocol: http2`（QUIC/UDP 在 NAT4、国内运营商常被限速/阻断）、`no-autoupdate: true`。**注意**：`config.yml` 里的 8080/8083 是写死的，改了 `PORT` / `MQTT_WS_PORT` 要同步手改 `C:\couple\config\cloudflared\config.yml` 并 `Restart-Service couple-cloudflared`。
+`protocol: http2`（QUIC/UDP 在 NAT4、国内运营商常被限速/阻断）、`no-autoupdate: true`。端口不用手改：`config.yml` 由 `install.ps1` 从模板 `config.yml.in` 渲染，自动跟随 `couple.env` 里的 `PORT` / `MQTT_WS_PORT` / `HOOK_PORT`（端口变了重跑 `install.ps1` 会自动重新渲染，旧文件保留为 `config.yml.bak`）。
 
 ## 2. MySQL 8.4（LTS）
 
@@ -383,7 +383,7 @@ New-Secret 32                                             # 64 位十六进制
 | `UPDATE_WINDOW` | | 空 | 轮询时段（本机时区），如 `03:00-05:00`，可跨午夜；webhook 不受限 | — |
 | `HEALTH_TIMEOUT` | | `90` | 新版本健康检查超时秒数，超时即回滚 | — |
 | `UPDATE_REPO` | | `slss15/couple-` | 允许下载安装包的 GitHub 仓库（白名单） | — |
-| `UPDATE_GITHUB_TOKEN` | 可选 | 空 | 只读 GitHub token，用于查询 Release API（限流时）。注意：目前**下载 zip 时不带 token**，私有仓库的推送即部署走不通（待实机确认） | — |
+| `UPDATE_GITHUB_TOKEN` | 可选 | 空 | 只读 GitHub token（`contents:read`）。设置后查询 Release API **和下载 zip** 都带上它（走 API asset URL，token 只发给 api.github.com、不跟随跳转发到存储），私有仓库的推送即部署也能用 | `ghp_…`（GitHub → Settings → Developer settings → Tokens） |
 | `HOOK_BIND` / `HOOK_PORT` | | `127.0.0.1` / `9000` | webhook 监听地址，改端口要同步改 `config.yml`；一般不改 | — |
 | `HOOK_MAX_SKEW` | | `300` | 签名时间戳允许误差（秒） | — |
 | `KEEP_RELEASES` | | `3`（最少 2） | `C:\couple\releases` 下保留几个版本（当前和上一个总是保留） | — |
