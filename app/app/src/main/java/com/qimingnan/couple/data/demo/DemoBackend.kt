@@ -300,8 +300,13 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
         if (req.method == "GET" && path == DemoBackend.APK_PROXY_PATH) return proxyApk(req)
         if (req.method == "POST" && path == "media") {
             val body = req.body ?: return json(req, 400, """{"code":"VALIDATION_ERROR","message":"empty body"}""")
-            val (code, resp) = runCatching { DemoBackend.handleMediaUpload(body, now()) }
-                .getOrElse { e -> 400 to """{"code":"VALIDATION_ERROR","message":"bad multipart: ${e.message}"}""" }
+            val (code, resp) = runCatching {
+                val buf = okio.Buffer()
+                body.writeTo(buf)
+                // MultipartReader 要从 ResponseBody 的 contentType 里读 boundary，这里原样保留请求的 multipart 头
+                val rb = buf.readByteArray().toResponseBody(body.contentType())
+                DemoBackend.handleMediaUpload(rb, now())
+            }.getOrElse { e -> 400 to """{"code":"VALIDATION_ERROR","message":"bad multipart: ${e.message}"}""" }
             return json(req, code, resp)
         }
         val mediaMatch = Regex("^media/([^/]+)(/thumb)?$").find(path)
