@@ -59,6 +59,7 @@ export interface ReleaseSettingsForm {
   autoPublish: boolean
   pollMinutes: number
   certPin: string
+  canaryIds: string[]
 }
 
 export function releaseSettingsForm(v: ReleaseSettingsView | null): ReleaseSettingsForm {
@@ -68,6 +69,7 @@ export function releaseSettingsForm(v: ReleaseSettingsView | null): ReleaseSetti
     autoPublish: v?.autoPublish ?? false,
     pollMinutes: v?.pollMinutes ?? 30,
     certPin: v?.expectedSigningCertSha256 ?? '',
+    canaryIds: v?.canaryDeviceIds ?? [],
   }
 }
 
@@ -81,10 +83,18 @@ export function releaseSettingsPayload(f: ReleaseSettingsForm): ReleaseSettingsU
     autoPublish: f.autoPublish,
     pollMinutes: f.pollMinutes,
     expectedSigningCertSha256: f.certPin.trim() ? (normalizeCertSha256(f.certPin) ?? f.certPin.trim()) : '',
+    canaryDeviceIds: f.canaryIds.map((s) => s.trim()).filter(Boolean),
   }
   if (f.token.clear) out.githubToken = ''
   else if (f.token.value.trim()) out.githubToken = f.token.value.trim()
   return out
+}
+
+/** 健康上报状态 → 标签颜色 */
+export const HEALTH_TAG: Record<string, 'success' | 'danger' | 'warning' | 'info'> = {
+  OK: 'success',
+  CRASH: 'danger',
+  FAILED: 'warning',
 }
 
 /** 仪表盘：updater 最近结果的展示类型 */
