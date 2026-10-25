@@ -50,4 +50,17 @@ class DemoBackendTest {
         assertFalse(DemoBackend.isDemo("https://couple.example.com"))
         assertFalse(DemoBackend.isDemo(null))
     }
+
+    @Test fun `debug OTA update json gets a same-origin proxied download url`() {
+        val src = """{"latest":{"versionName":"0.1.0-debug.7","versionCode":1007,"sha256":"${"a".repeat(64)}","size":10,""" +
+            """"signingCertSha256":"${"b".repeat(64)}","downloadUrl":"https://github.com/slss15/couple-/releases/download/app-debug-edge/couple-debug-1007.apk"},"force":false}"""
+        val info = UpdateLogic.parseResponse(DemoBackend.rewriteUpdate(src)).latest!!
+        assertEquals(1007, info.versionCode)
+        assertTrue(info.downloadUrl.startsWith("/api/v1/app/demo-apk?u=https%3A%2F%2Fgithub.com%2Fslss15%2Fcouple-%2F"))
+    }
+
+    @Test fun `foreign download urls are dropped`() {
+        val src = """{"latest":{"versionName":"x","versionCode":2,"sha256":"","size":1,"signingCertSha256":"","downloadUrl":"https://evil.example/a.apk"}}"""
+        assertNull(UpdateLogic.parseResponse(DemoBackend.rewriteUpdate(src)).latest)
+    }
 }

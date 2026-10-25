@@ -46,7 +46,13 @@ jobs:
         uses: gradle/actions/wrapper-validation@v4
 
       - name: Build debug APK + unit tests
-        run: ./gradlew assembleDebug testDebugUnitTest --stacktrace
+        env:
+          ON_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          # Debug OTA channel: on main every build gets a strictly higher versionCode (1000 + run number).
+          if [ "$ON_MAIN" = "true" ]; then export COUPLE_VERSION_CODE=$((1000 + RUN_NUMBER)); fi
+          ./gradlew assembleDebug testDebugUnitTest --stacktrace
 
       - name: Upload test reports
         if: always()
@@ -61,3 +67,61 @@ jobs:
         with:
           name: app-debug-apk
           path: app/app/build/outputs/apk/debug/*.apk
+
+  debug-edge:
+    # Rolling prerelease `app-debug-edge`: the debug APK (shared debug key) + update.json, read by the debug build's
+    # offline demo account (我的 → 检查更新) so the OTA flow can be tried without a server.
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: app-debug-edge
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-debug-apk
+          path: apk
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "build-tools;35.0.0"
+      - name: Publish APK + update.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_NUMBER: ${{ github.run_number }}
+          SHA: ${{ github.sha }}
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          CODE=$((1000 + RUN_NUMBER))
+          src=$(ls apk/*.apk | head -n1)
+          name="couple-debug-$CODE.apk"
+          cp "$src" "$name"
+          sha=$(sha256sum "$name" | cut -d' ' -f1)
+          size=$(stat -c %s "$name")
+          cert=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$name" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1)
+          [ -n "$cert" ] || { echo "no signer cert"; exit 1; }
+          url="https://github.com/$GH_REPO/releases/download/app-debug-edge/$name"
+          notes=$(printf '%s' "$MSG" | head -n1 | cut -c1-200)
+          jq -n --arg vn "0.1.0-debug.$CODE" --argjson vc "$CODE" --arg sha "$sha" --argjson size "$size" \
+            --arg cert "$cert" --arg url "$url" --arg notes "$notes" --argjson ts "$(date +%s%3N)" \
+            '{latest: {versionName: $vn, versionCode: $vc, sha256: $sha, size: $size, signingCertSha256: $cert,
+                       notes: $notes, downloadUrl: $url, publishedAt: $ts}, force: false}' > update.json
+          cat update.json
+          if ! gh release view app-debug-edge >/dev/null 2>&1; then
+            gh release create app-debug-edge --prerelease --title "app debug (rolling)" --target "$SHA" \
+              --notes "Rolling debug APK of main (shared debug key, applicationId com.qimingnan.couple.debug). For testing only."
+          fi
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/app-debug-edge" -f sha="$SHA" -F force=true >/dev/null \
+            || gh api -X POST "repos/$GH_REPO/git/refs" -f ref=refs/tags/app-debug-edge -f sha="$SHA" >/dev/null
+          gh release upload app-debug-edge "$name" update.json --clobber
+          for a in $(gh release view app-debug-edge --json assets -q '.assets[].name'); do
+            case "$a" in
+              "$name"|update.json) ;;
+              couple-debug-*.apk) gh release delete-asset app-debug-edge "$a" -y ;;
+            esac
+          done

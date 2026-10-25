@@ -8,4 +8,5 @@ local.properties
 captures/
 .kotlin/
 *.keystore
+!app/debug-shared.keystore
 *.jks

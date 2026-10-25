@@ -8,10 +8,16 @@ import com.qimingnan.couple.data.net.PairCode
 import com.qimingnan.couple.data.net.TokenPair
 import com.qimingnan.couple.data.net.User
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
@@ -72,10 +78,29 @@ object DemoBackend {
             "POST pair/join" -> { paired = true; ok(Couple.serializer(), couple()) }
             "POST couple/unpair/request" -> 200 to """{"requestId":"demo-unpair"}"""
             "POST couple/unpair/confirm" -> { paired = false; 204 to "" }
-            "GET app/update" -> 200 to """{"latest":null,"force":false}"""
+            "GET app/update" -> 200 to NO_UPDATE
             "POST app/health-report" -> 204 to ""
             else -> 404 to err("NOT_FOUND", "演示后端未实现：$method /$p")
         }
+    }
+
+    const val NO_UPDATE = """{"latest":null,"force":false}"""
+    /** 只代理本仓库 GitHub Release 上的 APK，别的地址一律拒绝。 */
+    const val APK_PREFIX = "https://github.com/slss15/couple-/releases/download/"
+    const val APK_PROXY_PATH = "app/demo-apk"
+
+    /**
+     * 调试 OTA 通道：CI 每次推 main 都把 debug APK 和 update.json 发到 `app-debug-edge` 预发布。这里把
+     * update.json 的 downloadUrl 改写成演示后端同源的代理地址（App 只允许同源下载），返回给 UpdateRepository。
+     */
+    fun rewriteUpdate(json: String): String {
+        val root = CoupleJson.parseToJsonElement(json).jsonObject
+        val latest = root["latest"] as? JsonObject ?: return NO_UPDATE
+        val url = latest["downloadUrl"]?.jsonPrimitive?.contentOrNull ?: return NO_UPDATE
+        if (!url.startsWith(APK_PREFIX)) return NO_UPDATE
+        val proxied = "/api/v1/$APK_PROXY_PATH?u=" + java.net.URLEncoder.encode(url, "UTF-8")
+        val newLatest = JsonObject(latest + ("downloadUrl" to JsonPrimitive(proxied)))
+        return JsonObject(root + ("latest" to newLatest)).toString()
     }
 
     private fun err(code: String, message: String) = buildJsonObject { put("code", code); put("message", message) }.toString()
@@ -83,10 +108,44 @@ object DemoBackend {
 
 /** 放在 OkHttp 链最前面：只拦截 [DemoBackend.HOST]，其余请求原样放行。 */
 class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) : Interceptor {
+    /** 不经过任何拦截器的上游客户端，只用于调试 OTA 通道访问 GitHub。 */
+    private val upstream by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val req: Request = chain.request()
         if (!DemoBackend.available || req.url.host != DemoBackend.HOST) return chain.proceed(req)
+        val path = req.url.encodedPath.removePrefix("/api/v1/")
+        if (req.method == "GET" && path == "app/update") return json(req, 200, fetchUpdate())
+        if (req.method == "GET" && path == DemoBackend.APK_PROXY_PATH) return proxyApk(req)
         val (code, body) = DemoBackend.respond(req.method, req.url.encodedPath, now())
+        return json(req, code, body)
+    }
+
+    /** 从 GitHub 拉调试通道的 update.json；拉不到就当没有更新。 */
+    private fun fetchUpdate(): String {
+        val src = BuildConfig.DEMO_UPDATE_URL.takeIf { it.isNotBlank() } ?: return DemoBackend.NO_UPDATE
+        return runCatching {
+            upstream.newCall(Request.Builder().url(src).header("Cache-Control", "no-cache").build()).execute().use { r ->
+                if (!r.isSuccessful) DemoBackend.NO_UPDATE else DemoBackend.rewriteUpdate(r.body?.string().orEmpty())
+            }
+        }.getOrDefault(DemoBackend.NO_UPDATE)
+    }
+
+    private fun proxyApk(req: Request): Response {
+        val target = req.url.queryParameter("u")
+        if (target == null || !target.startsWith(DemoBackend.APK_PREFIX)) return json(req, 403, """{"code":"FORBIDDEN","message":"只允许本仓库的 Release"}""")
+        // 不带 Authorization（演示 token 不能发给 GitHub）；Range 透传以便断点续传
+        val up = Request.Builder().url(target).apply { req.header("Range")?.let { header("Range", it) } }.build()
+        val resp = upstream.newCall(up).execute()
+        return resp.newBuilder().request(req).build()
+    }
+
+    private fun json(req: Request, code: Int, body: String): Response {
         return Response.Builder()
             .request(req)
             .protocol(Protocol.HTTP_1_1)

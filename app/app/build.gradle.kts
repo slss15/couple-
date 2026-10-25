@@ -19,6 +19,11 @@ val coupleVersionCode: Int = run {
     val (x, y, z) = m.destructured.toList().map { it.toInt() }
     if (y > 99 || z > 99) throw GradleException("minor/patch must be <= 99 (got $coupleVersionName)")
     x * 10000 + y * 100 + z
+}.let { computed ->
+    // Debug OTA channel (app.yml on main): COUPLE_VERSION_CODE=1000+run_number so every debug build updates the last.
+    val override = ((findProperty("couple.versionCode") as String?) ?: System.getenv("COUPLE_VERSION_CODE"))?.trim()
+    if (override.isNullOrEmpty()) computed else override.toIntOrNull()?.takeIf { it > 0 }
+        ?: throw GradleException("couple.versionCode / COUPLE_VERSION_CODE must be a positive integer (got '$override')")
 }
 // Release signing from env (CI decodes SIGNING_KEYSTORE_BASE64 into SIGNING_STORE_FILE).
 // Without it a local `assembleRelease` produces an *unsigned* APK — never debug-signed.
@@ -69,6 +74,14 @@ android {
     }
 
     signingConfigs {
+        // Shared debug key committed to the repo (debug-shared.keystore, password "android"): CI and local debug builds
+        // carry the same certificate, so the debug OTA channel can install one over the other. Never used for release.
+        create("debugShared") {
+            storeFile = file("debug-shared.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(signingStoreFile!!)
@@ -85,6 +98,8 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
+            signingConfig = signingConfigs.getByName("debugShared")
+            buildConfigField("String", "DEMO_UPDATE_URL", "\"https://github.com/slss15/couple-/releases/download/app-debug-edge/update.json\"")
             buildConfigField("boolean", "ALLOW_CLEARTEXT_DEBUG", "true")
         }
         release {
@@ -92,6 +107,7 @@ android {
             isShrinkResources = true
             signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
             buildConfigField("boolean", "ALLOW_CLEARTEXT_DEBUG", "false")
+            buildConfigField("String", "DEMO_UPDATE_URL", "\"\"")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
