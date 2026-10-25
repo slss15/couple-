@@ -103,6 +103,12 @@ class EmbeddedMqttBroker(
         server.internalPublish(msg, INTERNAL_CLIENT_ID)
     }
 
+    /** Server→client event push (contract "Feed" §MQTT push): QoS 1, not retained. */
+    fun publishToCouple(coupleId: String, topic: String, payload: String) {
+        if (!running) return
+        publish(topic, payload.toByteArray(), MqttQoS.AT_LEAST_ONCE, retain = false)
+    }
+
     private inner class Authenticator : IAuthenticator {
         override fun checkValid(clientId: String?, username: String?, password: ByteArray?): Boolean = runBlocking {
             val user = username.orEmpty()

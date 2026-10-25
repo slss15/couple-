@@ -41,6 +41,7 @@ fun testConfig(
     bootstrapPrivateKey: String? = null,
     mqttHookSecret: String? = null,
     releasesDir: String = java.nio.file.Files.createTempDirectory("releases").toString(),
+    mediaDir: String = java.nio.file.Files.createTempDirectory("media").toString(),
     githubApiBase: String = "http://127.0.0.1:9",
     // Most tests do not need a broker; the embedded broker tests opt in with a free port.
     brokerMode: MqttBrokerMode = MqttBrokerMode.EXTERNAL,
@@ -63,6 +64,7 @@ fun testConfig(
     dbMaxPoolSize = 4,
     clock = clock::now,
     releasesDir = releasesDir,
+    mediaDir = mediaDir,
     githubApiBase = githubApiBase,
     releasePollEnabled = false,
     releaseRetryBaseMs = 10,

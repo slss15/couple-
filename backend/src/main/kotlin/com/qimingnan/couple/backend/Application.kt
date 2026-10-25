@@ -24,6 +24,9 @@ import com.qimingnan.couple.backend.mqtt.mqttHookRoutes
 import com.qimingnan.couple.backend.admin.adminStaticRoutes
 import com.qimingnan.couple.backend.config.MqttBrokerMode
 import com.qimingnan.couple.backend.db.Couples
+import com.qimingnan.couple.backend.feed.adminMediaRoutes
+import com.qimingnan.couple.backend.feed.feedRoutes
+import com.qimingnan.couple.backend.feed.mediaRoutes
 import com.qimingnan.couple.backend.health.SERVER_VERSION
 import org.jetbrains.exposed.sql.selectAll
 import com.qimingnan.couple.backend.pairing.PairingService
@@ -91,6 +94,7 @@ fun Application.module(config: AppConfig) {
     val audit = AuditService(db, config.clock)
     val jwtService = JwtService(config.jwtSecret, config.accessTokenTtlMs, config.clock)
     val mqttAccess = MqttAccessService(db, jwtService, audit)
+    var embeddedBroker: EmbeddedMqttBroker? = null
     if (config.mqttBrokerMode == MqttBrokerMode.EMBEDDED) {
         val broker = EmbeddedMqttBroker(
             config,
@@ -98,6 +102,7 @@ fun Application.module(config: AppConfig) {
             activeCoupleIds = { db.tx { Couples.selectAll().where { Couples.deletedAt.isNull() }.map { it[Couples.id] } } },
         )
         broker.start()
+        embeddedBroker = broker
         // Stop the broker (clean disconnects, persistent store flushed) before the DB pool closes.
         monitor.subscribe(ApplicationStopping) { broker.stop() }
     }
@@ -126,6 +131,20 @@ fun Application.module(config: AppConfig) {
         while (true) {
             runCatching { releaseService.sweepStaleCanaries() }
             delay(30 * 60_000L)
+        }
+    }
+
+    // Media + feed (contract "Media storage", "Feed"): server→client events over the couple topics.
+    val serverPush = com.qimingnan.couple.backend.mqtt.serverPushFor(config, embeddedBroker)
+    val storageManager = com.qimingnan.couple.backend.media.StorageManager(config) {
+        adminConfigService.snapshot().stored.storage
+    }
+    val mediaService = com.qimingnan.couple.backend.media.MediaService(db, config, storageManager)
+    val feedService = com.qimingnan.couple.backend.feed.FeedService(db, config, storageManager, serverPush)
+    launch(Dispatchers.IO) {
+        while (true) {
+            runCatching { mediaService.orphanSweep() }
+            delay(60 * 60_000L)
         }
     }
 
@@ -187,6 +206,9 @@ fun Application.module(config: AppConfig) {
                 adminRoutes(db, audit, adminConfigService, bootstrapService, config.mqttWsPath)
                 appUpdateRoutes(releaseService)
                 adminReleaseRoutes(db, audit, releaseService, releaseMirror, releaseSettings, this@module)
+                mediaRoutes(mediaService)
+                feedRoutes(feedService)
+                adminMediaRoutes(db, audit, mediaService)
             }
         }
         config.adminStaticDir?.let { dir ->

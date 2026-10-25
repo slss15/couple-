@@ -123,6 +123,47 @@ object DeviceReports : Table("device_reports") {
     override val primaryKey = PrimaryKey(deviceId)
 }
 
+/** Uploaded media objects (V5): images for feed posts and avatars; couple-scoped (contract "Media storage"). */
+object MediaObjects : Table("media_objects") {
+    val storageKey = varchar("storage_key", 26)
+    val coupleId = varchar("couple_id", 26)
+    val purpose = varchar("purpose", 16).default("post")
+    val mimeType = varchar("mime_type", 64)
+    val size = long("size")
+    val width = integer("width")
+    val height = integer("height")
+    val thumbKey = varchar("thumb_key", 26).nullable()
+    val usedByPost = varchar("used_by_post", 26).nullable()
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(storageKey)
+}
+
+/** Feed posts (V5, contract "Feed"). */
+object Posts : Table("posts") {
+    val id = varchar("id", 26)
+    val coupleId = varchar("couple_id", 26)
+    val authorId = varchar("author_id", 26)
+    val text = varchar("text", 4000)
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+object PostLikes : Table("post_likes") {
+    val postId = varchar("post_id", 26)
+    val userId = varchar("user_id", 26)
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(postId, userId)
+}
+
+object PostComments : Table("post_comments") {
+    val id = varchar("id", 26)
+    val postId = varchar("post_id", 26)
+    val authorId = varchar("author_id", 26)
+    val text = varchar("text", 1000)
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
 /** Post-install health reports (V4). */
 object ReleaseHealth : Table("release_health") {
     val id = varchar("id", 26)

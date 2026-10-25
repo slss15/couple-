@@ -103,6 +103,19 @@ data class AppConfig(
      * to <dataDir>/setup-token.txt. Null = no file.
      */
     val dataDir: String? = null,
+    /**
+     * Directory for uploaded media when the storage provider is "local" (MEDIA_DIR, else DATA_DIR/media).
+     * MinIO/R2 store off-host and ignore this.
+     */
+    val mediaDir: String? = null,
+    /**
+     * Server→client MQTT push for the external EMQX broker (contract "Feed"): the HTTP publish API root, key and
+     * secret. Missing/unset = push disabled (clients still work via catch-up). Embedded mode pushes in-process
+     * and ignores these.
+     */
+    val emqxApiUrl: String? = null,
+    val emqxApiKey: String? = null,
+    val emqxApiSecret: String? = null,
     /** Injectable clock (epoch ms) so tests can move time. */
     val clock: () -> Long = { System.currentTimeMillis() },
 ) {
@@ -131,6 +144,7 @@ data class AppConfig(
                 // The EMQX hooks decide who may connect: never run them unauthenticated.
                 req("MQTT_HOOK_SECRET")
             }
+            val dataDirValue = opt("DATA_DIR") ?: File(opt("RELEASES_DIR") ?: "/data/releases").parent
             return AppConfig(
                 port = opt("PORT")?.toInt() ?: 8080,
                 dbUrl = req("DB_URL"),
@@ -161,7 +175,11 @@ data class AppConfig(
                 adminStaticDir = opt("ADMIN_STATIC_DIR"),
                 adminApiBase = opt("COUPLE_API_BASE") ?: opt("ADMIN_API_BASE") ?: "",
                 setupToken = opt("SETUP_TOKEN"),
-                dataDir = opt("DATA_DIR") ?: File(opt("RELEASES_DIR") ?: "/data/releases").parent,
+                dataDir = dataDirValue,
+                mediaDir = opt("MEDIA_DIR") ?: dataDirValue?.let { File(it, "media").path },
+                emqxApiUrl = opt("EMQX_API_URL"),
+                emqxApiKey = opt("EMQX_API_KEY"),
+                emqxApiSecret = opt("EMQX_API_SECRET"),
             )
         }
     }
