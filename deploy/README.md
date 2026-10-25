@@ -68,6 +68,9 @@ docker compose logs -f updater
 | `SIGNING_STORE_PASSWORD` | keystore 密码 | 打 tag 发版 |
 | `SIGNING_KEY_ALIAS` | key 别名 | 打 tag 发版 |
 | `SIGNING_KEY_PASSWORD` | key 密码 | 打 tag 发版 |
+| `OTA_SIGNING_KEY` | OTA 发布清单签名私钥（Ed25519 seed 的 base64），**建议放进 Environment `ota-release` 并设自己为 required reviewer** | 打 tag 发版 |
+
+仓库**变量**（Variables，不是 Secret，公开信息）`OTA_PUBLIC_KEY`：上面私钥对应的公钥，构建时写进 App（`BuildConfig.OTA_PUBLIC_KEY`）。缺它 release 构建直接失败。后端可选同名环境变量，设置后镜像时也会验签。
 
 仓库**变量** `DEPLOY_TARGET`：`windows`（默认，未设置即是）= webhook 部署 Windows 包；`docker` = webhook 部署镜像。两种产物每次推 main 都会构建（Windows zip 发到滚动预发布 `edge`，镜像推到 GHCR），只是 webhook 只通知其中一种。
 
@@ -87,6 +90,15 @@ base64 -w0 couple-release.jks > couple-release.jks.b64   # macOS: base64 -i coup
 
 keystore 丢了就再也无法给已安装的 App 推送升级（签名不一致），只能卸载重装。
 
+### 生成 OTA 发布密钥（只做一次，与 keystore、服务器 bootstrap 密钥都无关）
+
+```bash
+deploy/scripts/ota-keygen.sh      # 输出 OTA_SIGNING_KEY=... 和 OTA_PUBLIC_KEY=...，不落盘
+```
+
+`OTA_SIGNING_KEY` 填 Secret（离线备份到密码管理器），`OTA_PUBLIC_KEY` 填 Variable。App 只接受用这把钥匙签过的 `release.json`（见 `docs/ota-design.md`）。
+私钥丢了：发一个内置新公钥的版本（旧版本仍信旧公钥，所以要在丢之前或用旧钥签最后一版过渡）。
+
 ## 三、GHCR 镜像可见性
 
 首次推送后包默认是 **private**。二选一：
@@ -99,7 +111,8 @@ keystore 丢了就再也无法给已安装的 App 推送升级（签名不一致
 ```bash
 git tag -a v0.2.0 -m "修复若干问题
 
-minSupportedVersionCode: 100"     # 可选：低于此 versionCode 的客户端强制升级
+minSupportedVersionCode: 100     # 可选：低于此 versionCode 的客户端强制升级
+rollout: all"                    # 可选：默认 staged（先发给 canary 设备，健康上报 OK 后自动扩到全部）
 git push origin v0.2.0
 ```
 
@@ -109,15 +122,17 @@ git push origin v0.2.0
 2. 构建多架构镜像并打 `X.Y.Z`、`X.Y`；
 3. 构建签名 APK，用 `apksigner` 校验签名、拒绝 debug 证书、核对 versionCode/versionName；
 4. 以上全部成功后才把镜像的 `stable` 指向这个版本；
-5. 创建 GitHub Release，附件 `couple-X.Y.Z.apk` 和 `release.json`：
+5. 用 `OTA_SIGNING_KEY` 对 `release.json` 签名（只有这一步能看到私钥，密钥文件写在 `$RUNNER_TEMP`，结束即删），并用 `OTA_PUBLIC_KEY` 回验；
+6. 创建 GitHub Release，附件 `couple-X.Y.Z.apk`、`release.json`、`release.json.sig`：
 
 ```json
-{"versionName":"0.2.0","versionCode":200,"sha256":"<apk 的 hex sha256>","size":12345678,
- "signingCertSha256":"<签名证书 hex sha256>","minSupportedVersionCode":100,
+{"schema":2,"packageName":"com.qimingnan.couple","versionName":"0.2.0","versionCode":200,
+ "sha256":"<apk 的 hex sha256>","size":12345678,"signingCertSha256":"<签名证书 hex sha256>",
+ "minSupportedVersionCode":100,"protocolVersion":1,"minPeerProtocol":1,"minSdk":26,"rollout":"staged",
  "notes":"修复若干问题","publishedAt":1767225600000}
 ```
 
-tag 注释的正文就是 `notes`（`minSupportedVersionCode:` 那一行会被去掉）。也可以在 Actions 页面手动运行 `release` 并指定已有 tag 和 `minSupportedVersionCode`。
+tag 注释的正文就是 `notes`（`minSupportedVersionCode:` / `rollout:` 行会被去掉）。`protocolVersion` / `minPeerProtocol` 来自 `app/gradle.properties`（伴侣间协议，破坏性变更要分两版发，见 `docs/ota-design.md` §4）。canary 设备在管理后台「发布设置」的 `canaryDeviceIds` 里填自己手机的 deviceId。也可以在 Actions 页面手动运行 `release` 并指定已有 tag 和 `minSupportedVersionCode`。
 
 本地构建：`cd app && ./gradlew assembleRelease` 默认版本 0.1.0；带 `SIGNING_*` 环境变量（`SIGNING_STORE_FILE` 指向 .jks）才会签名，否则产出未签名 APK。R8 混淆/资源压缩已开启。
 

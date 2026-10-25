@@ -117,7 +117,12 @@ class ApkInstaller @Inject constructor(@ApplicationContext private val context: 
             setAppPackageName(context.packageName)
             setSize(apk.length())
             if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-            if (Build.VERSION.SDK_INT >= 34) setPackageSource(PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE)
+            if (Build.VERSION.SDK_INT >= 34) {
+                setPackageSource(PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE)
+                // Become the update owner: other installers (ROM app stores, file managers) then need explicit user
+                // confirmation to update us (needs ENFORCE_UPDATE_OWNERSHIP; docs/ota-design.md §6).
+                setRequestUpdateOwnership(true)
+            }
         }
         val sessionId = installer.createSession(params)
         try {

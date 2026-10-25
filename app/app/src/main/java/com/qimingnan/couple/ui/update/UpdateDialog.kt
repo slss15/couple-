@@ -26,6 +26,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import com.qimingnan.couple.data.update.UpdateLogic
 import com.qimingnan.couple.data.update.UpdatePhase
 import com.qimingnan.couple.data.update.UpdateRepository
 import com.qimingnan.couple.data.update.UpdateState
@@ -93,7 +94,12 @@ fun UpdateDialogHost(vm: UpdateViewModel = hiltViewModel()) {
         title = { Text(if (s.force) "需要更新到 ${info.versionName}" else "发现新版本 ${info.versionName}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                if (s.force) StatusBanner("当前版本已停止支持，更新后才能继续使用。", BannerKind.Warning)
+                val why = UpdateLogic.reasonText(s.reason, s.peer)
+                if (s.force) {
+                    StatusBanner(why ?: "当前版本已停止支持，更新后才能继续使用。", BannerKind.Warning)
+                } else if (why != null) {
+                    StatusBanner(why, BannerKind.Info)
+                }
                 Text(
                     "当前 ${s.currentVersionName} → ${info.versionName} · ${formatBytes(info.size)}",
                     style = t.typography.caption,

@@ -98,6 +98,42 @@ object AppReleases : Table("app_releases") {
     val status = varchar("status", 16)
     val rolloutPercent = integer("rollout_percent")
     val createdAt = long("created_at")
+    // V3 (OTA v2): signed manifest + partner protocol gate
+    val manifestB64 = text("manifest_b64").nullable()
+    val manifestSig = varchar("manifest_sig", 128).nullable()
+    val protocolVersion = integer("protocol_version").default(1)
+    val minPeerProtocol = integer("min_peer_protocol").default(1)
+    val minSdk = integer("min_sdk").default(0)
+    // V4 (OTA v2): staged rollout + auto-pause
+    val stage = varchar("stage", 16).default("ALL")
+    val pausedAt = long("paused_at").nullable()
+    val pauseReason = varchar("pause_reason", 512).nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+/** Last app version/protocol each device reported (V4, OTA v2 partner gate). */
+object DeviceReports : Table("device_reports") {
+    val deviceId = varchar("device_id", 128)
+    val userId = varchar("user_id", 26)
+    val versionCode = integer("version_code")
+    val protocolVersion = integer("protocol_version").default(1)
+    val minPeerProtocol = integer("min_peer_protocol").default(1)
+    val sdkInt = integer("sdk_int").nullable()
+    val reportedAt = long("reported_at")
+    override val primaryKey = PrimaryKey(deviceId)
+}
+
+/** Post-install health reports (V4). */
+object ReleaseHealth : Table("release_health") {
+    val id = varchar("id", 26)
+    val versionCode = integer("version_code")
+    val deviceId = varchar("device_id", 128)
+    val userId = varchar("user_id", 26)
+    val status = varchar("status", 16)
+    val fromVersionCode = integer("from_version_code").nullable()
+    val mqttConnected = bool("mqtt_connected").nullable()
+    val detail = varchar("detail", 512).nullable()
+    val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(id)
 }
 

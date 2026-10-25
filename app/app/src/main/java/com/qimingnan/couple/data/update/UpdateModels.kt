@@ -19,10 +19,31 @@ data class UpdateInfo(
     val notes: String? = null,
     val downloadUrl: String,
     val publishedAt: Long = 0,
+    /** base64 of the exact release.json bytes (OTA v2); verified with [manifestSig] by [ManifestVerifier]. */
+    val manifest: String? = null,
+    val manifestSig: String? = null,
+    val protocolVersion: Int = 1,
+    val minPeerProtocol: Int = 1,
+)
+
+/** The partner's last report as seen by the server (OTA v2 partner gate). */
+@Serializable
+data class PeerInfo(
+    val versionCode: Int,
+    val protocolVersion: Int = 1,
+    val minPeerProtocol: Int = 1,
+    val reportedAt: Long = 0,
+    val compatible: Boolean = true,
 )
 
 @Serializable
-data class UpdateResponse(val latest: UpdateInfo? = null, val force: Boolean = false)
+data class UpdateResponse(
+    val latest: UpdateInfo? = null,
+    val force: Boolean = false,
+    /** null | MIN_SUPPORTED | PEER_PROTOCOL | PEER_NEWER */
+    val reason: String? = null,
+    val peer: PeerInfo? = null,
+)
 
 /** Pure update rules (no Android dependencies) so they can be unit-tested on the JVM. */
 object UpdateLogic {
@@ -36,6 +57,25 @@ object UpdateLogic {
      * we still ignore anything not strictly newer (e.g. a stale cached response after an update).
      */
     fun isNewer(info: UpdateInfo?, currentVersionCode: Int): Boolean = info != null && info.versionCode > currentVersionCode
+
+    /**
+     * Anti-downgrade (docs/ota-design.md §3): an offer is acceptable only when it is newer than the installed build and
+     * not older than the highest versionCode this device has installed or seen in a *verified* manifest.
+     */
+    fun acceptOffer(offeredVersionCode: Int, installedVersionCode: Int, highestSeen: Int): Boolean =
+        offeredVersionCode > installedVersionCode && offeredVersionCode >= highestSeen
+
+    /** New high-water mark; only verified manifests may raise it above the installed version. */
+    fun nextHighestSeen(current: Int, installedVersionCode: Int, verifiedOffer: Int?): Int =
+        maxOf(current, installedVersionCode, verifiedOffer ?: 0)
+
+    /** Short Chinese explanation for the dialog. */
+    fun reasonText(reason: String?, peer: PeerInfo?): String? = when (reason) {
+        "MIN_SUPPORTED" -> "当前版本已停止支持，需要更新后才能继续使用。"
+        "PEER_PROTOCOL" -> "对方已升级到新的通信协议，需要更新后才能继续和对方通信。"
+        "PEER_NEWER" -> "对方已经更新到新版本，建议你也更新。"
+        else -> null
+    }
 
     fun shouldAutoCheck(lastCheckAt: Long, now: Long): Boolean =
         lastCheckAt <= 0 || now - lastCheckAt >= AUTO_CHECK_INTERVAL_MS || now < lastCheckAt

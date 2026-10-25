@@ -40,6 +40,7 @@ jobs:
       major_minor: ${{ steps.v.outputs.major_minor }}
       version_code: ${{ steps.v.outputs.version_code }}
       min_supported: ${{ steps.v.outputs.min_supported }}
+      rollout: ${{ steps.v.outputs.rollout }}
       revision: ${{ steps.v.outputs.revision }}
     steps:
       - uses: actions/checkout@v4
@@ -68,13 +69,17 @@ jobs:
           [ -n "$MIN_INPUT" ] && min=$MIN_INPUT
           min=${min:-0}
           [[ "$min" =~ ^[0-9]+$ ]] || { echo "::error::minSupportedVersionCode must be an integer"; exit 1; }
-          printf '%s\n' "$notes" | grep -v '^minSupportedVersionCode:' > release-notes.md || true
+          # OTA rollout: "staged" (canary devices first, default) or "all"; tag annotation line `rollout: all`.
+          rollout=$(printf '%s\n' "$notes" | sed -n 's/^rollout:[[:space:]]*\(staged\|all\)[[:space:]]*$/\1/p' | tail -n1)
+          rollout=${rollout:-staged}
+          printf '%s\n' "$notes" | grep -v -e '^minSupportedVersionCode:' -e '^rollout:' > release-notes.md || true
           {
             echo "tag=$TAG"
             echo "version=$((10#$x)).$((10#$y)).$((10#$z))"
             echo "major_minor=$((10#$x)).$((10#$y))"
             echo "version_code=$((10#$x * 10000 + 10#$y * 100 + 10#$z))"
             echo "min_supported=$min"
+            echo "rollout=$rollout"
             echo "revision=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
@@ -142,12 +147,14 @@ jobs:
       SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
       SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
       COUPLE_VERSION_NAME: ${{ needs.meta.outputs.version }}
+      # Public half of the OTA release key, pinned into BuildConfig.OTA_PUBLIC_KEY (public; a repo *variable*).
+      OTA_PUBLIC_KEY: ${{ vars.OTA_PUBLIC_KEY }}
     steps:
       - name: Require signing secrets
         working-directory: .
         run: |
           missing=""
-          for v in SIGNING_KEYSTORE_BASE64 SIGNING_STORE_PASSWORD SIGNING_KEY_ALIAS SIGNING_KEY_PASSWORD; do
+          for v in SIGNING_KEYSTORE_BASE64 SIGNING_STORE_PASSWORD SIGNING_KEY_ALIAS SIGNING_KEY_PASSWORD OTA_PUBLIC_KEY; do
             [ -n "${!v}" ] || missing="$missing $v"
           done
           if [ -n "$missing" ]; then
@@ -170,7 +177,7 @@ jobs:
           printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "SIGNING_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - name: Build signed release APK
-        run: ./gradlew --no-daemon -Pcouple.requireReleaseSigning=true :app:assembleRelease testReleaseUnitTest --stacktrace
+        run: ./gradlew --no-daemon -Pcouple.requireReleaseSigning=true -Pcouple.requireOtaPublicKey=true :app:assembleRelease testReleaseUnitTest --stacktrace
       - name: Verify signature and collect metadata
         env:
           VERSION: ${{ needs.meta.outputs.version }}
@@ -190,10 +197,20 @@ jobs:
           echo "$badging"
           echo "$badging" | grep -q "versionCode='$VERSION_CODE'" || { echo "::error::versionCode mismatch"; exit 1; }
           echo "$badging" | grep -q "versionName='$VERSION'" || { echo "::error::versionName mismatch"; exit 1; }
+          pkg=$(echo "$badging" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+          min_sdk=$("$aapt2" dump badging "$apk" | sed -n "s/^sdkVersion:'\([0-9]*\)'.*/\1/p" | head -n1)
+          [ -n "$pkg" ] && [ -n "$min_sdk" ] || { echo "::error::could not read packageName/minSdk"; exit 1; }
+          # Protocol gate constants: single source of truth is app/gradle.properties (also compiled into BuildConfig).
+          proto=$(sed -n 's/^couple\.protocolVersion=\([0-9][0-9]*\)$/\1/p' gradle.properties)
+          min_peer=$(sed -n 's/^couple\.minPeerProtocol=\([0-9][0-9]*\)$/\1/p' gradle.properties)
+          [ -n "$proto" ] && [ -n "$min_peer" ] || { echo "::error::couple.protocolVersion/minPeerProtocol missing in app/gradle.properties"; exit 1; }
           mkdir -p "$GITHUB_WORKSPACE/out"
           cp "$apk" "$GITHUB_WORKSPACE/out/couple-$VERSION.apk"
           jq -n --arg sha "$(sha256sum "$apk" | cut -d' ' -f1)" --argjson size "$(stat -c %s "$apk")" \
-            --arg cert "$cert_sha" '{sha256:$sha,size:$size,signingCertSha256:$cert}' > "$GITHUB_WORKSPACE/out/apk-meta.json"
+            --arg cert "$cert_sha" --arg pkg "$pkg" --argjson minSdk "$min_sdk" \
+            --argjson proto "$proto" --argjson minPeer "$min_peer" \
+            '{sha256:$sha,size:$size,signingCertSha256:$cert,packageName:$pkg,minSdk:$minSdk,protocolVersion:$proto,minPeerProtocol:$minPeer}' \
+            > "$GITHUB_WORKSPACE/out/apk-meta.json"
           cat "$GITHUB_WORKSPACE/out/apk-meta.json"
       - name: Remove keystore
         if: always()
@@ -240,9 +257,16 @@ jobs:
     needs: [meta, app, promote, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # OTA_SIGNING_KEY may live here as an Environment secret; give the environment a required reviewer
+    # (Settings -> Environments -> ota-release) so a stolen GitHub session alone cannot sign a release.
+    environment: ota-release
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.tag }}
+          sparse-checkout: deploy/scripts
       - uses: actions/download-artifact@v4
         with:
           name: apk
@@ -255,14 +279,12 @@ jobs:
         with:
           name: windows-package
           path: out
-      - name: Assemble release.json and publish
+      - name: Assemble release.json
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.meta.outputs.tag }}
           VERSION: ${{ needs.meta.outputs.version }}
           VERSION_CODE: ${{ needs.meta.outputs.version_code }}
           MIN_SUPPORTED: ${{ needs.meta.outputs.min_supported }}
+          ROLLOUT: ${{ needs.meta.outputs.rollout }}
         run: |
           set -euo pipefail
           cd out
@@ -270,18 +292,45 @@ jobs:
             --arg versionName "$VERSION" \
             --argjson versionCode "$VERSION_CODE" \
             --argjson minSupported "$MIN_SUPPORTED" \
+            --arg rollout "$ROLLOUT" \
             --rawfile notes release-notes.md \
             --argjson publishedAt "$(date +%s%3N)" \
             --slurpfile apk apk-meta.json \
-            '{versionName:$versionName, versionCode:$versionCode, sha256:$apk[0].sha256, size:$apk[0].size,
-              signingCertSha256:$apk[0].signingCertSha256, minSupportedVersionCode:$minSupported,
+            '{schema:2, packageName:$apk[0].packageName, versionName:$versionName, versionCode:$versionCode,
+              sha256:$apk[0].sha256, size:$apk[0].size, signingCertSha256:$apk[0].signingCertSha256,
+              minSupportedVersionCode:$minSupported, protocolVersion:$apk[0].protocolVersion,
+              minPeerProtocol:$apk[0].minPeerProtocol, minSdk:$apk[0].minSdk, rollout:$rollout,
               notes:($notes|sub("\\s+$";"")), publishedAt:$publishedAt}' > release.json
           cat release.json
+      # The only step that sees OTA_SIGNING_KEY. The key is written to $RUNNER_TEMP by the script, removed by its
+      # EXIT trap and again by the always() step below. The signature covers the exact bytes of release.json.
+      - name: Sign release.json (OTA release key)
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+          OTA_PUBLIC_KEY: ${{ vars.OTA_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$OTA_SIGNING_KEY" ] || [ -z "$OTA_PUBLIC_KEY" ]; then
+            echo "::error::Missing secret OTA_SIGNING_KEY or variable OTA_PUBLIC_KEY (generate with deploy/scripts/ota-keygen.sh)"; exit 1
+          fi
+          bash deploy/scripts/ota-sign.sh out/release.json "$RUNNER_TEMP"
+      - name: Remove OTA key material
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/ota-signing-key.der "$RUNNER_TEMP"/ota-public-key.der "$RUNNER_TEMP"/ota-manifest.sig.bin
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd out
           win="couple-server-windows-x64-$VERSION.zip"
           if [ ! -f "$win" ] || [ ! -f "$win.sha256" ]; then echo "::error::Windows package missing"; exit 1; fi
           sha256sum -c "$win.sha256"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "couple-$VERSION.apk" release.json "$win" "$win.sha256" --clobber
+            gh release upload "$TAG" "couple-$VERSION.apk" release.json release.json.sig "$win" "$win.sha256" --clobber
           else
-            gh release create "$TAG" "couple-$VERSION.apk" release.json "$win" "$win.sha256" --title "$TAG" --notes-file release-notes.md --verify-tag
+            gh release create "$TAG" "couple-$VERSION.apk" release.json release.json.sig "$win" "$win.sha256" --title "$TAG" --notes-file release-notes.md --verify-tag
           fi

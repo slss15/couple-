@@ -35,6 +35,19 @@ if (!hasReleaseSigning && (findProperty("couple.requireReleaseSigning") as Strin
     )
 }
 
+// OTA release-manifest public key (base64 raw Ed25519, see deploy/scripts/ota-keygen.sh), pinned at build time.
+// -Pcouple.otaPublicKey=... or env OTA_PUBLIC_KEY. Empty = manifest verification skipped (debug/local builds only);
+// the release workflow passes -Pcouple.requireOtaPublicKey=true so a release can never ship without a pin.
+val otaPublicKey: String = ((findProperty("couple.otaPublicKey") as String?) ?: System.getenv("OTA_PUBLIC_KEY") ?: "").trim()
+if (otaPublicKey.isNotEmpty() && !Regex("^[A-Za-z0-9+/]{43}=$").matches(otaPublicKey)) {
+    throw GradleException("OTA_PUBLIC_KEY must be standard base64 of a 32-byte Ed25519 public key")
+}
+if (otaPublicKey.isEmpty() && (findProperty("couple.requireOtaPublicKey") as String?) == "true") {
+    throw GradleException("OTA public key required (-Pcouple.otaPublicKey or env OTA_PUBLIC_KEY) but not set.")
+}
+val coupleProtocolVersion: Int = (findProperty("couple.protocolVersion") as String?)?.toInt() ?: 1
+val coupleMinPeerProtocol: Int = (findProperty("couple.minPeerProtocol") as String?)?.toInt() ?: 1
+
 android {
     namespace = "com.qimingnan.couple"
     compileSdk = 35
@@ -46,8 +59,12 @@ android {
         targetSdk = 35
         versionCode = coupleVersionCode
         versionName = coupleVersionName
-        // 与 contract.md 中 /health 的 protocolVersion 对齐
+        // 与 contract.md 中 /health 的 protocolVersion 对齐（客户端<->服务器）
         buildConfigField("int", "PROTOCOL_VERSION", "1")
+        // App<->app (partner) protocol, distinct from the client<->server PROTOCOL_VERSION above (docs/ota-design.md §4)
+        buildConfigField("int", "PEER_PROTOCOL_VERSION", coupleProtocolVersion.toString())
+        buildConfigField("int", "MIN_PEER_PROTOCOL", coupleMinPeerProtocol.toString())
+        buildConfigField("String", "OTA_PUBLIC_KEY", "\"$otaPublicKey\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
