@@ -127,7 +127,7 @@ jobs:
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
-          $issues = @('setup.ps1', 'install.ps1', 'uninstall.ps1', 'lib\common.ps1') | ForEach-Object {
+          $issues = @('setup.ps1', 'install.ps1', 'uninstall.ps1', 'doctor.ps1', 'watchdog.ps1', 'lib\common.ps1') | ForEach-Object {
             Invoke-ScriptAnalyzer -Path (Join-Path $env:PKG $_) -Severity Warning, Error `
               -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions
           }
@@ -158,6 +158,58 @@ jobs:
           & "$env:PKG\install.ps1" -InstallDir $dir -NoStart   # idempotent re-run (upgrade path)
           & "$env:PKG\uninstall.ps1" -InstallDir $dir -RemoveData -Force
           if (Get-Service couple-backend -ErrorAction SilentlyContinue) { throw 'service not removed' }
+
+  pester:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          sparse-checkout: deploy/windows
+      - name: Pester (helpers, parse, BOM)
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.5 -Force -Scope CurrentUser -SkipPublisherCheck
+          $r = Invoke-Pester -Path deploy/windows/tests/common.Tests.ps1 -PassThru -Output Detailed
+          if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) Pester test(s) failed" }
+
+  e2e:
+    # Full flow on a throwaway runner: doctor -> setup.ps1 (real MySQL) -> /setup -> bootstrap -> idempotent re-run ->
+    # watchdog -> downgrade refusal -> service restart -> uninstall. Not yet a gate for publish-edge.
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          sparse-checkout: deploy/windows/tests
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: out
+      - name: Extract
+        shell: pwsh
+        env:
+          ZIP: ${{ needs.build.outputs.zip }}
+        run: |
+          Expand-Archive -Path "out/$env:ZIP" -DestinationPath pkg
+          $dir = Get-ChildItem pkg -Directory | Select-Object -First 1
+          "PKG=$($dir.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: e2e.ps1
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File deploy\windows\tests\e2e.ps1 -Pkg "$env:PKG" -IUnderstandThisIsDestructive
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-e2e-logs
+          path: |
+            C:\couple\logs
+            C:\couple\config\*.yml
+          if-no-files-found: ignore
+          retention-days: 14
 
   publish-edge:
     needs: [build, smoke]
