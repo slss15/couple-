@@ -20,12 +20,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import queue
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -38,6 +40,11 @@ SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 MAX_BODY = 8192
 # Internal (compose-network) calls never go through an HTTP proxy from the environment.
 DIRECT = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+# Outbound registry host, a compile-time constant by design: every URL this module builds goes to
+# ghcr.io and nothing else (images are published as ghcr.io/slss15/couple-*). Keeping the host out of
+# the environment means no env value can redirect these requests to another machine.
+REGISTRY = "ghcr.io"
 
 
 def log(msg: str) -> None:
@@ -53,7 +60,7 @@ class Config:
         self.channel = g("UPDATE_CHANNEL") or g("COUPLE_TAG") or "edge"
         self.window = g("UPDATE_WINDOW")  # "HH:MM-HH:MM" local time (TZ env); poller only
         self.health_timeout = int(g("HEALTH_TIMEOUT", "90"))
-        self.registry = g("REGISTRY", "ghcr.io")
+        self.registry = REGISTRY
         self.owner = g("IMAGE_OWNER", "slss15").lower()
         self.services = [s.strip() for s in g("SERVICES", "backend,admin").split(",") if s.strip()]
         self.health_urls = {
@@ -105,10 +112,17 @@ class ReplayCache:
             self.seen[key] = now + 2 * self.ttl + 60
             if self.path:
                 try:
-                    tmp = self.path + ".tmp"
-                    with open(tmp, "w") as f:
-                        json.dump(self.seen, f)
-                    os.replace(tmp, self.path)
+                    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path) or ".", prefix=".replay-", suffix=".tmp")
+                    try:
+                        with os.fdopen(fd, "w") as f:
+                            json.dump(self.seen, f)
+                        os.replace(tmp, self.path)
+                    except BaseException:
+                        try:
+                            os.unlink(tmp)
+                        except OSError:
+                            pass
+                        raise
                 except OSError:
                     pass
             return True
@@ -227,27 +241,56 @@ def http_get_status(url: str, timeout: float = 5) -> int:
         return 0
 
 
+def _registry_call(path: str, method: str, headers: dict, timeout: int = 20) -> tuple[int, dict, bytes]:
+    """One request to the registry host, which is the compile-time constant REGISTRY (never env-derived).
+
+    `path` starts with "/" and may only carry regex-validated name/tag segments (see remote_digest), so the
+    request line cannot be redirected or smuggled; the connection host being a literal rules out SSRF.
+    Note: unlike urllib's default opener this does not honour *_proxy env vars — the compose updater is
+    expected to have direct outbound (the whole design: no inbound, direct egress).
+    """
+    conn = http.client.HTTPSConnection(REGISTRY, timeout=timeout)
+    try:
+        conn.request(method, path, headers=headers)
+        resp = conn.getresponse()
+        body = resp.read()
+        return resp.status, {k.lower(): v for k, v in resp.getheaders()}, body
+    finally:
+        conn.close()
+
+
 def remote_digest(cfg: Config, svc: str, tag: str) -> str | None:
     """HEAD the manifest on the registry (anonymous token for public packages)."""
+    # Both names end up in registry URLs: only accept the Docker-legal spellings so a bad
+    # UPDATE_CHANNEL / SERVICES env var cannot smuggle path tricks into the request.
+    if svc not in cfg.services or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", tag):
+        log(f"remote digest: refusing invalid service/tag {svc}:{tag!r}")
+        return None
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", cfg.owner):
+        log(f"remote digest: refusing invalid IMAGE_OWNER {cfg.owner!r}")
+        return None
     name = f"{cfg.owner}/couple-{svc}"
     try:
-        treq = urllib.request.Request(
-            f"https://{cfg.registry}/token?scope=repository:{name}:pull&service={cfg.registry}")
+        auth = {}
         if cfg.ghcr_user and cfg.ghcr_token:
             cred = base64.b64encode(f"{cfg.ghcr_user}:{cfg.ghcr_token}".encode()).decode()
-            treq.add_header("Authorization", f"Basic {cred}")
-        with urllib.request.urlopen(treq, timeout=20) as r:
-            token = json.load(r).get("token", "")
-        req = urllib.request.Request(f"https://{cfg.registry}/v2/{name}/manifests/{tag}", method="HEAD")
-        req.add_header("Authorization", f"Bearer {token}")
-        req.add_header("Accept", ", ".join([
+            auth["Authorization"] = f"Basic {cred}"
+        status, _, body = _registry_call(f"/token?scope=repository:{name}:pull&service={REGISTRY}", "GET", auth)
+        if status != 200:
+            log(f"remote digest {svc}:{tag}: token endpoint returned {status}")
+            return None
+        token = json.loads(body).get("token", "")
+        headers = {"Authorization": f"Bearer {token}", "Accept": ", ".join([
             "application/vnd.oci.image.index.v1+json",
             "application/vnd.docker.distribution.manifest.list.v2+json",
             "application/vnd.oci.image.manifest.v1+json",
-            "application/vnd.docker.distribution.manifest.v2+json"]))
-        with urllib.request.urlopen(req, timeout=20) as r:
-            d = r.headers.get("Docker-Content-Digest")
-            return d if d and DIGEST_RE.match(d) else None
+            "application/vnd.docker.distribution.manifest.v2+json"])}
+        status, hdrs, _ = _registry_call(f"/v2/{name}/manifests/{tag}", "HEAD", headers)
+        if status != 200:
+            log(f"remote digest {svc}:{tag}: manifest HEAD returned {status}")
+            return None
+        d = hdrs.get("docker-content-digest")
+        return d if d and DIGEST_RE.match(d) else None
     except Exception as e:  # noqa: BLE001
         log(f"remote digest {svc}:{tag} failed: {e}")
         return None
@@ -285,10 +328,17 @@ class Updater:
 
     def save(self) -> None:
         with self.lock:
-            tmp = self.state_path + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(self.state, f, indent=2, sort_keys=True)
-            os.replace(tmp, self.state_path)
+            fd, tmp = tempfile.mkstemp(dir=self.cfg.state_dir, prefix=".updater-", suffix=".json.tmp")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(self.state, f, indent=2, sort_keys=True)
+                os.replace(tmp, self.state_path)
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
             payload = self.public_status()
         self._post_status(payload)
 
