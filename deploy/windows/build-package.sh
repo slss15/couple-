@@ -95,7 +95,7 @@ cp "$here"/service/*.xml.in "$pkg/service/"
 cp "$here/cloudflared/config.yml.in" "$pkg/cloudflared/"
 cp "$here/config/couple.env.example" "$pkg/config/"
 cp "$here/lib/common.ps1" "$pkg/lib/"
-cp "$here/setup.ps1" "$here/install.ps1" "$here/uninstall.ps1" "$here/doctor.ps1" "$here/watchdog.ps1" "$here/versions.env" "$pkg/"
+cp "$here/setup.ps1" "$here/install.ps1" "$here/uninstall.ps1" "$here/doctor.ps1" "$here/watchdog.ps1" "$here/backup.ps1" "$here/versions.env" "$pkg/"
 printf '%s\n' "$version" > "$pkg/VERSION"
 # Build order for the anti-downgrade rule (updater VersionOrder.kt / install.ps1): edge-<sha> names carry no order.
 commit_sha=$(git -C "$root" rev-parse HEAD 2>/dev/null || true)
