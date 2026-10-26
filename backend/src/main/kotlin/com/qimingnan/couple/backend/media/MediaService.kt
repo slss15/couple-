@@ -205,6 +205,20 @@ class MediaService(
         return MediaView(key, null, mime, w, h, cleaned.size.toLong())
     }
 
+    /** 复制一个媒体对象（文件 + 缩略图 + 行），新对象未被占用。重复的定时消息每次发送用一份副本。 */
+    suspend fun duplicate(key: String): MediaView? {
+        val o = db.tx { MediaRepo.byKey(key) } ?: return null
+        val bytes = storage.get(o.storageKey) ?: return null
+        val newKey = Ids.newId()
+        storage.put(newKey, o.mimeType, bytes)
+        val newThumb = o.thumbKey?.let { tk ->
+            storage.get(tk)?.let { tb -> Ids.newId().also { storage.put(it, "image/jpeg", tb) } }
+        }
+        val now = config.clock()
+        db.tx { MediaRepo.insert(o.copy(storageKey = newKey, thumbKey = newThumb, usedByPost = null, createdAt = now)) }
+        return MediaView(newKey, newThumb, o.mimeType, o.width, o.height, o.size)
+    }
+
     /** Deletes a media object (row + files), e.g. when a chat image is recalled. */
     suspend fun deleteObject(key: String) {
         val o = db.tx { MediaRepo.byKey(key)?.also { MediaRepo.deleteRow(key) } } ?: return

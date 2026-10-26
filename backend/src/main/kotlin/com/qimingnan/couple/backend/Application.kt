@@ -14,6 +14,7 @@ import com.qimingnan.couple.backend.bootstrap.BootstrapService
 import com.qimingnan.couple.backend.bootstrap.bootstrapPublicRoutes
 import com.qimingnan.couple.backend.chat.ChatService
 import com.qimingnan.couple.backend.chat.chatRoutes
+import com.qimingnan.couple.backend.chat.scheduledRoutes
 import com.qimingnan.couple.backend.common.ApiException
 import com.qimingnan.couple.backend.common.AppJson
 import com.qimingnan.couple.backend.common.ErrorBody
@@ -73,6 +74,7 @@ import org.slf4j.event.Level
 import kotlin.time.Duration.Companion.minutes
 
 /** Lets tests reach the first-run setup service (generated token). */
+val ScheduledServiceKey = io.ktor.util.AttributeKey<com.qimingnan.couple.backend.chat.ScheduledService>("ScheduledService")
 val SetupServiceKey = io.ktor.util.AttributeKey<SetupService>("SetupService")
 
 /** Lets tests reach the running mirror instance. */
@@ -151,6 +153,16 @@ fun Application.module(config: AppConfig) {
         val key = (apihz?.get("apiKey") as? kotlinx.serialization.json.JsonPrimitive)?.content?.trim().orEmpty()
         if (id.isEmpty() || key.isEmpty()) null else com.qimingnan.couple.backend.chat.ApihzCreds(id, key)
     }
+    val chatService = ChatService(db, config, serverPush, mediaService, stickerService)
+    // 定时消息（contract "Chat → Scheduled messages"）：服务端每 30 s 处理到期规则；认领是条件 UPDATE，多实例安全。
+    val scheduledService = com.qimingnan.couple.backend.chat.ScheduledService(db, config, chatService, mediaService, stickerService)
+    attributes.put(ScheduledServiceKey, scheduledService)
+    launch(Dispatchers.IO) {
+        while (true) {
+            delay(com.qimingnan.couple.backend.chat.ScheduledService.TICK_MS)
+            runCatching { scheduledService.tick() }.onFailure { log.warn("scheduled tick failed: {}", it.toString()) }
+        }
+    }
     launch(Dispatchers.IO) {
         while (true) {
             runCatching { mediaService.orphanSweep() }
@@ -220,7 +232,8 @@ fun Application.module(config: AppConfig) {
                 feedRoutes(feedService)
                 adminMediaRoutes(db, audit, mediaService)
                 taRoutes(TaService(db, config))
-                chatRoutes(ChatService(db, config, serverPush, mediaService, stickerService))
+                chatRoutes(chatService)
+                scheduledRoutes(scheduledService)
             }
         }
         config.adminStaticDir?.let { dir ->

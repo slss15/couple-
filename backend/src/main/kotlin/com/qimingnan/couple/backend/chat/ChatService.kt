@@ -223,6 +223,23 @@ class ChatService(
         return view
     }
 
+    /**
+     * 服务端发起的消息（定时消息）。必须在事务内调用：与 POST /chat/messages 相同的落库（同一张表、同样的
+     * 媒体占用），调用方提交事务后再 [publishMessage]，所以客户端看到的推送 / catch-up 语义完全一样。
+     */
+    fun insertServerMessage(
+        id: String, coupleId: String, senderId: String, type: String, text: String, media: ChatMedia?, now: Long,
+    ): ChatMessageView {
+        ChatRepo.insert(id, coupleId, senderId, if (type == "text") text else "", null, now, now, type, media)
+        media?.let { com.qimingnan.couple.backend.media.MediaRepo.markUsed(it.key, id) }
+        return ChatRepo.toView(ChatRepo.message(id)!!)
+    }
+
+    /** 与 send() 相同的 MQTT 推送（couple/{cid}/chat, kind=message）。 */
+    suspend fun publishMessage(coupleId: String, view: ChatMessageView) {
+        push.publish(coupleId, "chat", messageEvent(view))
+    }
+
     private fun replay(existing: ResultRow, coupleId: String, caller: AuthUser): ChatMessageView {
         if (existing[ChatMessages.coupleId] != coupleId || existing[ChatMessages.senderId] != caller.userId) {
             throw conflict("ID_CONFLICT", "id already used by another message")

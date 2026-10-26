@@ -192,6 +192,7 @@ class PairingService(
                 val memberIds = Users.selectAll().where { Users.coupleId eq cid }.map { it[Users.id] }
                 Couples.update({ Couples.id eq cid }) { it[deletedAt] = now } // soft delete
                 Users.update({ Users.coupleId eq cid }) { it[Users.coupleId] = null }
+                com.qimingnan.couple.backend.chat.ScheduledService.Unpair.deleteForCouple(cid) // 定时消息随解绑删除
                 Triple(memberIds, cid, rid)
             }
             audit.log(userId, AuditActions.UNPAIR_CONFIRM, coupleId, mapOf("requestId" to rid))

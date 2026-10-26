@@ -201,6 +201,30 @@ object ChatMessages : Table("chat_messages") {
 }
 
 /** Per-user read cursor (V7): the newest message id each member has read, monotonic. */
+/** V9: 定时消息规则（contract "Chat → Scheduled messages"）。 */
+object ScheduledMessages : Table("scheduled_messages") {
+    val id = varchar("id", 26)
+    val coupleId = varchar("couple_id", 26)
+    val senderId = varchar("sender_id", 26)
+    val msgType = varchar("msg_type", 16).default("text")
+    val text = varchar("text", 4000).default("")
+    val mediaKey = varchar("media_key", 26).nullable()
+    val mediaWidth = integer("media_width").nullable()
+    val mediaHeight = integer("media_height").nullable()
+    val ruleKind = varchar("rule_kind", 8)
+    val atMs = long("at_ms").nullable()
+    val fireTime = varchar("fire_time", 5).nullable()
+    val fireDow = integer("fire_dow").nullable()
+    val fireMonth = integer("fire_month").nullable()
+    val fireDay = integer("fire_day").nullable()
+    val tz = varchar("tz", 64).default("Asia/Shanghai")
+    val nextFireAt = long("next_fire_at").nullable()
+    val paused = bool("paused").default(false)
+    val lastFiredAt = long("last_fired_at").nullable()
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
 object ChatReads : Table("chat_reads") {
     val coupleId = varchar("couple_id", 26)
     val userId = varchar("user_id", 26)
