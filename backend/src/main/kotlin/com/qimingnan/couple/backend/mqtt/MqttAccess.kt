@@ -9,16 +9,26 @@ import java.util.concurrent.ConcurrentHashMap
 
 object MqttTopics {
     /**
-     * A client may only publish/subscribe under couple/{its own coupleId}/... .
+     * Subscribe side: a client may read any topic under couple/{its own coupleId}/... .
      * Rejects shared/queue subscriptions, wildcards in the couple segment, and anything outside the root.
      */
-    fun allowed(topic: String, coupleId: String?): Boolean {
+    fun allowedRead(topic: String, coupleId: String?): Boolean {
         if (coupleId == null) return false
         if (topic.startsWith("\$")) return false // $share/..., $queue/..., $SYS/...
         val levels = topic.split('/')
         if (levels.size < 3) return false
         if (levels[0] != "couple" || levels[1] != coupleId) return false
         return true
+    }
+
+    /**
+     * Publish side: clients only write their own presence. Feed/chat/plugin events are server-pushed
+     * (contract "Feed"/"Chat": client publishes to those topics are denied by ACL).
+     */
+    fun allowedWrite(topic: String, coupleId: String?): Boolean {
+        if (!allowedRead(topic, coupleId)) return false
+        val levels = topic.split('/')
+        return levels.size == 3 && levels[2] == "presence"
     }
 }
 
@@ -75,9 +85,18 @@ class MqttAccessService(
         return cid
     }
 
-    /** Topic ACL: same rule for publish and subscribe (see [MqttTopics.allowed]). */
-    suspend fun canAccess(username: String?, topic: String?): Boolean {
+    /** Subscribe ACL (see [MqttTopics.allowedRead]). */
+    suspend fun canRead(username: String?, topic: String?): Boolean {
         if (username.isNullOrEmpty() || topic == null) return false
-        return MqttTopics.allowed(topic, coupleIdOf(username))
+        return MqttTopics.allowedRead(topic, coupleIdOf(username))
     }
+
+    /** Publish ACL (see [MqttTopics.allowedWrite]). Server pushes use internalPublish, not this check. */
+    suspend fun canWrite(username: String?, topic: String?): Boolean {
+        if (username.isNullOrEmpty() || topic == null) return false
+        return MqttTopics.allowedWrite(topic, coupleIdOf(username))
+    }
+
+    /** True when either direction is allowed (used by the Last Will guard, which only writes presence). */
+    suspend fun canAccess(username: String?, topic: String?): Boolean = canWrite(username, topic)
 }

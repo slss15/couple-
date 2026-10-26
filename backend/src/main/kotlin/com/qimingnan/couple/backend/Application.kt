@@ -12,6 +12,8 @@ import com.qimingnan.couple.backend.auth.authRoutes
 import com.qimingnan.couple.backend.auth.clientIp
 import com.qimingnan.couple.backend.bootstrap.BootstrapService
 import com.qimingnan.couple.backend.bootstrap.bootstrapPublicRoutes
+import com.qimingnan.couple.backend.chat.ChatService
+import com.qimingnan.couple.backend.chat.chatRoutes
 import com.qimingnan.couple.backend.common.ApiException
 import com.qimingnan.couple.backend.common.AppJson
 import com.qimingnan.couple.backend.common.ErrorBody
@@ -212,6 +214,7 @@ fun Application.module(config: AppConfig) {
                 feedRoutes(feedService)
                 adminMediaRoutes(db, audit, mediaService)
                 taRoutes(TaService(db, config))
+                chatRoutes(ChatService(db, config, serverPush))
             }
         }
         config.adminStaticDir?.let { dir ->

@@ -1,4 +1,4 @@
-# Couple 后端（P0）
+# Couple 后端
 
 > **从零配置服务器：首选 Windows 原生方案 [`../deploy/windows/SETUP-windows.md`](../deploy/windows/SETUP-windows.md)**（无需 Docker/WSL，内置 MQTT broker）；Linux + Docker 方案见 [`../deploy/SETUP.md`](../deploy/SETUP.md)。
 
@@ -6,7 +6,7 @@
 
 - 技术栈：Kotlin 2.1 + Ktor 3（Netty）、Exposed + HikariCP + MySQL 8（Flyway 迁移）、kotlinx.serialization、JWT（HS256，java-jwt）、Argon2id（Bouncy Castle 纯 Java 实现）、Ed25519（JDK）、ULID。
 - JDK：21（Gradle toolchain）。
-- 模块：`config` / `auth`（注册、登录、refresh 轮换 + 家族吊销、登出）/ `pairing`（配对码、加入、解绑申请+对方确认）/ `bootstrap`（公钥、二维码签名）/ `admin`（配置、密钥脱敏、审计日志）/ `mqtt`（`MqttAccessService` 统一认证/ACL：内置 Moquette broker 或 EMQX HTTP 钩子）/ `health`；`updater/` 子工程是 Windows 的 couple-updater 服务。
+- 模块：`config` / `auth`（注册、登录、refresh 轮换 + 家族吊销、登出）/ `pairing`（配对码、加入、解绑申请+对方确认）/ `bootstrap`（公钥、二维码签名）/ `admin`（配置、密钥脱敏、审计日志）/ `mqtt`（`MqttAccessService` 统一认证/ACL：内置 Moquette broker 或 EMQX HTTP 钩子）/ `media`（私有桶存储、EXIF 剥离、缩略图）/ `feed`（动态/点赞/评论）/ `ta`（资料卡/重要日子）/ `chat`（P1a 文本消息/引用/撤回/已读）/ `health`；`updater/` 子工程是 Windows 的 couple-updater 服务。
 - 每个 auth / pair / admin 操作都会写一条审计日志（`audit_log` 表，`GET /api/v1/admin/audit` 查看）。
 
 ## 目录
@@ -20,8 +20,8 @@ backend/
 │   ├── common/                   # 错误体、模型（User/TokenPair/Couple）、ULID、工具
 │   ├── db/                       # Exposed 表定义、Hikari + Flyway、server_settings
 │   ├── audit/                    # 审计
-│   ├── auth/ pairing/ bootstrap/ admin/ mqtt/ health/
-├── src/main/resources/db/migration/V1__init.sql
+│   ├── auth/ pairing/ bootstrap/ admin/ mqtt/ media/ feed/ ta/ chat/ health/
+├── src/main/resources/db/migration/V1..V7.sql
 ├── src/test/kotlin/...           # Ktor testApplication + H2（MySQL 模式）
 ├── updater/                      # Windows server-updater（Gradle 子工程，JDK-only）
 ├── Dockerfile, docker-compose.yml, .env.example
@@ -100,12 +100,12 @@ docker compose --profile aaaa up -d --build   # 可选：确认有公网 IPv6 �
 
 **可选：Cloudflare 代理的 AAAA + Caddy**（`--profile aaaa`）——只有确认服务器有公网 IPv6 且能放行 443 入站时才用：Cloudflare DNS 建橙云 AAAA（`ddns` 服务自动更新）、SSL 选 Full (strict)、Origin CA 证书放 `deploy/certs/`、防火墙只放行 Cloudflare IP 段（Docker 发布的端口绕过 ufw，要在 `DOCKER-USER` 链里限制）。
 
-### MQTT 客户端连接方式（P0）
+### MQTT 客户端连接方式（P1）
 
 - URL：`wss://couple.example.com/mqtt`（WebSocket 子协议 `mqtt`）。两种 broker（内置 Moquette / EMQX）对客户端完全一样。
 - `username = userId`，`password = accessToken`（15 分钟有效，过期后需刷新 token 并重连）。内置 broker 还要求 clientId 属于该用户（`{userId}`、`{userId}-…` 或 `a-{userId}-…`）。
 - keepAlive ≤ 60 秒（Cloudflare 约 100 秒无流量断开 WebSocket；推荐 30–45 秒）。broker 按 1.5 × keepAlive 判定掉线并发布遗嘱。
-- 只能发布/订阅 `couple/{自己的 coupleId}/...`；P0 主题 `couple/{cid}/presence`（retained，`{userId, online, ts}`）。未配对用户可以连上但所有主题都被拒绝。
+- 只能访问 `couple/{自己的 coupleId}/...`。客户端**发布**仅允许 `couple/{cid}/presence`（retained，`{userId, online, ts}`）；`couple/{cid}/feed` 与 `couple/{cid}/chat` 为服务端推送话题，客户端只可订阅，发布被 ACL 拒绝。未配对用户可以连上但所有主题都被拒绝。
 
 ## API 速览（全部在 `/api/v1` 下）
 
@@ -121,13 +121,19 @@ docker compose --profile aaaa up -d --build   # 可选：确认有公网 IPv6 �
 | POST | `/admin/bootstrap` | admin | `{uri, json}` |
 | GET/PUT | `/admin/config` | admin | 密钥只写、返回脱敏 |
 | GET | `/admin/audit?limit&before` | admin | 按 ts 倒序，`before` 为 epoch ms（不含） |
+| POST | `/media` · GET `/media/{key}` `/media/{key}/thumb` | Bearer | 图片上传/私有读取（同 couple） |
+| GET/POST/DELETE | `/feed/posts...` · `/feed/comments/{id}` | Bearer | 动态、点赞、评论 |
+| GET | `/ta/summary` | Bearer | 资料卡 + 重要日子 |
+| PUT/POST/DELETE | `/ta/me` · `/ta/days...` | Bearer | 编辑档案、重要日子 CRUD |
+| POST/GET | `/chat/messages` · `/chat/messages/{id}/recall` | Bearer | 聊天发送/分页/撤回 |
+| POST/GET | `/chat/read` · `/chat/state` | Bearer | 已读游标（单调） |
 | POST | `/internal/mqtt/auth` · `/internal/mqtt/acl` | 内部 | 仅 external 模式（EMQX） |
 
 ### 实现细节（契约未写明处）
 
 - **Refresh**：明文 token 为 32 字节随机数（base64url），库里只存 SHA-256。每次刷新都轮换；已用过的 token 再次出现 → 整个家族吊销并返回 401 `REFRESH_REUSED`。`deviceId` 必须与签发时一致（`DEVICE_MISMATCH`）。同一设备重新登录会吊销该设备旧的会话。
 - **配对后 JWT 里的 `cid`**：access token 是无状态的，加入/解绑后旧 token 里的 `cid` 会过时，App 应在配对状态变化后调用 `/auth/refresh`。服务端所有判断（含 MQTT ACL）都以数据库为准，不信任 `cid` 声明。
-- **错误码与 HTTP 状态**：`CODE_INVALID` / `CODE_EXPIRED` / `SELF_PAIR` → 400；`ALREADY_PAIRED` → 409；`NOT_PAIRED` → 404；`NOT_OTHER_MEMBER` → 403；`UNPAIR_REQUEST_NOT_FOUND` → 404；`UNPAIR_REQUEST_EXPIRED` → 400；`UNPAIR_REQUEST_CLOSED` → 409；`INVALID_CREDENTIALS` / `REFRESH_*` / `UNAUTHORIZED` → 401；`INVITE_CODE_INVALID` / `REGISTRATION_DISABLED` / `FORBIDDEN` → 403；`USERNAME_TAKEN` → 409；`VALIDATION_ERROR` / `BAD_REQUEST` / `CONFIG_INCOMPLETE` → 400；`RATE_LIMITED` → 429。
+- **错误码与 HTTP 状态**：`CODE_INVALID` / `CODE_EXPIRED` / `SELF_PAIR` → 400；`ALREADY_PAIRED` → 409；`NOT_PAIRED` → `/couple` 为 404，`/feed` `/ta` `/chat` 等需配对功能为 403；`NOT_OTHER_MEMBER` → 403；`UNPAIR_REQUEST_NOT_FOUND` → 404；`UNPAIR_REQUEST_EXPIRED` → 400；`UNPAIR_REQUEST_CLOSED` → 409；`INVALID_CREDENTIALS` / `REFRESH_*` / `UNAUTHORIZED` → 401；`INVITE_CODE_INVALID` / `REGISTRATION_DISABLED` / `FORBIDDEN` → 403；`USERNAME_TAKEN` → 409；`VALIDATION_ERROR` / `BAD_REQUEST` / `CONFIG_INCOMPLETE` → 400；`RATE_LIMITED` → 429。
 - **解绑申请**：7 天有效；新申请会作废旧的未确认申请。
 - **二维码签名**：`s` 是对 `base64url解码(d)` 原始字节的签名（base64url 无填充）。校验时必须对 `d` 的字节验签，不能对重新序列化的 JSON 验签。
 - **管理配置密钥**：键名匹配 `secret|token|password|passwd|credential|private_key|api_key`（不区分大小写，任意层级）即视为密钥。GET 返回 `****` + 末 4 位（长度 ≥ 12）或 `********`，未设置返回 `null`；PUT 时省略、传 `null` 或原样回传脱敏值 = 保留，传 `""` = 清除，其它值 = 覆盖。每次 PUT 使 `configVersion` +1。审计日志只记录变更了哪些密钥的名字。

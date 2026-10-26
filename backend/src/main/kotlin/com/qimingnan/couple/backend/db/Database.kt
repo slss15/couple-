@@ -182,6 +182,29 @@ object PostComments : Table("post_comments") {
     override val primaryKey = PrimaryKey(id)
 }
 
+/** Chat messages (V7, contract "Chat"). `createdAt` is server time and the sort key; ties break on id. */
+object ChatMessages : Table("chat_messages") {
+    val id = varchar("id", 26)
+    val coupleId = varchar("couple_id", 26)
+    val senderId = varchar("sender_id", 26)
+    val msgType = varchar("msg_type", 16).default("text")
+    val text = varchar("text", 4000)
+    val replyTo = varchar("reply_to", 26).nullable()
+    val clientTs = long("client_ts")
+    val createdAt = long("created_at")
+    val recalledAt = long("recalled_at").nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+/** Per-user read cursor (V7): the newest message id each member has read, monotonic. */
+object ChatReads : Table("chat_reads") {
+    val coupleId = varchar("couple_id", 26)
+    val userId = varchar("user_id", 26)
+    val upToId = varchar("up_to_id", 26)
+    val updatedAt = long("updated_at")
+    override val primaryKey = PrimaryKey(coupleId, userId)
+}
+
 /** Post-install health reports (V4). */
 object ReleaseHealth : Table("release_health") {
     val id = varchar("id", 26)
