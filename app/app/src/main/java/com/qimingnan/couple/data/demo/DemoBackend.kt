@@ -123,7 +123,7 @@ object DemoBackend {
         val comments = p.comments.map { (id, both) ->
             val (author, text) = both.split("|", limit = 2)
             commentJson(id, author, text, p.createdAt + 60_000)
-        }
+        }.joinToString(",")
         return """{"id":"${p.id}","coupleId":"$COUPLE_ID","authorId":"${p.authorId}","text":${JsonPrimitive(p.text)},""" +
             """"media":[$media],"createdAt":${p.createdAt},"likes":{"count":${p.likeCount()},"likedByMe":${p.likedBySelf}},""" +
             """"comments":[$comments],"commentCount":${comments.size}}"""
@@ -166,6 +166,8 @@ object DemoBackend {
                 val list = posts.sortedByDescending { it.createdAt }.joinToString(",") { postJson(it) }
                 200 to """{"posts":[$list],"hasMore":false}"""
             }
+            "GET app/update" -> 200 to NO_UPDATE
+            "POST app/health-report" -> 204 to ""
             "POST feed/posts" -> {
                 val body = json.parseToJsonElement(demoBody).jsonObject
                 val id = body["id"]?.jsonPrimitive?.content ?: return 400 to err("VALIDATION_ERROR", "id required")
