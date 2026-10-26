@@ -1,7 +1,7 @@
 # Couple 路线图（P0 → P5）
 
 > 本文档是仓库的正式阶段定义。admin 侧边栏（`AdminLayout.vue`）与各 README 中引用的 P1–P5 以此为准。
-> 状态标记：【已完成】 / 【进行中】 / 【待做】。更新于 2026-10-25。
+> 状态标记：【已完成】 / 【进行中】 / 【待做】。更新于 2026-10-26。
 >
 > 接口契约见 [`../contract.md`](../contract.md)（权威）；OTA 设计与威胁模型见 [`ota-design.md`](ota-design.md)。
 
@@ -11,7 +11,7 @@
 |---|---|---|---|
 | P0 | 基础设施 | 【已完成】 | 认证/配对/引导（扫码 TOFU）/管理后台/MQTT 在线状态/后台保活 |
 | P0.5 | OTA 自动更新 | 【已完成】 | GitHub Release 镜像、签名 manifest、灰度/canary/自动暂停、健康上报、防降级 |
-| P1 | 动态 + TA + 聊天 | 【待做】 | 媒体存储、动态 Feed（点赞+评论）、TA 页、文本聊天、WxPusher 候补推送 |
+| P1 | 动态 + TA + 聊天 | 【进行中】 | 媒体存储、动态 Feed（点赞+评论）、TA 页、文本聊天、WxPusher 候补推送 |
 | P2 | 媒体消息 + 插件系统 | 【待做】 | 聊天图片/语音/表情包、插件框架与首批插件、桌面小部件 |
 | P3 | （并入 P1/P2，保留编号） | — | — |
 | P4 | 通话 | 【待做】 | WebRTC 语音/视频、TURN 凭证、通话统计 |
@@ -32,17 +32,17 @@ P3 编号保留不使用（历史上曾被 admin 侧边栏预留），避免与�
 
 签名清单（Ed25519）、防降级高水位、canary 分阶段发布、健康上报自动暂停与晋升、伴侣协议门槛（PEER_PROTOCOL/PEER_NEWER）。设计见 [`ota-design.md`](ota-design.md)。
 
-## P1 动态 + TA + 聊天【待做】
+## P1 动态 + TA + 聊天【进行中】
 
 实施顺序（`feat/complete-p1` 分支，全部完成后合 `main`）：
 
-1. **媒体存储层**：`StorageService` 三提供方（local/MinIO/R2，全私有桶），上传端点（类型/大小白名单、EXIF/GPS 剥离、Bearer 代理下载仅同 couple 可读）、头像上传。
-2. **动态 Feed**：帖子（文字+图片）、点赞、评论、`before&limit` 分页、`couple/{cid}/feed` MQTT 推送；App 时间线/发布页/压缩上传 worker；feedHeader 纪念日倒数卡；空状态引导。
-3. **server→client MQTT 推送基建**：embedded 走 `internalPublish`，external 模式新增 EMQX HTTP publish 客户端（`EMQX_API_URL/KEY/SECRET`，缺失仅禁用推送）——聊天/插件/通话共用。
-4. **App 通知子系统**：通知渠道、优先级、未读角标、免打扰时段——聊天/插件/来电复用。
-5. **TA 页**：资料卡、重要日子、`privacy_toggle` 字段可见性控制（taCards 网格）。
-6. **聊天 P1a**（契约已定稿）：文本消息、引用回复、撤销、已读、离线 outbox（WorkManager）；`couple/{cid}/typing` 话题（正在输入）；配对成功/解绑申请改 MQTT 推送（替代轮询与口头告知）；聊天记录导出；双机 e2e 脚本。
-7. **WxPusher 候补推送**：App 被杀时微信提醒（仅「你有新消息」级别、不带正文、去抖聚合）；用户绑定 UID；同一通道兼作服务器运维告警。
+1. **媒体存储层【已完成】**：`StorageService` 三提供方（local/MinIO/R2，全私有桶），上传端点（类型/大小白名单、EXIF/GPS 剥离、Bearer 代理下载仅同 couple 可读）、头像上传。
+2. **动态 Feed【已完成】**：帖子（文字+图片）、点赞、评论、`before&limit` 分页、`couple/{cid}/feed` MQTT 推送；App 时间线/发布页/压缩上传 worker；feedHeader 纪念日倒数卡；空状态引导。
+3. **server→client MQTT 推送基建【已完成】**：embedded 走 `internalPublish`，external 模式 EMQX HTTP publish 客户端（`EMQX_API_URL/KEY/SECRET`，缺失仅禁用推送）——聊天/插件/通话共用。ACL 已收紧：客户端只可发布 `presence`，`feed`/`chat` 仅可订阅。
+4. **App 通知子系统【已完成】**：通知渠道、优先级、免打扰时段——聊天/插件/来电复用。未读角标随 P2 聊天媒体/桌面小部件一起做。
+5. **TA 页【已完成】**：资料卡、重要日子、`privacy_toggle` 字段可见性控制（taCards 网格）。
+6. **聊天 P1a【进行中】**：文本消息、引用回复、120 秒撤回、已读回执、离线 outbox（WorkManager）、`couple/{cid}/chat` MQTT 推送、App Room 缓存与上滑分页、DemoBackend 自动回复已完成（后端 V7）。待做：`couple/{cid}/typing` 话题（正在输入）、配对成功/解绑申请改 MQTT 推送（替代轮询与口头告知）、聊天记录导出、双机 e2e 脚本。
+7. **WxPusher 候补推送【待做】**：App 被杀时微信提醒（仅「你有新消息」级别、不带正文、去抖聚合）；用户绑定 UID；同一通道兼作服务器运维告警。
 
 ## P2 媒体消息 + 插件系统【待做】
 
@@ -73,7 +73,7 @@ P3 编号保留不使用（历史上曾被 admin 侧边栏预留），避免与�
 ## 跨阶段约定
 
 - **契约先行**：每个功能先在 `contract.md` 写权威章节再写代码；客户端↔服务端 `protocolVersion` 保持 1（增量变更不动既有字段）。伴侣协议（`app/gradle.properties` 的 `couple.protocolVersion`）破坏性变更需分两版发布（见 ota-design.md §4）。
-- **Flyway 只扩不缩**（当前 V4，新增从 V5 起）。
+- **Flyway 只扩不缩**（当前 V7，新增从 V8 起）。
 - **可达性策略**：常驻前台服务 + MQTT QoS1 为主路，WxPusher 微信为候补（App 被杀场景）；不接 FCM（国内无 GMS）与厂商推送 SDK。
 - **隐私底线**：媒体仅同 couple 可读（Bearer 代理，不用公开 URL）；上传剥离 EXIF/GPS；经第三方的推送不透传消息正文。
 - **不做清单**：第三方插件动态加载、FCM、Web/桌面端；应用锁与截图屏蔽记 backlog（本轮不做）。
@@ -84,7 +84,6 @@ P3 编号保留不使用（历史上曾被 admin 侧边栏预留），避免与�
 | 决策 | 需要时间 |
 |---|---|
 | App 最终名称 + 图标 | P5 收尾前 |
-| TA 页具体内容 | P1 阶段 2 契约定稿时 |
 | 记账是否要结算/AA | P2 契约定稿时 |
 | WxPusher 应用注册（APP_TOKEN）+ 两人 UID | P1 聊天联调前 |
 | TURN 提供方确认 | P4（默认 Cloudflare） |
