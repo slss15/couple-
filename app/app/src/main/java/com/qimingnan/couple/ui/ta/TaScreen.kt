@@ -115,7 +115,7 @@ fun TaScreen(vm: TaViewModel, modifier: Modifier = Modifier) {
     if (editingMe) {
         val me = state.summary?.me
         if (me != null) EditMeDialog(me, onSave = { bio, bd, by, show ->
-            vm.saveMe(me, bio, bd, by, show)
+            vm.saveMe(bio, bd, by, show)
             editingMe = false
         }, onCancel = { editingMe = false })
     }
