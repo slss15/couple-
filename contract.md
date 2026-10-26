@@ -191,3 +191,25 @@ Scope of P1 feed: posts with text + images, likes, comments, deletion. Video/voi
 - Room caches posts/comments/likes; UI renders from Room. Publish = insert locally (author view) → upload media (already done via the publish flow) → POST /feed/posts → replace local row with the server Post. Offline publish queues like the chat outbox.
 - 空状态：未发过任何动态时显示引导卡（「发第一条动态」）。
 
+
+## TA (P1b: TA 页) — authoritative for backend + app
+Scope: partner card (profile + presence), shared important days (anniversary/birthdays/custom dates), and a minimal privacy toggle. TA 页数据量小、改动低频：**没有 MQTT 推送**，App 每次进入 Tab 时拉取一次（下拉刷新同路径）。
+
+### Model
+- Profile = {bio: String|null (≤200 chars), birthday: "MM-DD"|null, birthYear: Int|null (1900..2100; null = 不展示年龄), showBirthday: Boolean (default true)}
+- ImportantDay = {id (server ULID), coupleId, name (1..50 chars), month (1..12), day (1..31), year: Int|null (null = 不计年龄/周年数), createdBy, createdAt}
+- 两人共享同一份 days 列表；任一成员可增改删。
+- 生日存在用户档案上（自己的 month/day/year），TA 卡展示的是**对方**的生日；对方 `showBirthday=false` 时，服务器对生日字段返回 null（`birthdayVisible:false` 提示前端显示「已隐藏」）。
+
+### REST (under /api/v1, Bearer, requires a paired user 403 NOT_PAIRED)
+- GET /ta/summary -> {me: Profile & {displayName}, partner: {id, displayName, username, avatarUrl, bio, birthday, birthYear, birthdayVisible}, anniversary: Long|null, pairedAt: Long, days: [ImportantDay]}
+- PUT /ta/me {bio?, birthday?, birthYear?, showBirthday?} -> 204（只改自己的档案；字段缺省 = 保持；显式 null = 清除）
+- POST /ta/days {name, month, day, year?} -> ImportantDay（服务端生成 id）
+- PUT /ta/days/{id} {name?, month?, day?, year?} -> ImportantDay
+- DELETE /ta/days/{id} -> 204
+- Validation: month 1..12, day 1..31（不校验月份天数——2 月 30 日允许，回忆类日子没有严格日历语义）; bio ≤ 200; name 1..50. Errors: VALIDATION_ERROR (400), NOT_PAIRED (403), DAY_NOT_FOUND (404).
+
+### App rules
+- TA Tab = 对方资料卡（头像/昵称/bio/生日/在线状态圆点——在线状态复用 MQTT presence，不进 /ta/summary）+ 在一起天数 + 重要日子列表（距下次周年/生日的天数升序）+ 「我的档案」编辑入口（bio/生日/showBirthday 开关）。
+- days 不进 Room（低频、实时拉取）；进入 Tab 时 GET /ta/summary，下拉刷新同路径。
+- Demo 后端在内存里实现同一组端点（TA 卡 + 两条示例日子）。

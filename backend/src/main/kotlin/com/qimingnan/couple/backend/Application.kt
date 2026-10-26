@@ -33,6 +33,8 @@ import com.qimingnan.couple.backend.pairing.PairingService
 import com.qimingnan.couple.backend.setup.SetupService
 import com.qimingnan.couple.backend.setup.setupRoutes
 import com.qimingnan.couple.backend.pairing.pairingRoutes
+import com.qimingnan.couple.backend.ta.TaService
+import com.qimingnan.couple.backend.ta.taRoutes
 import com.qimingnan.couple.backend.release.ReleaseMirror
 import com.qimingnan.couple.backend.release.ReleaseService
 import com.qimingnan.couple.backend.release.ReleaseSettingsService
@@ -209,6 +211,7 @@ fun Application.module(config: AppConfig) {
                 mediaRoutes(mediaService)
                 feedRoutes(feedService)
                 adminMediaRoutes(db, audit, mediaService)
+                taRoutes(TaService(db, config))
             }
         }
         config.adminStaticDir?.let { dir ->

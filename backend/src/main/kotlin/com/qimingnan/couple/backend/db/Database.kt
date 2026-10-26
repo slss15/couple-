@@ -20,6 +20,24 @@ object Users : Table("users") {
     val role = varchar("role", 16)
     val coupleId = varchar("couple_id", 26).nullable()
     val createdAt = long("created_at")
+    // V6 (TA page)
+    val bio = varchar("bio", 200).nullable()
+    val birthday = varchar("birthday", 5).nullable() // "MM-DD"
+    val birthYear = short("birth_year").nullable()
+    val showBirthday = bool("show_birthday").default(true)
+    override val primaryKey = PrimaryKey(id)
+}
+
+/** Shared important days (V6, contract "TA"): anniversary-type dates, birthdays live on users. */
+object ImportantDays : Table("important_days") {
+    val id = varchar("id", 26)
+    val coupleId = varchar("couple_id", 26)
+    val name = varchar("name", 50)
+    val month = short("date_month")   // month/day/year 是 H2 保留字，列名加 date_ 前缀
+    val day = short("date_day")
+    val year = short("date_year").nullable()
+    val createdBy = varchar("created_by", 26)
+    val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(id)
 }
 
