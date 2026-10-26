@@ -25,6 +25,15 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import com.qimingnan.couple.data.db.preview
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,6 +56,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.R
 import com.qimingnan.couple.data.chat.ChatRepository
+import com.qimingnan.couple.data.chat.ReceiptStatus
 import com.qimingnan.couple.data.db.ChatMessageEntity
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.components.StatusDot
@@ -65,6 +75,16 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
     var input by rememberSaveable { mutableStateOf("") }
     var replyingTo by rememberSaveable { mutableStateOf<String?>(null) }
     var actionFor by rememberSaveable { mutableStateOf<String?>(null) }
+    var stickerOpen by rememberSaveable { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf<String?>(null) } // 全屏查看的图片地址
+    val stickers by vm.stickers.collectAsStateWithLifecycle()
+    val stickerLoading by vm.stickerLoading.collectAsStateWithLifecycle()
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            vm.sendImage(uri, replyingTo)
+            replyingTo = null
+        }
+    }
 
     DisposableEffect(Unit) {
         vm.enter()
@@ -85,7 +105,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
     }
 
     Column(modifier.fillMaxSize().imePadding()) {
-        ChatHeader(name = state.partnerName, online = state.partnerOnline)
+        ChatHeader(name = state.partnerName, online = state.partnerOnline, typing = state.partnerTyping)
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (state.empty) {
@@ -104,9 +124,11 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
                             row = row,
                             mine = mine,
                             replyTarget = row.replyTo?.let { byId[it] },
-                            lastMineReadId = state.lastMineReadId,
+                            receipt = state.receipts[row.id],
                             onRetry = { vm.retryPending(row.id) },
                             onLongPress = { if (row.recalledAt == null) actionFor = row.id },
+                            mediaModel = { thumb -> mediaModel(row, thumb, vm::mediaUrl) },
+                            onOpenMedia = { mediaModel(row, false, vm::mediaUrl)?.let { viewing = it } },
                         )
                     }
                 }
@@ -132,8 +154,8 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
 
         ChatComposer(
             value = input,
-            onValueChange = { if (it.length <= 4000) input = it },
-            replyText = replyingTo?.let { id -> byId[id]?.text?.takeIf { it.isNotBlank() } ?: stringResource(R.string.chat_reply_missing) },
+            onValueChange = { if (it.length <= 4000) { input = it; vm.onInputChanged(it) } },
+            replyText = replyingTo?.let { id -> byId[id]?.preview()?.takeIf { it.isNotBlank() } ?: stringResource(R.string.chat_reply_missing) },
             onCancelReply = { replyingTo = null },
             onSend = {
                 if (input.isNotBlank()) {
@@ -142,7 +164,36 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
                     replyingTo = null
                 }
             },
+            onPickImage = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            stickerOpen = stickerOpen,
+            onToggleSticker = { stickerOpen = !stickerOpen },
         )
+        if (stickerOpen) {
+            StickerPanel(
+                results = stickers,
+                loading = stickerLoading,
+                onQuery = vm::searchStickers,
+                onPick = { s ->
+                    vm.sendSticker(s, replyingTo)
+                    replyingTo = null
+                    stickerOpen = false
+                },
+            )
+        }
+    }
+
+    viewing?.let { model ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { viewing = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                Modifier.fillMaxSize().background(t.colors.background).clickable { viewing = null },
+                contentAlignment = Alignment.Center,
+            ) {
+                coil.compose.AsyncImage(model = model, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxWidth())
+            }
+        }
     }
 
     actionFor?.let { id ->
@@ -164,7 +215,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
 private const val RECALL_WINDOW_MS = 120_000L
 
 @Composable
-private fun ChatHeader(name: String, online: Boolean) {
+private fun ChatHeader(name: String, online: Boolean, typing: Boolean) {
     val t = LocalCoupleTokens.current
     Surface(color = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
         Row(
@@ -176,9 +227,15 @@ private fun ChatHeader(name: String, online: Boolean) {
             Column {
                 Text(name, style = t.typography.title, color = t.colors.onSurface)
                 Text(
-                    stringResource(if (online) R.string.online else R.string.offline),
+                    stringResource(
+                        when {
+                            typing -> R.string.chat_typing
+                            online -> R.string.online
+                            else -> R.string.offline
+                        },
+                    ),
                     style = t.typography.caption,
-                    color = t.colors.onSurfaceVariant,
+                    color = if (typing) t.colors.primary else t.colors.onSurfaceVariant,
                 )
             }
         }
@@ -202,9 +259,11 @@ private fun MessageBubble(
     row: ChatMessageEntity,
     mine: Boolean,
     replyTarget: ChatMessageEntity?,
-    lastMineReadId: String?,
+    receipt: ReceiptStatus?,
     onRetry: () -> Unit,
     onLongPress: () -> Unit,
+    mediaModel: (thumb: Boolean) -> String? = { null },
+    onOpenMedia: () -> Unit = {},
 ) {
     val t = LocalCoupleTokens.current
     val bg = if (mine) t.colors.primaryContainer else t.colors.surfaceContainer
@@ -229,7 +288,7 @@ private fun MessageBubble(
                             Text(
                                 replyTarget?.let {
                                     if (it.recalledAt != null) stringResource(R.string.chat_recalled)
-                                    else it.text.ifBlank { stringResource(R.string.chat_reply_missing) }
+                                    else it.preview().ifBlank { stringResource(R.string.chat_reply_missing) }
                                 } ?: stringResource(R.string.chat_reply_missing),
                                 style = t.typography.caption,
                                 color = t.colors.onSurfaceVariant,
@@ -239,28 +298,49 @@ private fun MessageBubble(
                         }
                         Spacer(Modifier.height(t.spacing.xs))
                     }
-                    Text(
-                        if (recalled) stringResource(R.string.chat_recalled) else row.text,
-                        style = if (recalled) t.typography.body.copy(fontStyle = FontStyle.Italic) else t.typography.body,
-                        color = if (recalled) t.colors.onSurfaceVariant else fg,
-                    )
+                    val isMedia = !recalled && row.type != ChatMessageEntity.TYPE_TEXT
+                    val model = if (isMedia) mediaModel(row.type == ChatMessageEntity.TYPE_IMAGE) else null
+                    if (isMedia && model != null) {
+                        val (w, h) = bubbleSize(row.width, row.height, sticker = row.type == ChatMessageEntity.TYPE_STICKER)
+                        coil.compose.AsyncImage(
+                            model = model,
+                            contentDescription = row.preview(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                            modifier = Modifier
+                                .size(w.dp, h.dp)
+                                .clip(t.shapes.small)
+                                .combinedClickable(onClick = { if (failed) onRetry() else onOpenMedia() }, onLongClick = onLongPress),
+                        )
+                    } else {
+                        Text(
+                            if (recalled) stringResource(R.string.chat_recalled) else row.preview(),
+                            style = if (recalled) t.typography.body.copy(fontStyle = FontStyle.Italic) else t.typography.body,
+                            color = if (recalled) t.colors.onSurfaceVariant else fg,
+                        )
+                    }
                     Spacer(Modifier.height(t.spacing.xxs))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
                         Text(chatTime(row.createdAt ?: row.sortAt), style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        when (row.pendingState) {
-                            ChatRepository.PENDING -> Text(
-                                stringResource(R.string.chat_sending),
-                                style = t.typography.caption,
-                                color = t.colors.onSurfaceVariant,
-                            )
-                            ChatRepository.FAILED -> Text(
-                                stringResource(R.string.chat_failed_retry),
-                                style = t.typography.caption,
-                                color = t.colors.error,
-                            )
-                        }
-                        if (mine && row.id == lastMineReadId) {
-                            Text(stringResource(R.string.chat_read), style = t.typography.caption, color = t.colors.primary)
+                        if (mine) {
+                            when (receipt) {
+                                ReceiptStatus.SENDING -> Text(
+                                    stringResource(R.string.chat_sending),
+                                    style = t.typography.caption,
+                                    color = t.colors.onSurfaceVariant,
+                                )
+                                ReceiptStatus.FAILED -> Text(
+                                    stringResource(R.string.chat_failed_retry),
+                                    style = t.typography.caption,
+                                    color = t.colors.error,
+                                )
+                                ReceiptStatus.READ -> Text(stringResource(R.string.chat_read), style = t.typography.caption, color = t.colors.primary)
+                                ReceiptStatus.UNREAD -> Text(
+                                    stringResource(R.string.chat_unread),
+                                    style = t.typography.caption,
+                                    color = t.colors.onSurfaceVariant,
+                                )
+                                null -> Unit
+                            }
                         }
                         if (row.pendingState == ChatRepository.PENDING) {
                             CircularProgressIndicator(
@@ -283,6 +363,9 @@ private fun ChatComposer(
     replyText: String?,
     onCancelReply: () -> Unit,
     onSend: () -> Unit,
+    onPickImage: () -> Unit = {},
+    stickerOpen: Boolean = false,
+    onToggleSticker: () -> Unit = {},
 ) {
     val t = LocalCoupleTokens.current
     Surface(color = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
@@ -300,6 +383,16 @@ private fun ChatComposer(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
+                IconButton(onClick = onPickImage, modifier = Modifier.size(t.spacing.minTouchTarget)) {
+                    Icon(Icons.Filled.AddCircle, contentDescription = stringResource(R.string.chat_pick_image), tint = t.colors.onSurfaceVariant)
+                }
+                IconButton(onClick = onToggleSticker, modifier = Modifier.size(t.spacing.minTouchTarget)) {
+                    Icon(
+                        Icons.Filled.Face,
+                        contentDescription = stringResource(R.string.chat_sticker),
+                        tint = if (stickerOpen) t.colors.primary else t.colors.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = value,
                     onValueChange = onValueChange,
@@ -333,6 +426,79 @@ private fun MessageActionsDialog(canRecall: Boolean, onReply: () -> Unit, onReca
                 if (canRecall) {
                     TextButton(onClick = onRecall, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.chat_recall), color = t.colors.error)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 气泡里的图片地址：已确认用服务端媒体（图片用缩略图），待发用本地文件 / 表情包原 URL。 */
+internal fun mediaModel(row: ChatMessageEntity, thumb: Boolean, url: (String, Boolean) -> String?): String? = when {
+    row.mediaId != null -> url(row.mediaId, thumb && row.type == ChatMessageEntity.TYPE_IMAGE)
+    row.localUri != null -> row.localUri
+    row.stickerUrl != null -> row.stickerUrl
+    else -> null
+}
+
+/** 气泡尺寸（dp）：按宽高比缩放；图片最长边 200，表情包最长边 120；未知尺寸给正方形。 */
+internal fun bubbleSize(width: Int?, height: Int?, sticker: Boolean): Pair<Int, Int> {
+    val max = if (sticker) 120 else 200
+    val min = 48
+    if (width == null || height == null || width <= 0 || height <= 0) return max to max
+    return if (width >= height) {
+        max to (max * height / width).coerceIn(min, max)
+    } else {
+        (max * width / height).coerceIn(min, max) to max
+    }
+}
+
+@Composable
+private fun StickerPanel(
+    results: List<com.qimingnan.couple.data.net.StickerResult>,
+    loading: Boolean,
+    onQuery: (String) -> Unit,
+    onPick: (com.qimingnan.couple.data.net.StickerResult) -> Unit,
+) {
+    val t = LocalCoupleTokens.current
+    var q by rememberSaveable { mutableStateOf("") }
+    Surface(color = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
+        Column(Modifier.fillMaxWidth().height(280.dp).padding(horizontal = t.spacing.sm)) {
+            OutlinedTextField(
+                value = q,
+                onValueChange = { q = it.take(50); onQuery(q) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text(stringResource(R.string.chat_sticker_search_hint)) },
+                textStyle = t.typography.body,
+                shape = t.shapes.medium,
+            )
+            Spacer(Modifier.height(t.spacing.xs))
+            Box(Modifier.fillMaxSize()) {
+                if (loading) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center).size(24.dp), color = t.colors.primary)
+                } else if (results.isEmpty()) {
+                    Text(
+                        stringResource(if (q.isBlank()) R.string.chat_sticker_hint else R.string.chat_sticker_empty),
+                        style = t.typography.caption,
+                        color = t.colors.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
+                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                    columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(72.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
+                    verticalArrangement = Arrangement.spacedBy(t.spacing.xs),
+                ) {
+                    items(results.size, key = { results[it].url }) { i ->
+                        val s = results[i]
+                        coil.compose.AsyncImage(
+                            model = s.url,
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                            modifier = Modifier.size(72.dp).clip(t.shapes.small).clickable { onPick(s) },
+                        )
                     }
                 }
             }

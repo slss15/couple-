@@ -193,6 +193,54 @@ class EmbeddedBrokerTest {
     }
 
     @Test
+    fun typingAndPairingEventsArePushed() {
+        val port = freePort()
+        appTest(embedded(port)) { http ->
+            startApplication()
+            val a = http.register("alice")
+            val b = http.register("bob")
+            // Before pairing alice can only subscribe to her own user topic.
+            val alice = connect(port, a.user.id, a.accessToken)
+            alice.paho.subscribe("user/${a.user.id}/events", 1)
+            val bobEarly = connect(port, b.user.id, b.accessToken)
+            assertFailsWith<MqttException> { bobEarly.paho.subscribe("user/${a.user.id}/events", 1) }
+            bobEarly.close()
+
+            val cid = http.pair(a, b) // bob joins with alice's code
+            val paired = assertNotNull(alice.next(), "paired event not pushed")
+            assertEquals("user/${a.user.id}/events", paired.topic)
+            assertTrue(paired.payload.contains("\"kind\":\"paired\"") && paired.payload.contains(cid), paired.payload)
+
+            // Right after pairing the couple topics are readable (no stale ACL cache).
+            alice.paho.subscribe("couple/$cid/events", 1)
+            val bob = connect(port, b.user.id, b.accessToken)
+            bob.paho.subscribe(arrayOf("couple/$cid/typing", "couple/$cid/events", "user/${b.user.id}/events"), intArrayOf(0, 1, 1))
+
+            // Typing: client-published, QoS 0, not retained.
+            alice.paho.publish("couple/$cid/typing", """{"userId":"${a.user.id}","typing":true,"ts":1}""".toByteArray(), 0, false)
+            val typing = assertNotNull(bob.next(), "typing not delivered")
+            assertEquals("couple/$cid/typing", typing.topic)
+            // Clients cannot forge server events.
+            alice.paho.publish("couple/$cid/events", """{"kind":"unpaired"}""".toByteArray(), 0, false)
+            assertNull(bob.next(500))
+
+            val req = http.postJson("/api/v1/couple/unpair/request", token = b.accessToken)
+            assertEquals(200, req.status.value, req.bodyAsText())
+            val requested = assertNotNull(alice.next(), "unpair_requested not pushed")
+            assertEquals("couple/$cid/events", requested.topic)
+            assertTrue(requested.payload.contains("\"kind\":\"unpair_requested\"") && requested.payload.contains(b.user.id), requested.payload)
+            assertNotNull(bob.next()) // the requester gets it too (same topic)
+
+            val ok = http.postJson("/api/v1/couple/unpair/confirm", obj(), a.accessToken)
+            assertEquals(true, ok.status.value in 200..299, ok.bodyAsText())
+            val got = listOfNotNull(bob.next(), bob.next())
+            assertTrue(got.any { it.topic == "couple/$cid/events" && it.payload.contains("\"kind\":\"unpaired\"") }, got.map { it.payload }.toString())
+            assertTrue(got.any { it.topic == "user/${b.user.id}/events" }, got.map { it.topic }.toString())
+            listOf(alice, bob).forEach { it.close() }
+        }
+    }
+
+    @Test
     fun persistentSessionQueuesQos1WhileOffline() {
         val port = freePort()
         val dir = java.nio.file.Files.createTempDirectory("mqtt-store").toString()

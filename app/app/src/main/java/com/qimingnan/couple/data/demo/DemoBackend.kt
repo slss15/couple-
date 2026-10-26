@@ -5,6 +5,7 @@ import com.qimingnan.couple.core.CoupleJson
 import com.qimingnan.couple.core.Ulid
 import com.qimingnan.couple.data.bootstrap.ServerConfig
 import com.qimingnan.couple.data.net.ChatMessage
+import com.qimingnan.couple.data.net.StickerResult
 import com.qimingnan.couple.data.net.ChatPage
 import com.qimingnan.couple.data.net.ChatReadState
 import com.qimingnan.couple.data.net.Couple
@@ -112,6 +113,10 @@ object DemoBackend {
         val clientTs: Long,
         val createdAt: Long,
         var recalledAt: Long?,
+        val type: String = "text",
+        var mediaId: String? = null,
+        val width: Int? = null,
+        val height: Int? = null,
     )
 
     private val chatMessages = mutableListOf<DemoChat>()
@@ -120,6 +125,17 @@ object DemoBackend {
 
     /** 与 MQTT couple/{cid}/chat 载荷同构的事件流。 */
     val chatEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+
+    /** 演示模式的 couple/{cid}/typing：TA 自动回复前约 1 秒显示「正在输入」。 */
+    val typingEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
+
+    /** 自动回复前 TA「正在输入」的时长。 */
+    const val DEMO_TYPING_MS = 1_000L
+
+    private fun emitTyping(typing: Boolean) {
+        val now = System.currentTimeMillis()
+        demoScope.launch { typingEvents.emit("""{"userId":"${partner.id}","typing":$typing,"ts":$now}""") }
+    }
 
     init {
         seed()
@@ -191,6 +207,25 @@ object DemoBackend {
         path: String,
         now: Long,
         query: Map<String, String?> = emptyMap(),
+        body: String? = null,
+    ): Pair<Int, String> {
+        // body 由调用方显式传入：拦截器以前把它写进全局 demoBody 再读，并发 POST（打字状态、已读、健康上报、
+        // 聊天发送）会互相覆盖，动态 POST 偶发读到别人的 body → 400「id required」→ 帖子「发送失败」。
+        if (body != null) requestBody.set(body)
+        try { return synchronized(stateLock) { respondInner(method, path, now, query) } } finally { if (body != null) requestBody.remove() }
+    }
+
+    private val requestBody = ThreadLocal<String>()
+    private val stateLock = Any()
+
+    /** 当前请求的 body：优先本线程显式传入的，其次（单测用的）[demoBody]。 */
+    private val currentBody: String get() = requestBody.get() ?: demoBody
+
+    private fun respondInner(
+        method: String,
+        path: String,
+        now: Long,
+        query: Map<String, String?>,
     ): Pair<Int, String> {
         val p = path.removePrefix("/api/v1/").removePrefix("/api/v1").trimEnd('/')
         fun <T> ok(s: KSerializer<T>, v: T) = 200 to CoupleJson.encodeToString(s, v)
@@ -218,14 +253,15 @@ object DemoBackend {
             "GET chat/state" -> ok(ChatReadState.serializer(), ChatReadState(demoMyReadUpTo, demoPartnerReadUpTo))
             "POST chat/messages" -> sendChat(now)
             "POST feed/posts" -> {
-                val body = json.parseToJsonElement(demoBody).jsonObject
+                val body = json.parseToJsonElement(currentBody).jsonObject
                 val id = body["id"]?.jsonPrimitive?.content ?: return 400 to err("VALIDATION_ERROR", "id required")
                 posts.firstOrNull { it.id == id }?.let { return 200 to postJson(it) } // 幂等
                 val text = body["text"]?.jsonPrimitive?.contentOrNull ?: ""
                 val keys = (body["mediaKeys"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
                 if (text.isBlank() && keys.isEmpty()) return 400 to err("VALIDATION_ERROR", "text or media required")
-                val media = keys.mapNotNull { mediaStore[it] }
-                val post = DemoPost(id, self().id, text, now, media.toMutableList())
+                val media = synchronized(mediaStore) { keys.map { mediaStore[it] } }
+                if (media.any { it == null }) return 400 to err("VALIDATION_ERROR", "unknown media key")
+                val post = DemoPost(id, self().id, text, now, media.filterNotNull().toMutableList())
                 posts += post
                 demoScope.launch { feedEvents.emit("""{"kind":"post","post":${postJson(post)}}""") }
                 autoReact(id)
@@ -236,8 +272,9 @@ object DemoBackend {
     }
 
     private fun DemoChat.toModel() = ChatMessage(
-        id = id, coupleId = COUPLE_ID, senderId = senderId, type = "text", text = text,
+        id = id, coupleId = COUPLE_ID, senderId = senderId, type = type, text = text,
         replyTo = replyTo, clientTs = clientTs, createdAt = createdAt, recalledAt = recalledAt,
+        mediaId = mediaId, width = width, height = height,
     )
 
     private fun emitChat(payload: String) {
@@ -282,21 +319,35 @@ object DemoBackend {
 
     private fun sendChat(now: Long): Pair<Int, String> {
         if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
-        val body = json.parseToJsonElement(demoBody).jsonObject
+        val body = json.parseToJsonElement(currentBody).jsonObject
         val id = body["id"]?.jsonPrimitive?.content ?: return 400 to err("VALIDATION_ERROR", "id required")
         if (!Regex("^[0-9A-HJKMNP-TV-Z]{26}$").matches(id)) return 400 to err("VALIDATION_ERROR", "id must be a ULID")
         chatMessages.firstOrNull { it.id == id }?.let { existing ->
             if (existing.senderId != self().id) return 409 to err("ID_CONFLICT", "id already used by another message")
             return 200 to CoupleJson.encodeToString(ChatMessage.serializer(), existing.toModel())
         }
-        val text = body["text"]?.jsonPrimitive?.contentOrNull?.trim() ?: ""
-        if (text.isEmpty() || text.length > 4000) return 400 to err("VALIDATION_ERROR", "text must be 1..4000 chars")
+        val type = body["type"]?.jsonPrimitive?.contentOrNull ?: "text"
+        val text = if (type == "text") body["text"]?.jsonPrimitive?.contentOrNull?.trim() ?: "" else ""
+        // image：mediaId 来自演示 /media；sticker：拦截器已把 stickerUrl 下载入库并补上 mediaId
+        val media: DemoMedia? = when (type) {
+            "text" -> {
+                if (text.isEmpty() || text.length > 4000) return 400 to err("VALIDATION_ERROR", "text must be 1..4000 chars")
+                null
+            }
+            "image", "sticker" -> {
+                val key = body["mediaId"]?.jsonPrimitive?.contentOrNull
+                    ?: return if (type == "sticker") 502 to err("STICKER_FETCH_FAILED", "演示模式离线，无法下载表情包")
+                    else 400 to err("VALIDATION_ERROR", "image messages need mediaId")
+                synchronized(mediaStore) { mediaStore[key] } ?: return 400 to err("VALIDATION_ERROR", "unknown media $key")
+            }
+            else -> return 400 to err("VALIDATION_ERROR", "type must be text, image or sticker")
+        }
         val replyTo = body["replyTo"]?.jsonPrimitive?.contentOrNull
         if (replyTo != null && chatMessages.none { it.id == replyTo }) {
             return 400 to err("VALIDATION_ERROR", "replyTo must be a message of your couple")
         }
         val clientTs = body["clientTs"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: now
-        val msg = DemoChat(id, self().id, text, replyTo, clientTs, now, null)
+        val msg = DemoChat(id, self().id, text, replyTo, clientTs, now, null, type, media?.key, media?.w, media?.h)
         chatMessages += msg
         emitChatMessage(msg)
         scheduleDemoReply()
@@ -306,7 +357,10 @@ object DemoBackend {
     private fun scheduleDemoReply() {
         val replies = listOf("我在呢，怎么啦？", "刚看到～想你了", "好呀，听你的", "哈哈哈哈，真的吗？")
         demoScope.launch {
-            delay(1_500)
+            delay(500)
+            emitTyping(true)
+            delay(DEMO_TYPING_MS)
+            emitTyping(false)
             val id = Ulid.next()
             val at = System.currentTimeMillis()
             val reply = DemoChat(id, partner.id, replies[(chatMessages.size - 1) % replies.size], null, at, at, null)
@@ -333,12 +387,13 @@ object DemoBackend {
             if (now - msg.createdAt > 120_000) return 409 to err("RECALL_EXPIRED", "Messages can only be recalled within 120 seconds")
             msg.text = ""
             msg.recalledAt = now
+            msg.mediaId = null
             emitChat("""{"kind":"recall","id":"${msg.id}","recalledAt":$now}""")
             return 200 to CoupleJson.encodeToString(ChatMessage.serializer(), msg.toModel())
         }
         if (p == "chat/read" && method == "POST") {
             if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
-            val body = json.parseToJsonElement(demoBody).jsonObject
+            val body = json.parseToJsonElement(currentBody).jsonObject
             val upToId = body["upToId"]?.jsonPrimitive?.contentOrNull
                 ?: return 400 to err("VALIDATION_ERROR", "upToId required")
             val ordered = chatMessages.sortedWith(compareBy({ it.createdAt }, { it.id }))
@@ -363,7 +418,7 @@ object DemoBackend {
         val commentMatch = Regex("^feed/posts/([^/]+)/comments$").find(p)
         if (commentMatch != null && method == "POST") {
             val post = posts.firstOrNull { it.id == commentMatch.groupValues[1] } ?: return 404 to err("POST_NOT_FOUND", "no post")
-            val body = json.parseToJsonElement(demoBody).jsonObject
+            val body = json.parseToJsonElement(currentBody).jsonObject
             val id = body["id"]?.jsonPrimitive?.content ?: return 400 to err("VALIDATION_ERROR", "id required")
             post.comments.firstOrNull { it.first == id }?.let { (_, both) ->
                 val (author, text) = both.split("|", limit = 2)
@@ -388,7 +443,7 @@ object DemoBackend {
             return if (removed) 204 to "" else 404 to err("POST_NOT_FOUND", "no post")
         }
         if (p == "ta/me" && method == "PUT") {
-            val body = json.parseToJsonElement(demoBody).jsonObject
+            val body = json.parseToJsonElement(currentBody).jsonObject
             (body["bio"] as? JsonPrimitive)?.contentOrNull?.let { demoBio = it.take(200) }
             (body["birthday"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.matches(Regex("^\\d{2}-\\d{2}$")) }?.let { demoBirthday = it }
             (body["birthYear"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.let { demoBirthYear = it }
@@ -397,7 +452,7 @@ object DemoBackend {
         }
         if (p == "ta/days" && method == "POST") {
             if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
-            val body = json.parseToJsonElement(demoBody).jsonObject
+            val body = json.parseToJsonElement(currentBody).jsonObject
             val name = body["name"]?.jsonPrimitive?.contentOrNull?.trim() ?: return 400 to err("VALIDATION_ERROR", "name required")
             if (name.isEmpty() || name.length > 50) return 400 to err("VALIDATION_ERROR", "name 1..50")
             val month = body["month"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return 400 to err("VALIDATION_ERROR", "month required")
@@ -443,12 +498,10 @@ object DemoBackend {
         return try {
             val reader = MultipartReader(body)
             var bytes: ByteArray? = null
-            var mime = "image/jpeg"
             reader.use { r ->
                 var part = r.nextPart()
                 while (part != null) {
                     if (part.headers["Content-Disposition"]?.contains("name=\"file\"") == true) {
-                        mime = part.headers["Content-Type"] ?: mime
                         bytes = part.body.readByteArray()
                         break
                     }
@@ -456,18 +509,43 @@ object DemoBackend {
                 }
             }
             val data = bytes ?: return 400 to err("VALIDATION_ERROR", "multipart field 'file' required")
-            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, opts)
-            if (opts.outWidth <= 0) return 400 to err("VALIDATION_ERROR", "not an image")
+            // 纯 Kotlin 读头部尺寸（BitmapFactory 在 JVM 单测里是空桩，且 mime 以实际字节为准）
+            val info = com.qimingnan.couple.core.ImageSize.read(data) ?: return 400 to err("VALIDATION_ERROR", "not an image")
+            if (data.size > 10 * 1024 * 1024) return 400 to err("VALIDATION_ERROR", "too large")
             val key = Ulid.next(now)
-            mediaStore[key] = DemoMedia(key, data, mime, opts.outWidth, opts.outHeight)
-            200 to """{"storageKey":"$key","thumbKey":null,"mimeType":"$mime","width":${opts.outWidth},"height":${opts.outHeight},"size":${data.size}}"""
+            synchronized(mediaStore) { mediaStore[key] = DemoMedia(key, data, info.mime, info.width, info.height) }
+            200 to """{"storageKey":"$key","thumbKey":null,"mimeType":"${info.mime}","width":${info.width},"height":${info.height},"size":${data.size}}"""
         } catch (e: Exception) {
             400 to err("VALIDATION_ERROR", "bad multipart: ${e.message}")
         }
     }
 
-    fun media(key: String): DemoMedia? = mediaStore[key]
+    /** 演示表情包搜索的内置样例（离线或 oiapi 不可用时返回）。 */
+    val SAMPLE_STICKERS = listOf(
+        StickerResult("https://biaoqing.gtimg.com/product/200678/o/8852c4e8230776fee09e0eb993ba64c4.jpg", 240, 240),
+        StickerResult("https://biaoqing.gtimg.com/product/200678/o/8ae314393aec5511c007668a5533f4dc.gif", 240, 92),
+        StickerResult("https://res.apihz.cn/img/bqb/0109a929c3c7bbf62fcead1b4821f03f.jpg"),
+        StickerResult("https://res.apihz.cn/img/bqb/010a049e537d1486474a84b0f2d07c83.jpg"),
+    )
+
+    /** 解析 oiapi 的 EmoticonPack 响应（data[].url/width/height）。 */
+    fun parseOiapi(body: String): List<StickerResult> = runCatching {
+        val arr = json.parseToJsonElement(body).jsonObject["data"] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val url = o["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return@mapNotNull null
+            StickerResult(url, o["width"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(), o["height"]?.jsonPrimitive?.contentOrNull?.toIntOrNull())
+        }
+    }.getOrDefault(emptyList())
+
+    /** 把下载到的表情包字节存进演示媒体库；不是图片返回 null。 */
+    fun storeMediaBytes(bytes: ByteArray, now: Long): DemoMedia? {
+        val info = com.qimingnan.couple.core.ImageSize.read(bytes) ?: return null
+        val key = Ulid.next(now)
+        return DemoMedia(key, bytes, info.mime, info.width, info.height).also { synchronized(mediaStore) { mediaStore[key] = it } }
+    }
+
+    fun media(key: String): DemoMedia? = synchronized(mediaStore) { mediaStore[key] }
 
     const val NO_UPDATE = """{"latest":null,"force":false}"""
 
@@ -519,6 +597,18 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
             }.getOrElse { e -> 400 to """{"code":"VALIDATION_ERROR","message":"bad multipart: ${e.message}"}""" }
             return json(req, code, resp)
         }
+        if (req.method == "GET" && path == "chat/stickers/search") {
+            val q = req.url.queryParameter("q").orEmpty().trim()
+            if (q.isEmpty()) return json(req, 400, """{"code":"VALIDATION_ERROR","message":"q required"}""")
+            val page = req.url.queryParameter("page")?.toIntOrNull() ?: 1
+            // 在线时直接代理 oiapi，失败/离线返回内置样例
+            val online = runCatching {
+                val u = "https://oiapi.net/api/EmoticonPack?keyword=" + java.net.URLEncoder.encode(q, "UTF-8") + "&page=$page&limit=30"
+                upstream.newCall(Request.Builder().url(u).build()).execute().use { r -> if (r.isSuccessful) DemoBackend.parseOiapi(r.body?.string().orEmpty()) else emptyList() }
+            }.getOrDefault(emptyList())
+            val list = online.ifEmpty { DemoBackend.SAMPLE_STICKERS }
+            return json(req, 200, CoupleJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(StickerResult.serializer()), list))
+        }
         val mediaMatch = Regex("^media/([^/]+)(/thumb)?$").find(path)
         if (req.method == "GET" && mediaMatch != null) {
             val m = DemoBackend.media(mediaMatch.groupValues[1]) ?: return json(req, 404, """{"code":"MEDIA_NOT_FOUND","message":"no such media"}""")
@@ -527,14 +617,15 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
                 .body(m.bytes.toResponseBody(m.mime.toMediaType()))
                 .build()
         }
-        // POST body 暂存给纯函数 respond()（feed 等需要读 body 的端点）
-        if (req.method == "POST" || req.method == "PUT") {
-            DemoBackend.demoBody = runCatching {
+        // POST/PUT body 显式交给 respond()（不再写全局变量，避免并发请求串 body）
+        val reqBody = if (req.method == "POST" || req.method == "PUT") {
+            runCatching {
                 val buf = okio.Buffer()
                 req.body?.writeTo(buf)
                 buf.readUtf8()
-            }.getOrDefault("{}")
-        }
+            }.getOrDefault("{}").ifBlank { "{}" }
+        } else null
+        val finalBody = if (req.method == "POST" && path == "chat/messages" && reqBody != null) withStickerMedia(reqBody) else reqBody
         val (code, body) = DemoBackend.respond(
             req.method,
             req.url.encodedPath,
@@ -544,9 +635,25 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
                 "before" to req.url.queryParameter("before"),
                 "limit" to req.url.queryParameter("limit"),
             ),
+            body = finalBody,
         )
         return json(req, code, body)
     }
+
+    /** type=sticker：下载 stickerUrl（http(s)、≤5MB、image/ 类型）存进演示媒体库，body 补上 mediaId；失败则原样返回。 */
+    private fun withStickerMedia(body: String): String = runCatching {
+        val obj = CoupleJson.parseToJsonElement(body).jsonObject
+        if (obj["type"]?.jsonPrimitive?.contentOrNull != "sticker" || obj["mediaId"] != null) return body
+        val url = obj["stickerUrl"]?.jsonPrimitive?.contentOrNull ?: return body
+        if (!url.startsWith("https://") && !url.startsWith("http://")) return body
+        val bytes = upstream.newCall(Request.Builder().url(url).build()).execute().use { r ->
+            val ct = r.body?.contentType()
+            if (!r.isSuccessful || ct?.type != "image") return body
+            r.body?.source()?.let { src -> src.request(5L * 1024 * 1024 + 1); src.buffer.size.takeIf { it <= 5L * 1024 * 1024 }?.let { src.readByteArray() } }
+        } ?: return body
+        val m = DemoBackend.storeMediaBytes(bytes, now()) ?: return body
+        JsonObject(obj + ("mediaId" to JsonPrimitive(m.key))).toString()
+    }.getOrDefault(body)
 
     /** 从 GitHub 拉调试通道的 update.json；拉不到就当没有更新。 */
     private fun fetchUpdate(): String {

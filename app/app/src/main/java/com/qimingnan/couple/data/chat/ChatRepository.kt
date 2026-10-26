@@ -1,5 +1,8 @@
 package com.qimingnan.couple.data.chat
 
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+
 import android.content.Context
 import com.qimingnan.couple.core.Ulid
 import com.qimingnan.couple.data.auth.SessionManager
@@ -7,6 +10,7 @@ import com.qimingnan.couple.data.auth.SessionState
 import com.qimingnan.couple.data.db.ChatDao
 import com.qimingnan.couple.data.db.ChatMessageEntity
 import com.qimingnan.couple.data.db.toEntity
+import com.qimingnan.couple.data.db.chatPreview
 import com.qimingnan.couple.data.demo.DemoBackend
 import com.qimingnan.couple.data.mqtt.MqttManager
 import com.qimingnan.couple.data.mqtt.MqttState
@@ -48,6 +52,7 @@ class ChatRepository @Inject constructor(
     private val mqtt: MqttManager,
     private val notifier: Notifier,
     @ApplicationScope private val scope: CoroutineScope,
+    private val bootstrapStore: com.qimingnan.couple.data.bootstrap.BootstrapStore,
 ) {
     val messages = dao.observeMessages()
 
@@ -92,7 +97,7 @@ class ChatRepository @Inject constructor(
                 val existed = dao.message(e.message.id) != null
                 dao.upsert(e.message.toEntity())
                 if (!existed && e.message.senderId != selfId() && e.message.recalledAt == null) {
-                    maybeNotify(e.message.text)
+                    maybeNotify(chatPreview(e.message.type, e.message.text))
                 }
             }
             is ChatEvent.Recall -> dao.markRecalled(e.id, e.recalledAt)
@@ -175,15 +180,77 @@ class ChatRepository @Inject constructor(
                     createdAt = null, sortAt = now, recalledAt = null, pendingState = PENDING,
                 ),
             )
-            ChatSendWorker.enqueue(context, id)
+            ChatSendWorker.enqueue(context, id, requireNetwork = !isDemo())
         }
         return id
     }
 
+    /** 发图片：先压缩落到 outbox（与动态同参数），PENDING 行带本地 uri；worker 先上传 /media 再发消息。 */
+    fun sendImage(uri: android.net.Uri, replyTo: String?): String? {
+        val me = selfId() ?: return null
+        val id = Ulid.next()
+        val now = System.currentTimeMillis()
+        scope.launch(Dispatchers.IO) {
+            val file = com.qimingnan.couple.data.feed.OutboxFiles.persist(context, "chat-$id", listOf(uri)) {
+                com.qimingnan.couple.data.feed.ImageCompression.compress(context, it)
+            }.firstOrNull()
+            if (file == null) {
+                _error.value = "图片无法读取"
+                return@launch
+            }
+            val size = com.qimingnan.couple.core.ImageSize.read(file.readBytes())
+            dao.upsert(
+                ChatMessageEntity(
+                    id = id, senderId = me, text = "", replyTo = replyTo, clientTs = now,
+                    createdAt = null, sortAt = now, recalledAt = null, pendingState = PENDING,
+                    type = ChatMessageEntity.TYPE_IMAGE, width = size?.width, height = size?.height,
+                    localUri = android.net.Uri.fromFile(file).toString(),
+                ),
+            )
+            ChatSendWorker.enqueue(context, id, requireNetwork = !isDemo())
+        }
+        return id
+    }
+
+    /** 发表情包：PENDING 行带搜索结果 URL（服务端下载入库），气泡先直接显示该 URL。 */
+    fun sendSticker(sticker: com.qimingnan.couple.data.net.StickerResult, replyTo: String?): String? {
+        val me = selfId() ?: return null
+        val id = Ulid.next()
+        val now = System.currentTimeMillis()
+        scope.launch(Dispatchers.IO) {
+            dao.upsert(
+                ChatMessageEntity(
+                    id = id, senderId = me, text = "", replyTo = replyTo, clientTs = now,
+                    createdAt = null, sortAt = now, recalledAt = null, pendingState = PENDING,
+                    type = ChatMessageEntity.TYPE_STICKER, width = sticker.width, height = sticker.height,
+                    stickerUrl = sticker.url,
+                ),
+            )
+            ChatSendWorker.enqueue(context, id, requireNetwork = !isDemo())
+        }
+        return id
+    }
+
+    /** 表情包搜索（失败返回空列表并给出错误提示）。 */
+    suspend fun searchStickers(q: String, page: Int = 1): List<com.qimingnan.couple.data.net.StickerResult> {
+        if (q.isBlank()) return emptyList()
+        return runCatching { api.searchStickers(q.trim(), page) }
+            .onFailure { _error.value = it.message ?: it.javaClass.simpleName }
+            .getOrDefault(emptyList())
+    }
+
+    /** 媒体绝对地址（Coil 走 apiClient，自动带 Bearer）。 */
+    fun mediaUrl(mediaId: String, thumb: Boolean = false): String? {
+        val base = bootstrapStore.currentConfigBlocking()?.baseUrl?.trimEnd('/') ?: return null
+        return base + CoupleApi.MEDIA_PATH + mediaId + if (thumb) "/thumb" else ""
+    }
+
+    private fun isDemo(): Boolean = com.qimingnan.couple.data.demo.DemoBackend.isDemo(bootstrapStore.currentConfigBlocking()?.baseUrl)
+
     fun retryPending(id: String) {
         scope.launch(Dispatchers.IO) {
             dao.updatePendingState(id, PENDING)
-            ChatSendWorker.enqueue(context, id)
+            ChatSendWorker.enqueue(context, id, requireNetwork = !isDemo(), replace = true)
         }
     }
 
@@ -192,9 +259,33 @@ class ChatRepository @Inject constructor(
         val row = dao.message(id) ?: return true
         if (row.pendingState != PENDING) return true
         return try {
-            val sent = api.sendMessage(SendMessageRequest(id = id, text = row.text, replyTo = row.replyTo, clientTs = row.clientTs))
+            val req = when (row.type) {
+                ChatMessageEntity.TYPE_IMAGE -> {
+                    // outbox：先上传（已上传过就复用 mediaId），再发消息
+                    val mediaId = row.mediaId ?: run {
+                        val bytes = row.localUri?.let { com.qimingnan.couple.data.feed.OutboxFiles.read(android.net.Uri.parse(it)) }
+                        if (bytes == null) {
+                            dao.updatePendingState(id, FAILED)
+                            return false
+                        }
+                        val part = okhttp3.MultipartBody.Part.createFormData(
+                            "file", "photo.jpg",
+                            bytes.toRequestBody("image/jpeg".toMediaType()),
+                        )
+                        val m = api.uploadMedia(part)
+                        dao.setUploadedMedia(id, m.storageKey, m.width, m.height)
+                        m.storageKey
+                    }
+                    SendMessageRequest(id = id, text = "", replyTo = row.replyTo, clientTs = row.clientTs, type = row.type, mediaId = mediaId, width = row.width, height = row.height)
+                }
+                ChatMessageEntity.TYPE_STICKER ->
+                    SendMessageRequest(id = id, text = "", replyTo = row.replyTo, clientTs = row.clientTs, type = row.type, stickerUrl = row.stickerUrl)
+                else -> SendMessageRequest(id = id, text = row.text, replyTo = row.replyTo, clientTs = row.clientTs)
+            }
+            val sent = api.sendMessage(req)
             val createdAt = sent.createdAt.takeIf { it > 0 } ?: row.clientTs
-            dao.confirm(sent.id, sent.text, createdAt, createdAt, sent.recalledAt)
+            dao.confirm(sent.id, sent.text, createdAt, createdAt, sent.recalledAt, sent.mediaId, sent.width, sent.height)
+            com.qimingnan.couple.data.feed.OutboxFiles.delete(context, "chat-$id")
             true
         } catch (e: HttpException) {
             val code = e.code()

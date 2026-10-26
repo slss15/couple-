@@ -35,14 +35,16 @@ class ChatSendWorker @AssistedInject constructor(
     companion object {
         const val KEY_MESSAGE_ID = "messageId"
 
-        fun enqueue(context: Context, messageId: String) {
+        /** requireNetwork=false：演示后端在进程内，离线也能发。replace：手动重试不被退避中的旧任务吞掉。 */
+        fun enqueue(context: Context, messageId: String, requireNetwork: Boolean = true, replace: Boolean = false) {
+            val net = if (requireNetwork) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED
             val req = OneTimeWorkRequestBuilder<ChatSendWorker>()
                 .setInputData(workDataOf(KEY_MESSAGE_ID to messageId))
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(net).build())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
                 .build()
             // KEEP：同一消息只保留一个待发任务；发送顺序由每条消息自己的 createdAt 决定。
-            WorkManager.getInstance(context).enqueueUniqueWork("chat-send-$messageId", ExistingWorkPolicy.KEEP, req)
+            WorkManager.getInstance(context).enqueueUniqueWork("chat-send-$messageId", if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, req)
         }
     }
 }

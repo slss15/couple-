@@ -68,6 +68,28 @@ object ImageCompression {
     }.orEmpty().map { Uri.parse(it) }
 }
 
+/** 发布 outbox 的本地图片：filesDir/outbox/{postId}-{i}.jpg（压缩后的 JPEG），发送成功即删。 */
+object OutboxFiles {
+    fun dir(context: Context) = java.io.File(context.filesDir, "outbox").apply { mkdirs() }
+
+    /** 逐张压缩并落盘；压缩失败的跳过。 */
+    fun persist(context: Context, prefix: String, uris: List<Uri>, compress: (Uri) -> ByteArray?): List<java.io.File> =
+        persistTo(dir(context), prefix, uris, compress)
+
+    fun <T> persistTo(dir: java.io.File, prefix: String, uris: List<T>, compress: (T) -> ByteArray?): List<java.io.File> =
+        uris.mapIndexedNotNull { i, uri ->
+            val bytes = compress(uri) ?: return@mapIndexedNotNull null
+            java.io.File(dir, "$prefix-$i.jpg").apply { writeBytes(bytes) }
+        }
+
+    /** file:// 读字节；非 file 或文件不在返回 null。 */
+    fun read(uri: Uri): ByteArray? = if (uri.scheme == "file") uri.path?.let { java.io.File(it) }?.takeIf { it.isFile }?.readBytes() else null
+
+    fun delete(context: Context, prefix: String) {
+        dir(context).listFiles { f -> f.name.startsWith("$prefix-") }?.forEach { it.delete() }
+    }
+}
+
 /**
  * 动态仓库：Room 是 UI 的唯一数据源。事件合并（MQTT / 演示进程内流）+ 分页补拉 + 离线发布 outbox
  * （本地 PENDING 行 → [FeedPublishWorker] 压缩上传 → POST，服务端按客户端 id 幂等）。
@@ -171,54 +193,60 @@ class FeedRepository @Inject constructor(
             .onFailure { _error.value = it.message ?: it.javaClass.simpleName }
     }
 
-    /** 本地建 PENDING 行并交给 worker；图片以 content-uri 列表存行内（worker 稍后压缩上传）。 */
+    /**
+     * 本地建 PENDING 行并交给 worker。图片在这里就压缩并落到 filesDir/outbox：相册选择器给的 content-uri
+     * 只是临时授权，进程被杀/重启后 worker 再读会失败（帖子永远「发送失败」）。
+     */
     fun publish(text: String, imageUris: List<Uri>) {
         val me = selfId() ?: return
         if (text.isBlank() && imageUris.isEmpty()) return
         val id = Ulid.next()
         scope.launch(Dispatchers.IO) {
+            val files = OutboxFiles.persist(context, id, imageUris) { ImageCompression.compress(context, it) }
+            if (files.size < imageUris.size) _error.value = "有 ${imageUris.size - files.size} 张图片无法读取，已跳过"
+            if (text.isBlank() && files.isEmpty()) return@launch
             dao.upsertPost(
                 PostEntity(
                     id = id, authorId = me, text = text.trim(), createdAt = System.currentTimeMillis(),
                     likeCount = 0, likedByMe = false, pendingState = PENDING,
-                    pendingImages = ImageCompression.encodeUris(imageUris),
+                    pendingImages = ImageCompression.encodeUris(files.map { Uri.fromFile(it) }),
                 ),
             )
-            FeedPublishWorker.enqueue(context, id)
+            FeedPublishWorker.enqueue(context, id, requireNetwork = !isDemo())
         }
     }
 
     fun retryPending(postId: String) {
         scope.launch(Dispatchers.IO) {
             dao.updatePendingState(postId, PENDING)
-            FeedPublishWorker.enqueue(context, postId)
+            FeedPublishWorker.enqueue(context, postId, requireNetwork = !isDemo(), replace = true)
         }
     }
 
-    /** worker 调用：上传 + POST；IO 失败保持 PENDING（WorkManager 退避），4xx → FAILED。 */
-    suspend fun sendPending(postId: String): Boolean {
-        val row = dao.postRow(postId) ?: return true
-        if (row.post.pendingState != PENDING) return true
-        return try {
+    /** 演示后端在进程内：不需要真实网络，WorkManager 不能挂网络约束（否则离线时永远「发送中」）。 */
+    private fun isDemo(): Boolean = DemoBackend.isDemo(bootstrapStore.currentConfigBlocking()?.baseUrl)
+
+    /** worker 调用：上传 + POST。网络/5xx → RETRY（保持 PENDING，WorkManager 退避）；4xx/坏图 → FAILED。 */
+    suspend fun sendPending(postId: String): SendOutcome {
+        val row = dao.postRow(postId) ?: return SendOutcome.DONE
+        if (row.post.pendingState != PENDING) return SendOutcome.DONE
+        val outcome = try {
             val keys = ImageCompression.decodeUris(row.post.pendingImages).map { uri ->
-                val bytes = ImageCompression.compress(context, uri)
+                val bytes = OutboxFiles.read(uri) ?: ImageCompression.compress(context, uri)
                 if (bytes == null) {
                     dao.updatePendingState(postId, FAILED)
-                    return false
+                    return SendOutcome.FAILED
                 }
                 api.uploadMedia(MultipartBody.Part.createFormData("file", "photo.jpg", bytes.toRequestBody("image/jpeg".toMediaType()))).storageKey
             }
             dao.upsertConfirmed(api.createPost(CreatePostRequest(id = postId, text = row.post.text, mediaKeys = keys)))
-            true
-        } catch (e: retrofit2.HttpException) {
-            dao.updatePendingState(postId, FAILED)
-            false
-        } catch (e: kotlinx.serialization.SerializationException) {
-            dao.updatePendingState(postId, FAILED)
-            false
+            OutboxFiles.delete(context, postId)
+            SendOutcome.DONE
         } catch (e: Exception) {
-            false // 网络/IO：保持 PENDING 等待重试
+            classifySendError(e)
         }
+        if (outcome == SendOutcome.FAILED) dao.updatePendingState(postId, FAILED)
+        return outcome
     }
 
     suspend fun toggleLike(postId: String) {
@@ -250,6 +278,7 @@ class FeedRepository @Inject constructor(
 
     suspend fun deletePost(postId: String) {
         dao.deletePost(postId)
+        OutboxFiles.delete(context, postId)
         runCatching { api.deletePost(postId) }.onFailure { _error.value = it.message }
     }
 
@@ -261,7 +290,16 @@ class FeedRepository @Inject constructor(
 
     suspend fun clearLocal() = dao.clearAll()
 
+    enum class SendOutcome { DONE, RETRY, FAILED }
+
     companion object {
+        /** 4xx（除 408/429）与坏响应是永久失败；5xx/408/429/网络异常可重试。 */
+        fun classifySendError(e: Throwable): SendOutcome = when (e) {
+            is retrofit2.HttpException -> if (e.code() in 400..499 && e.code() != 408 && e.code() != 429) SendOutcome.FAILED else SendOutcome.RETRY
+            is kotlinx.serialization.SerializationException -> SendOutcome.FAILED
+            else -> SendOutcome.RETRY
+        }
+
         const val PENDING = "PENDING"
         const val FAILED = "FAILED"
         const val PAGE = 20

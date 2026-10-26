@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -63,6 +64,7 @@ import com.qimingnan.couple.data.db.CommentEntity
 import com.qimingnan.couple.data.db.PostRow
 import com.qimingnan.couple.data.db.displayMedia
 import com.qimingnan.couple.data.feed.FeedRepository
+import com.qimingnan.couple.data.feed.ImageCompression
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import java.util.concurrent.TimeUnit
 
@@ -262,6 +264,21 @@ private fun PostCard(
                 Spacer(Modifier.height(t.spacing.xs))
                 Text(row.post.text, style = t.typography.body, color = t.colors.onSurface)
             }
+            val localImages = if (pending != null) ImageCompression.decodeUris(row.post.pendingImages) else emptyList()
+            if (localImages.isNotEmpty()) {
+                // 未确认帖子：显示 outbox 里已压缩的本地图（以前这里什么都不显示，像是图片丢了）
+                Spacer(Modifier.height(t.spacing.sm))
+                Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
+                    localImages.take(3).forEach { uri ->
+                        AsyncImage(
+                            model = uri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.weight(1f).height(120.dp).clip(RoundedCornerShape(t.spacing.xs)),
+                        )
+                    }
+                }
+            }
             if (row.media.isNotEmpty()) {
                 Spacer(Modifier.height(t.spacing.sm))
                 Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
@@ -345,13 +362,25 @@ private fun CommentLine(c: CommentEntity, author: String, canDelete: Boolean, on
 
 @Composable
 private fun PublishScreen(onDone: (String, List<Uri>) -> Unit, onCancel: () -> Unit) {
+    // 全屏 Dialog：以前直接画在 MainShell 的 Scaffold 内容区里，底部导航栏盖住了「发布」按钮（点到的是 Tab），
+    // 返回键也会直接退出页面。Dialog 盖在导航栏之上，返回键 = 取消。
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onCancel,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) { PublishContent(onDone, onCancel) }
+}
+
+@Composable
+private fun PublishContent(onDone: (String, List<Uri>) -> Unit, onCancel: () -> Unit) {
     val t = LocalCoupleTokens.current
     var text by rememberSaveable { mutableStateOf("") }
-    var images by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var imageStrings by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
+    val images = imageStrings.map { Uri.parse(it) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(9)) { uris ->
-        if (uris.isNotEmpty()) images = uris.take(9)
+        if (uris.isNotEmpty()) imageStrings = uris.take(9).map { it.toString() }
     }
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = t.colors.background,
         topBar = {
             Row(Modifier.fillMaxWidth().padding(horizontal = t.spacing.xs), verticalAlignment = Alignment.CenterVertically) {
