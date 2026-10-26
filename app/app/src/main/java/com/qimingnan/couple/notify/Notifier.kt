@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.qimingnan.couple.R
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Calendar
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,7 +23,7 @@ import javax.inject.Singleton
  * - 可见性：由 UI 层（FeedScreen 等 DisposableEffect）写 [Notifier.screenVisible]，前台时不打扰。
  */
 @Singleton
-class Notifier @Inject constructor(private val context: Context) {
+class Notifier @Inject constructor(@ApplicationContext private val context: Context) {
 
     /** 前台可见性登记：key = screen（"feed"/"chat"/…），value = 是否当前可见。 */
     private val visible = mutableMapOf<String, Boolean>()
