@@ -206,7 +206,7 @@ private fun DayRow(day: ImportantDay, canDelete: Boolean, onDelete: () -> Unit) 
 }
 
 @Composable
-private fun EditMeDialog(me: com.qimingnan.couple.data.net.TaMeView, onSave: (String?, String?, Int?, Boolean) -> Unit, onCancel: () -> Unit) {
+private fun EditMeDialog(me: com.qimingnan.couple.data.net.TaMeView, onSave: (String, String, Int?, Boolean) -> Unit, onCancel: () -> Unit) {
     val t = LocalCoupleTokens.current
     var bio by rememberSaveable { mutableStateOf(me.bio ?: "") }
     var birthday by rememberSaveable { mutableStateOf(me.birthday ?: "") }
