@@ -18,6 +18,8 @@ import com.qimingnan.couple.backend.db.Db
 import com.qimingnan.couple.backend.db.PairCodes
 import com.qimingnan.couple.backend.db.UnpairRequests
 import com.qimingnan.couple.backend.db.Users
+import com.qimingnan.couple.backend.mqtt.NullServerPush
+import com.qimingnan.couple.backend.mqtt.ServerPush
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -44,6 +46,8 @@ class PairingService(
     private val db: Db,
     private val config: AppConfig,
     private val audit: AuditService,
+    /** Pairing events (contract "MQTT" §events): `paired` → user/{owner}/events, unpair → couple/{cid}/events. */
+    private val push: ServerPush = NullServerPush,
 ) {
     private val codeRegex = Regex("^[0-9]{6}$")
 
@@ -109,7 +113,9 @@ class PairingService(
                 Users.update({ (Users.id eq ownerId) or (Users.id eq userId) }) { it[Users.coupleId] = coupleId }
                 loadCouple(coupleId)!!
             }
-            audit.log(userId, AuditActions.PAIR_JOIN, couple.id, mapOf("partnerId" to couple.members.first { it.id != userId }.id))
+            val ownerId = couple.members.first { it.id != userId }.id
+            audit.log(userId, AuditActions.PAIR_JOIN, couple.id, mapOf("partnerId" to ownerId))
+            push.publishTopic("user/$ownerId/events", """{"kind":"paired","coupleId":"${couple.id}"}""")
             return couple
         } catch (e: ApiException) {
             audit.log(userId, AuditActions.PAIR_JOIN_FAILED, null, mapOf("reason" to e.code))
@@ -143,6 +149,7 @@ class PairingService(
             id to cid
         }
         audit.log(userId, AuditActions.UNPAIR_REQUEST, coupleId, mapOf("requestId" to requestId))
+        push.publish(coupleId, "events", """{"kind":"unpair_requested","requestId":"$requestId","by":"$userId"}""")
         return UnpairRequestResponse(requestId)
     }
 
@@ -150,7 +157,7 @@ class PairingService(
         try {
             val explicitId = requestId?.trim()?.takeIf { it.isNotEmpty() }
             val now = config.clock()
-            val (coupleId, rid) = db.tx {
+            val (members, coupleId, rid) = db.tx {
                 val me = UserRepo.byIdForUpdate(userId) ?: throw unauthorized()
                 val req = if (explicitId != null) {
                     UnpairRequests.selectAll().where { UnpairRequests.id eq explicitId }.forUpdate().firstOrNull()
@@ -182,11 +189,16 @@ class PairingService(
                     it[confirmedBy] = userId
                     it[confirmedAt] = now
                 }
+                val memberIds = Users.selectAll().where { Users.coupleId eq cid }.map { it[Users.id] }
                 Couples.update({ Couples.id eq cid }) { it[deletedAt] = now } // soft delete
                 Users.update({ Users.coupleId eq cid }) { it[Users.coupleId] = null }
-                cid to rid
+                Triple(memberIds, cid, rid)
             }
             audit.log(userId, AuditActions.UNPAIR_CONFIRM, coupleId, mapOf("requestId" to rid))
+            val unpaired = """{"kind":"unpaired","coupleId":"$coupleId"}"""
+            push.publish(coupleId, "events", unpaired)
+            // Also per user: a client that reconnected after unpairing has lost its couple/... subscriptions.
+            members.forEach { push.publishTopic("user/$it/events", unpaired) }
         } catch (e: ApiException) {
             audit.log(userId, AuditActions.UNPAIR_CONFIRM_FAILED, requestId?.take(64), mapOf("reason" to e.code))
             throw e
