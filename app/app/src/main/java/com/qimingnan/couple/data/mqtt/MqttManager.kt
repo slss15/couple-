@@ -69,7 +69,8 @@ sealed interface MqttState {
     data class Failed(val reason: String, val retryInMillis: Long?) : MqttState
 }
 
-data class MqttTarget(val url: String, val userId: String, val coupleId: String)
+/** coupleId 为 null：已登录未配对，只订阅 user/{uid}/events（等待 `paired` 推送）。 */
+data class MqttTarget(val url: String, val userId: String, val coupleId: String?)
 
 object MqttTopics {
     fun presence(coupleId: String) = "couple/$coupleId/presence"
@@ -79,6 +80,15 @@ object MqttTopics {
 
     /** 服务端事件推送（contract "Chat"；客户端只订阅，ACL 拒绝客户端发布）。 */
     fun chat(coupleId: String) = "couple/$coupleId/chat"
+
+    /** 正在输入（contract "Chat"；客户端可发布/订阅，QoS 0、不保留）。 */
+    fun typing(coupleId: String) = "couple/$coupleId/typing"
+
+    /** 解绑申请/已解绑（服务端推送，客户端只订阅）。 */
+    fun coupleEvents(coupleId: String) = "couple/$coupleId/events"
+
+    /** 配对成功等个人事件（服务端推送；每个客户端只能订阅自己的）。 */
+    fun userEvents(userId: String) = "user/$userId/events"
 }
 
 /**
@@ -137,6 +147,14 @@ class MqttManager @Inject constructor(
     /** couple/{cid}/chat 的原始 JSON 载荷（由 ChatRepository 解析合并）。 */
     val chatEvents: kotlinx.coroutines.flow.SharedFlow<String> = _chatEvents
 
+    private val _typingEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 16)
+    /** couple/{cid}/typing 的原始 JSON（含自己发出的回显，由使用方按 userId 过滤）。 */
+    val typingEvents: kotlinx.coroutines.flow.SharedFlow<String> = _typingEvents
+
+    private val _pairEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 16)
+    /** user/{uid}/events 与 couple/{cid}/events 的原始 JSON（由 AppCoordinator 解析处理）。 */
+    val pairEvents: kotlinx.coroutines.flow.SharedFlow<String> = _pairEvents
+
     private val _stats = MutableStateFlow(latency.snapshot())
     val stats: StateFlow<LatencyStats.Snapshot> = _stats.asStateFlow()
 
@@ -189,18 +207,32 @@ class MqttManager @Inject constructor(
      * Debug/measurement hook (used by app/scripts/reliability-test.sh through a debug-only broadcast): publishes the
      * current presence (online) once more with a fresh messageId and logs it as `tx mid=… ts=… tag=…`.
      */
+    /** 发布正在输入状态（QoS 0、不保留）；未连接或未配对时静默丢弃。 */
+    fun publishTyping(typing: Boolean) {
+        scope.launch(Dispatchers.IO) {
+            val t = target ?: return@launch
+            val cid = t.coupleId ?: return@launch
+            val c = client ?: return@launch
+            if (!c.isConnected) return@launch
+            val payload = com.qimingnan.couple.data.chat.TypingEvent(t.userId, typing, clock.nowMillis()).toJson()
+            runCatching { c.publish(MqttTopics.typing(cid), payload.toByteArray(), 0, false) }
+                .onFailure { Log.w(TAG, "typing publish failed: $it") }
+        }
+    }
+
     fun publishProbe(tag: String?) {
         scope.launch(Dispatchers.IO) {
             mutex.withLock {
                 val t = target
                 val c = client
-                if (t == null || c == null || !c.isConnected) {
+                val cid = t?.coupleId
+                if (t == null || cid == null || c == null || !c.isConnected) {
                     Log.i(TAG, "tx skipped (not connected) tag=$tag")
                     return@withLock
                 }
                 val bytes = presenceBytes(t.userId, online = true, track = true)
                 val p = CoupleJson.decodeFromString(Presence.serializer(), bytes.toString(Charsets.UTF_8))
-                runCatching { c.publish(MqttTopics.presence(t.coupleId), bytes, 1, true) }
+                runCatching { c.publish(MqttTopics.presence(cid), bytes, 1, true) }
                     .onSuccess { Log.i(TAG, "tx mid=${p.mid} ts=${p.ts} tag=${tag ?: "-"}") }
                     .onFailure { Log.w(TAG, "tx failed tag=$tag: $it") }
             }
@@ -222,7 +254,9 @@ class MqttManager @Inject constructor(
             _state.value = MqttState.Failed("MQTT 地址无效：${e.message}", null)
             return
         }
-        val topic = MqttTopics.presence(t.coupleId)
+        val cid = t.coupleId
+        val topic = cid?.let { MqttTopics.presence(it) }
+        val userEvents = MqttTopics.userEvents(t.userId)
         sessionStart = clock.nowMillis()
         val opts = MqttConnectOptions().apply {
             userName = t.userId
@@ -233,7 +267,7 @@ class MqttManager @Inject constructor(
             isAutomaticReconnect = false
             maxInflight = 50
             mqttVersion = MqttConnectOptions.MQTT_VERSION_3_1_1
-            setWill(topic, presenceBytes(t.userId, online = false, track = false, will = true), 1, true)
+            if (topic != null) setWill(topic, presenceBytes(t.userId, online = false, track = false, will = true), 1, true)
         }
         c.setCallback(object : MqttCallback {
             override fun connectionLost(cause: Throwable?) {
@@ -251,13 +285,16 @@ class MqttManager @Inject constructor(
 
             override fun messageArrived(topicName: String?, message: MqttMessage?) {
                 if (message == null || topicName == null) return
-                if (topicName == topic) {
-                    onPresence(t, message)
-                } else if (topicName == MqttTopics.feed(t.coupleId)) {
+                val text = { message.payload.toString(Charsets.UTF_8) }
+                when {
+                    topicName == userEvents -> _pairEvents.tryEmit(text())
+                    cid == null -> Unit
+                    topicName == topic -> onPresence(t, message)
                     // 服务端事件：载荷原样下发，解析与合并在 FeedRepository（坏载荷不影响连接）。
-                    _feedEvents.tryEmit(message.payload.toString(Charsets.UTF_8))
-                } else if (topicName == MqttTopics.chat(t.coupleId)) {
-                    _chatEvents.tryEmit(message.payload.toString(Charsets.UTF_8))
+                    topicName == MqttTopics.feed(cid) -> _feedEvents.tryEmit(text())
+                    topicName == MqttTopics.chat(cid) -> _chatEvents.tryEmit(text())
+                    topicName == MqttTopics.typing(cid) -> _typingEvents.tryEmit(text())
+                    topicName == MqttTopics.coupleEvents(cid) -> _pairEvents.tryEmit(text())
                 }
             }
 
@@ -270,10 +307,15 @@ class MqttManager @Inject constructor(
             if (connectedBefore) latency.recordReconnect()
             connectedBefore = true
             // Re-subscribing is cheap and also restores the subscription if the broker expired our session.
-            c.subscribe(topic, 1).await()
-            c.subscribe(MqttTopics.feed(t.coupleId), 1).await()
-            c.subscribe(MqttTopics.chat(t.coupleId), 1).await()
-            c.publish(topic, presenceBytes(t.userId, online = true, track = true), 1, true).await()
+            c.subscribe(userEvents, 1).await()
+            if (cid != null && topic != null) {
+                c.subscribe(topic, 1).await()
+                c.subscribe(MqttTopics.feed(cid), 1).await()
+                c.subscribe(MqttTopics.chat(cid), 1).await()
+                c.subscribe(MqttTopics.coupleEvents(cid), 1).await()
+                c.subscribe(MqttTopics.typing(cid), 0).await()
+                c.publish(topic, presenceBytes(t.userId, online = true, track = true), 1, true).await()
+            }
             _state.value = MqttState.Connected(t.url)
             publishStats("connected")
         } catch (e: MqttException) {
@@ -351,8 +393,9 @@ class MqttManager @Inject constructor(
         client = null
         val t = target
         try {
-            if (publishOffline && c.isConnected && t != null) {
-                c.publish(MqttTopics.presence(t.coupleId), presenceBytes(t.userId, online = false, track = false), 1, true).await()
+            val cid = t?.coupleId
+            if (publishOffline && c.isConnected && t != null && cid != null) {
+                c.publish(MqttTopics.presence(cid), presenceBytes(t.userId, online = false, track = false), 1, true).await()
             }
             if (fast) {
                 runCatching { c.disconnectForcibly(0, 500, false) }

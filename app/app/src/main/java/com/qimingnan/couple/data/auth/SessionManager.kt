@@ -45,6 +45,11 @@ class SessionManager @Inject constructor(
     /** 需要提示用户的事件，例如“登录已失效”。 */
     val messages: SharedFlow<String> = _messages
 
+    /** 给顶层 Snackbar 发一条提示。 */
+    fun postMessage(msg: String) {
+        _messages.tryEmit(msg)
+    }
+
     init {
         scope.launch {
             val hasTokens = withContext(Dispatchers.IO) { tokenStore.read() != null }

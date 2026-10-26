@@ -47,6 +47,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.R
 import com.qimingnan.couple.data.chat.ChatRepository
+import com.qimingnan.couple.data.chat.ReceiptStatus
 import com.qimingnan.couple.data.db.ChatMessageEntity
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.components.StatusDot
@@ -85,7 +86,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
     }
 
     Column(modifier.fillMaxSize().imePadding()) {
-        ChatHeader(name = state.partnerName, online = state.partnerOnline)
+        ChatHeader(name = state.partnerName, online = state.partnerOnline, typing = state.partnerTyping)
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (state.empty) {
@@ -104,7 +105,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
                             row = row,
                             mine = mine,
                             replyTarget = row.replyTo?.let { byId[it] },
-                            lastMineReadId = state.lastMineReadId,
+                            receipt = state.receipts[row.id],
                             onRetry = { vm.retryPending(row.id) },
                             onLongPress = { if (row.recalledAt == null) actionFor = row.id },
                         )
@@ -132,7 +133,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
 
         ChatComposer(
             value = input,
-            onValueChange = { if (it.length <= 4000) input = it },
+            onValueChange = { if (it.length <= 4000) { input = it; vm.onInputChanged(it) } },
             replyText = replyingTo?.let { id -> byId[id]?.text?.takeIf { it.isNotBlank() } ?: stringResource(R.string.chat_reply_missing) },
             onCancelReply = { replyingTo = null },
             onSend = {
@@ -164,7 +165,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
 private const val RECALL_WINDOW_MS = 120_000L
 
 @Composable
-private fun ChatHeader(name: String, online: Boolean) {
+private fun ChatHeader(name: String, online: Boolean, typing: Boolean) {
     val t = LocalCoupleTokens.current
     Surface(color = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
         Row(
@@ -176,9 +177,15 @@ private fun ChatHeader(name: String, online: Boolean) {
             Column {
                 Text(name, style = t.typography.title, color = t.colors.onSurface)
                 Text(
-                    stringResource(if (online) R.string.online else R.string.offline),
+                    stringResource(
+                        when {
+                            typing -> R.string.chat_typing
+                            online -> R.string.online
+                            else -> R.string.offline
+                        },
+                    ),
                     style = t.typography.caption,
-                    color = t.colors.onSurfaceVariant,
+                    color = if (typing) t.colors.primary else t.colors.onSurfaceVariant,
                 )
             }
         }
@@ -202,7 +209,7 @@ private fun MessageBubble(
     row: ChatMessageEntity,
     mine: Boolean,
     replyTarget: ChatMessageEntity?,
-    lastMineReadId: String?,
+    receipt: ReceiptStatus?,
     onRetry: () -> Unit,
     onLongPress: () -> Unit,
 ) {
@@ -247,20 +254,26 @@ private fun MessageBubble(
                     Spacer(Modifier.height(t.spacing.xxs))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
                         Text(chatTime(row.createdAt ?: row.sortAt), style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        when (row.pendingState) {
-                            ChatRepository.PENDING -> Text(
-                                stringResource(R.string.chat_sending),
-                                style = t.typography.caption,
-                                color = t.colors.onSurfaceVariant,
-                            )
-                            ChatRepository.FAILED -> Text(
-                                stringResource(R.string.chat_failed_retry),
-                                style = t.typography.caption,
-                                color = t.colors.error,
-                            )
-                        }
-                        if (mine && row.id == lastMineReadId) {
-                            Text(stringResource(R.string.chat_read), style = t.typography.caption, color = t.colors.primary)
+                        if (mine) {
+                            when (receipt) {
+                                ReceiptStatus.SENDING -> Text(
+                                    stringResource(R.string.chat_sending),
+                                    style = t.typography.caption,
+                                    color = t.colors.onSurfaceVariant,
+                                )
+                                ReceiptStatus.FAILED -> Text(
+                                    stringResource(R.string.chat_failed_retry),
+                                    style = t.typography.caption,
+                                    color = t.colors.error,
+                                )
+                                ReceiptStatus.READ -> Text(stringResource(R.string.chat_read), style = t.typography.caption, color = t.colors.primary)
+                                ReceiptStatus.UNREAD -> Text(
+                                    stringResource(R.string.chat_unread),
+                                    style = t.typography.caption,
+                                    color = t.colors.onSurfaceVariant,
+                                )
+                                null -> Unit
+                            }
                         }
                         if (row.pendingState == ChatRepository.PENDING) {
                             CircularProgressIndicator(
