@@ -193,6 +193,10 @@ object ChatMessages : Table("chat_messages") {
     val clientTs = long("client_ts")
     val createdAt = long("created_at")
     val recalledAt = long("recalled_at").nullable()
+    /** V8: image / sticker messages reference a media object (Feed media storage). */
+    val mediaKey = varchar("media_key", 26).nullable()
+    val mediaWidth = integer("media_width").nullable()
+    val mediaHeight = integer("media_height").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 

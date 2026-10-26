@@ -188,6 +188,29 @@ class MediaService(
         return MediaView(key, thumbKey, mime, w, h, size)
     }
 
+    /**
+     * Server-side ingest of a downloaded chat sticker: same probe / EXIF strip / thumbnail as uploads, GIF allowed
+     * (kept as-is so animation survives), and the object is marked used by [messageId] right away.
+     */
+    suspend fun ingestSticker(coupleId: String, mimeType: String, bytes: ByteArray): MediaView {
+        val mime = mimeType.lowercase()
+        if (mime !in Images.ALLOWED && mime != "image/gif") throw badRequest("STICKER_REJECTED", "unsupported sticker type $mime")
+        if (bytes.isEmpty() || bytes.size > Images.MAX_BYTES) throw badRequest("STICKER_REJECTED", "bad sticker size")
+        val (w, h) = Images.probe(bytes)
+        val cleaned = Images.stripMetadata(bytes, mime)
+        val key = Ids.newId()
+        storage.put(key, mime, cleaned)
+        val now = config.clock()
+        db.tx { MediaRepo.insert(MediaObject(key, coupleId, "post", mime, cleaned.size.toLong(), w, h, null, null, now)) }
+        return MediaView(key, null, mime, w, h, cleaned.size.toLong())
+    }
+
+    /** Deletes a media object (row + files), e.g. when a chat image is recalled. */
+    suspend fun deleteObject(key: String) {
+        val o = db.tx { MediaRepo.byKey(key)?.also { MediaRepo.deleteRow(key) } } ?: return
+        runCatching { storage.delete(o.storageKey); o.thumbKey?.let { storage.delete(it) } }
+    }
+
     /** The bytes of a media object after the ACL check (contract: same couple, or an avatar of the couple). */
     suspend fun bytesForReading(caller: AuthUser, key: String, thumb: Boolean): Pair<MediaObject, ByteArray> {
         val o = db.tx { MediaRepo.byKeyOrThumbKey(key) } ?: throw notFound("MEDIA_NOT_FOUND", "no media $key")

@@ -34,13 +34,33 @@ data class ChatMessageView(
     val clientTs: Long,
     val createdAt: Long,
     val recalledAt: Long?,
+    /** image / sticker: the media object (GET /media/{mediaId}); null for text and after recall. */
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 @Serializable
 data class ChatPageView(val messages: List<ChatMessageView>, val hasMore: Boolean)
 
 @Serializable
-data class SendMessageRequest(val id: String, val text: String = "", val replyTo: String? = null, val clientTs: Long = 0)
+data class SendMessageRequest(
+    val id: String,
+    val text: String = "",
+    val replyTo: String? = null,
+    val clientTs: Long = 0,
+    /** "text" (default) | "image" | "sticker". */
+    val type: String = "text",
+    /** image: a storageKey from POST /media. */
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    /** sticker: a URL from GET /chat/stickers/search; the server downloads and stores it. */
+    val stickerUrl: String? = null,
+)
+
+/** Media attached to a message at insert time. */
+data class ChatMedia(val key: String, val width: Int?, val height: Int?)
 
 @Serializable
 data class ChatReadRequest(val upToId: String? = null)
@@ -55,12 +75,18 @@ object ChatRepo {
     fun read(coupleId: String, userId: String): ResultRow? =
         ChatReads.selectAll().where { (ChatReads.coupleId eq coupleId) and (ChatReads.userId eq userId) }.firstOrNull()
 
-    fun insert(id: String, coupleId: String, senderId: String, text: String, replyTo: String?, clientTs: Long, now: Long) {
+    fun insert(
+        id: String, coupleId: String, senderId: String, text: String, replyTo: String?, clientTs: Long, now: Long,
+        type: String = "text", media: ChatMedia? = null,
+    ) {
         ChatMessages.insert {
             it[ChatMessages.id] = id
             it[ChatMessages.coupleId] = coupleId
             it[ChatMessages.senderId] = senderId
-            it[msgType] = "text"
+            it[msgType] = type
+            it[mediaKey] = media?.key
+            it[mediaWidth] = media?.width
+            it[mediaHeight] = media?.height
             it[ChatMessages.text] = text
             it[ChatMessages.replyTo] = replyTo
             it[ChatMessages.clientTs] = clientTs
@@ -73,6 +99,9 @@ object ChatRepo {
         ChatMessages.update({ ChatMessages.id eq id }) {
             it[text] = ""
             it[recalledAt] = now
+            it[mediaKey] = null
+            it[mediaWidth] = null
+            it[mediaHeight] = null
         }
     }
 
@@ -102,6 +131,9 @@ object ChatRepo {
         clientTs = row[ChatMessages.clientTs],
         createdAt = row[ChatMessages.createdAt],
         recalledAt = row[ChatMessages.recalledAt],
+        mediaId = row[ChatMessages.mediaKey],
+        width = row[ChatMessages.mediaWidth],
+        height = row[ChatMessages.mediaHeight],
     )
 
     /** Conversation order: server createdAt, ties broken by id. */
@@ -120,6 +152,8 @@ class ChatService(
     private val db: Db,
     private val config: AppConfig,
     private val push: ServerPush,
+    private val media: com.qimingnan.couple.backend.media.MediaService? = null,
+    val stickers: StickerService? = null,
 ) {
 
     suspend fun send(caller: AuthUser, req: SendMessageRequest): ChatMessageView {
@@ -130,8 +164,30 @@ class ChatService(
         val existing = db.tx { ChatRepo.message(req.id) }
         if (existing != null) return replay(existing, coupleId, caller)
 
-        val text = req.text.trim()
-        if (text.isEmpty() || text.length > 4000) throw badRequest("VALIDATION_ERROR", "text must be 1..4000 chars")
+        val type = req.type.trim().ifEmpty { "text" }
+        val text = if (type == "text") req.text.trim() else ""
+        // Sticker: download + ingest before the insert transaction (network I/O outside the tx). If the insert then
+        // loses a race, the unreferenced media is removed by the orphan sweep.
+        val sticker: ChatMedia? = when (type) {
+            "text" -> {
+                if (text.isEmpty() || text.length > 4000) throw badRequest("VALIDATION_ERROR", "text must be 1..4000 chars")
+                null
+            }
+            "image" -> {
+                if (req.mediaId.isNullOrBlank()) throw badRequest("VALIDATION_ERROR", "image messages need mediaId")
+                null
+            }
+            "sticker" -> {
+                val url = req.stickerUrl?.trim().orEmpty()
+                if (url.isEmpty() || url.length > 2048) throw badRequest("VALIDATION_ERROR", "sticker messages need stickerUrl")
+                val svc = stickers ?: throw badRequest("VALIDATION_ERROR", "stickers are not available")
+                val ms = media ?: throw badRequest("VALIDATION_ERROR", "stickers are not available")
+                val fetched = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { svc.fetch(url) }
+                val v = ms.ingestSticker(coupleId, fetched.mimeType, fetched.bytes)
+                ChatMedia(v.storageKey, v.width, v.height)
+            }
+            else -> throw badRequest("VALIDATION_ERROR", "type must be text, image or sticker")
+        }
         val now = config.clock()
         val view = try {
             db.tx {
@@ -143,7 +199,19 @@ class ChatService(
                         throw badRequest("VALIDATION_ERROR", "replyTo must be a message of your couple")
                     }
                 }
-                ChatRepo.insert(req.id, cid, caller.userId, text, req.replyTo, req.clientTs, now)
+                val attached = when (type) {
+                    "image" -> {
+                        val m = com.qimingnan.couple.backend.media.MediaRepo.byKey(req.mediaId!!)
+                            ?: throw badRequest("VALIDATION_ERROR", "unknown media ${req.mediaId}")
+                        if (m.coupleId != cid || m.purpose != "post") throw badRequest("VALIDATION_ERROR", "media belongs to another couple")
+                        if (m.usedByPost != null) throw conflict("MEDIA_ALREADY_USED", "media already used")
+                        ChatMedia(m.storageKey, m.width, m.height) // real dimensions win over the client's
+                    }
+                    "sticker" -> sticker
+                    else -> null
+                }
+                ChatRepo.insert(req.id, cid, caller.userId, text, req.replyTo, req.clientTs, now, type, attached)
+                attached?.let { com.qimingnan.couple.backend.media.MediaRepo.markUsed(it.key, req.id) }
                 ChatRepo.toView(ChatRepo.message(req.id)!!)
             }
         } catch (e: org.jetbrains.exposed.exceptions.ExposedSQLException) {
@@ -203,6 +271,7 @@ class ChatService(
     suspend fun recall(caller: AuthUser, messageId: String): ChatMessageView {
         val coupleId = db.tx { requirePair(caller).first }
         val now = config.clock()
+        var recalledMedia: String? = null
         val (view, published) = db.tx {
             val row = requireMessageOf(coupleId, messageId)
             if (row[ChatMessages.senderId] != caller.userId) {
@@ -213,9 +282,11 @@ class ChatService(
             if (now - row[ChatMessages.createdAt] > RECALL_WINDOW_MS) {
                 throw conflict("RECALL_EXPIRED", "Messages can only be recalled within 120 seconds")
             }
+            recalledMedia = row[ChatMessages.mediaKey]
             ChatRepo.recall(messageId, now)
             ChatRepo.toView(ChatRepo.message(messageId)!!) to true
         }
+        recalledMedia?.let { k -> runCatching { media?.deleteObject(k) } }
         if (published) {
             push.publish(coupleId, "chat", """{"kind":"recall","id":"$messageId","recalledAt":$now}""")
         }
@@ -251,6 +322,11 @@ class ChatService(
                 partnerReadUpTo = ChatRepo.read(coupleId, partnerId)?.get(ChatReads.upToId),
             )
         }
+    }
+
+    /** 403 NOT_PAIRED unless the caller is paired (sticker search is a paired-only feature). */
+    suspend fun requirePaired(caller: AuthUser) {
+        db.tx { requirePair(caller) }
     }
 
     /** Inside a transaction. Returns (coupleId, partnerUserId); 403 NOT_PAIRED for solo users. */

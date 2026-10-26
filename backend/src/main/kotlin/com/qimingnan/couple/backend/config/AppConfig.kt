@@ -118,6 +118,10 @@ data class AppConfig(
     val emqxApiSecret: String? = null,
     /** Injectable clock (epoch ms) so tests can move time. */
     val clock: () -> Long = { System.currentTimeMillis() },
+    /** Outbound GET used by the sticker search proxy / sticker download (tests inject a fake). */
+    val stickerHttp: com.qimingnan.couple.backend.chat.StickerHttp = com.qimingnan.couple.backend.chat.StickerHttp.Default,
+    /** DNS lookup for the sticker downloader's private-address check (tests inject a fake). */
+    val hostResolver: (String) -> List<java.net.InetAddress> = { java.net.InetAddress.getAllByName(it).toList() },
 ) {
     init {
         require(jwtSecret.length >= 32) { "JWT_SECRET must be at least 32 characters" }

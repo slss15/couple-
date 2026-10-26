@@ -190,6 +190,28 @@ class ChatViewModel @Inject constructor(
         repo.send(text, replyTo)
     }
 
+    fun sendImage(uri: android.net.Uri, replyTo: String?) = repo.sendImage(uri, replyTo)
+
+    fun sendSticker(s: com.qimingnan.couple.data.net.StickerResult, replyTo: String?) = repo.sendSticker(s, replyTo)
+
+    /** 表情包面板：搜索结果（输入停顿 400ms 后搜索）。 */
+    val stickers = kotlinx.coroutines.flow.MutableStateFlow<List<com.qimingnan.couple.data.net.StickerResult>>(emptyList())
+    val stickerLoading = kotlinx.coroutines.flow.MutableStateFlow(false)
+    private var stickerJob: kotlinx.coroutines.Job? = null
+
+    fun searchStickers(q: String) {
+        stickerJob?.cancel()
+        if (q.isBlank()) { stickers.value = emptyList(); stickerLoading.value = false; return }
+        stickerJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(400)
+            stickerLoading.value = true
+            stickers.value = repo.searchStickers(q)
+            stickerLoading.value = false
+        }
+    }
+
+    fun mediaUrl(mediaId: String, thumb: Boolean) = repo.mediaUrl(mediaId, thumb)
+
     fun retryPending(id: String) = repo.retryPending(id)
 
     fun recall(id: String) = viewModelScope.launch { repo.recall(id) }

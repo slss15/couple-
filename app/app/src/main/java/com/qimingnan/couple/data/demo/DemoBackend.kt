@@ -5,6 +5,7 @@ import com.qimingnan.couple.core.CoupleJson
 import com.qimingnan.couple.core.Ulid
 import com.qimingnan.couple.data.bootstrap.ServerConfig
 import com.qimingnan.couple.data.net.ChatMessage
+import com.qimingnan.couple.data.net.StickerResult
 import com.qimingnan.couple.data.net.ChatPage
 import com.qimingnan.couple.data.net.ChatReadState
 import com.qimingnan.couple.data.net.Couple
@@ -112,6 +113,10 @@ object DemoBackend {
         val clientTs: Long,
         val createdAt: Long,
         var recalledAt: Long?,
+        val type: String = "text",
+        var mediaId: String? = null,
+        val width: Int? = null,
+        val height: Int? = null,
     )
 
     private val chatMessages = mutableListOf<DemoChat>()
@@ -267,8 +272,9 @@ object DemoBackend {
     }
 
     private fun DemoChat.toModel() = ChatMessage(
-        id = id, coupleId = COUPLE_ID, senderId = senderId, type = "text", text = text,
+        id = id, coupleId = COUPLE_ID, senderId = senderId, type = type, text = text,
         replyTo = replyTo, clientTs = clientTs, createdAt = createdAt, recalledAt = recalledAt,
+        mediaId = mediaId, width = width, height = height,
     )
 
     private fun emitChat(payload: String) {
@@ -320,14 +326,28 @@ object DemoBackend {
             if (existing.senderId != self().id) return 409 to err("ID_CONFLICT", "id already used by another message")
             return 200 to CoupleJson.encodeToString(ChatMessage.serializer(), existing.toModel())
         }
-        val text = body["text"]?.jsonPrimitive?.contentOrNull?.trim() ?: ""
-        if (text.isEmpty() || text.length > 4000) return 400 to err("VALIDATION_ERROR", "text must be 1..4000 chars")
+        val type = body["type"]?.jsonPrimitive?.contentOrNull ?: "text"
+        val text = if (type == "text") body["text"]?.jsonPrimitive?.contentOrNull?.trim() ?: "" else ""
+        // image：mediaId 来自演示 /media；sticker：拦截器已把 stickerUrl 下载入库并补上 mediaId
+        val media: DemoMedia? = when (type) {
+            "text" -> {
+                if (text.isEmpty() || text.length > 4000) return 400 to err("VALIDATION_ERROR", "text must be 1..4000 chars")
+                null
+            }
+            "image", "sticker" -> {
+                val key = body["mediaId"]?.jsonPrimitive?.contentOrNull
+                    ?: return if (type == "sticker") 502 to err("STICKER_FETCH_FAILED", "演示模式离线，无法下载表情包")
+                    else 400 to err("VALIDATION_ERROR", "image messages need mediaId")
+                synchronized(mediaStore) { mediaStore[key] } ?: return 400 to err("VALIDATION_ERROR", "unknown media $key")
+            }
+            else -> return 400 to err("VALIDATION_ERROR", "type must be text, image or sticker")
+        }
         val replyTo = body["replyTo"]?.jsonPrimitive?.contentOrNull
         if (replyTo != null && chatMessages.none { it.id == replyTo }) {
             return 400 to err("VALIDATION_ERROR", "replyTo must be a message of your couple")
         }
         val clientTs = body["clientTs"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: now
-        val msg = DemoChat(id, self().id, text, replyTo, clientTs, now, null)
+        val msg = DemoChat(id, self().id, text, replyTo, clientTs, now, null, type, media?.key, media?.w, media?.h)
         chatMessages += msg
         emitChatMessage(msg)
         scheduleDemoReply()
@@ -367,6 +387,7 @@ object DemoBackend {
             if (now - msg.createdAt > 120_000) return 409 to err("RECALL_EXPIRED", "Messages can only be recalled within 120 seconds")
             msg.text = ""
             msg.recalledAt = now
+            msg.mediaId = null
             emitChat("""{"kind":"recall","id":"${msg.id}","recalledAt":$now}""")
             return 200 to CoupleJson.encodeToString(ChatMessage.serializer(), msg.toModel())
         }
@@ -499,6 +520,31 @@ object DemoBackend {
         }
     }
 
+    /** 演示表情包搜索的内置样例（离线或 oiapi 不可用时返回）。 */
+    val SAMPLE_STICKERS = listOf(
+        StickerResult("https://biaoqing.gtimg.com/product/200678/o/8852c4e8230776fee09e0eb993ba64c4.jpg", 240, 240),
+        StickerResult("https://biaoqing.gtimg.com/product/200678/o/8ae314393aec5511c007668a5533f4dc.gif", 240, 92),
+        StickerResult("https://res.apihz.cn/img/bqb/0109a929c3c7bbf62fcead1b4821f03f.jpg"),
+        StickerResult("https://res.apihz.cn/img/bqb/010a049e537d1486474a84b0f2d07c83.jpg"),
+    )
+
+    /** 解析 oiapi 的 EmoticonPack 响应（data[].url/width/height）。 */
+    fun parseOiapi(body: String): List<StickerResult> = runCatching {
+        val arr = json.parseToJsonElement(body).jsonObject["data"] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val url = o["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return@mapNotNull null
+            StickerResult(url, o["width"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(), o["height"]?.jsonPrimitive?.contentOrNull?.toIntOrNull())
+        }
+    }.getOrDefault(emptyList())
+
+    /** 把下载到的表情包字节存进演示媒体库；不是图片返回 null。 */
+    fun storeMediaBytes(bytes: ByteArray, now: Long): DemoMedia? {
+        val info = com.qimingnan.couple.core.ImageSize.read(bytes) ?: return null
+        val key = Ulid.next(now)
+        return DemoMedia(key, bytes, info.mime, info.width, info.height).also { synchronized(mediaStore) { mediaStore[key] = it } }
+    }
+
     fun media(key: String): DemoMedia? = synchronized(mediaStore) { mediaStore[key] }
 
     const val NO_UPDATE = """{"latest":null,"force":false}"""
@@ -551,6 +597,18 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
             }.getOrElse { e -> 400 to """{"code":"VALIDATION_ERROR","message":"bad multipart: ${e.message}"}""" }
             return json(req, code, resp)
         }
+        if (req.method == "GET" && path == "chat/stickers/search") {
+            val q = req.url.queryParameter("q").orEmpty().trim()
+            if (q.isEmpty()) return json(req, 400, """{"code":"VALIDATION_ERROR","message":"q required"}""")
+            val page = req.url.queryParameter("page")?.toIntOrNull() ?: 1
+            // 在线时直接代理 oiapi，失败/离线返回内置样例
+            val online = runCatching {
+                val u = "https://oiapi.net/api/EmoticonPack?keyword=" + java.net.URLEncoder.encode(q, "UTF-8") + "&page=$page&limit=30"
+                upstream.newCall(Request.Builder().url(u).build()).execute().use { r -> if (r.isSuccessful) DemoBackend.parseOiapi(r.body?.string().orEmpty()) else emptyList() }
+            }.getOrDefault(emptyList())
+            val list = online.ifEmpty { DemoBackend.SAMPLE_STICKERS }
+            return json(req, 200, CoupleJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(StickerResult.serializer()), list))
+        }
         val mediaMatch = Regex("^media/([^/]+)(/thumb)?$").find(path)
         if (req.method == "GET" && mediaMatch != null) {
             val m = DemoBackend.media(mediaMatch.groupValues[1]) ?: return json(req, 404, """{"code":"MEDIA_NOT_FOUND","message":"no such media"}""")
@@ -567,6 +625,7 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
                 buf.readUtf8()
             }.getOrDefault("{}").ifBlank { "{}" }
         } else null
+        val finalBody = if (req.method == "POST" && path == "chat/messages" && reqBody != null) withStickerMedia(reqBody) else reqBody
         val (code, body) = DemoBackend.respond(
             req.method,
             req.url.encodedPath,
@@ -576,10 +635,25 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
                 "before" to req.url.queryParameter("before"),
                 "limit" to req.url.queryParameter("limit"),
             ),
-            body = reqBody,
+            body = finalBody,
         )
         return json(req, code, body)
     }
+
+    /** type=sticker：下载 stickerUrl（http(s)、≤5MB、image/ 类型）存进演示媒体库，body 补上 mediaId；失败则原样返回。 */
+    private fun withStickerMedia(body: String): String = runCatching {
+        val obj = CoupleJson.parseToJsonElement(body).jsonObject
+        if (obj["type"]?.jsonPrimitive?.contentOrNull != "sticker" || obj["mediaId"] != null) return body
+        val url = obj["stickerUrl"]?.jsonPrimitive?.contentOrNull ?: return body
+        if (!url.startsWith("https://") && !url.startsWith("http://")) return body
+        val bytes = upstream.newCall(Request.Builder().url(url).build()).execute().use { r ->
+            val ct = r.body?.contentType()
+            if (!r.isSuccessful || ct?.type != "image") return body
+            r.body?.source()?.let { src -> src.request(5L * 1024 * 1024 + 1); src.buffer.size.takeIf { it <= 5L * 1024 * 1024 }?.let { src.readByteArray() } }
+        } ?: return body
+        val m = DemoBackend.storeMediaBytes(bytes, now()) ?: return body
+        JsonObject(obj + ("mediaId" to JsonPrimitive(m.key))).toString()
+    }.getOrDefault(body)
 
     /** 从 GitHub 拉调试通道的 update.json；拉不到就当没有更新。 */
     private fun fetchUpdate(): String {

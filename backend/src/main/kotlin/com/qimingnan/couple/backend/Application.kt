@@ -145,6 +145,12 @@ fun Application.module(config: AppConfig) {
     }
     val mediaService = com.qimingnan.couple.backend.media.MediaService(db, config, storageManager)
     val feedService = com.qimingnan.couple.backend.feed.FeedService(db, config, storageManager, serverPush)
+    val stickerService = com.qimingnan.couple.backend.chat.StickerService(config.stickerHttp, config.hostResolver) {
+        val apihz = adminConfigService.snapshot().stored.stickers["apihz"] as? kotlinx.serialization.json.JsonObject
+        val id = (apihz?.get("id") as? kotlinx.serialization.json.JsonPrimitive)?.content?.trim().orEmpty()
+        val key = (apihz?.get("apiKey") as? kotlinx.serialization.json.JsonPrimitive)?.content?.trim().orEmpty()
+        if (id.isEmpty() || key.isEmpty()) null else com.qimingnan.couple.backend.chat.ApihzCreds(id, key)
+    }
     launch(Dispatchers.IO) {
         while (true) {
             runCatching { mediaService.orphanSweep() }
@@ -214,7 +220,7 @@ fun Application.module(config: AppConfig) {
                 feedRoutes(feedService)
                 adminMediaRoutes(db, audit, mediaService)
                 taRoutes(TaService(db, config))
-                chatRoutes(ChatService(db, config, serverPush))
+                chatRoutes(ChatService(db, config, serverPush, mediaService, stickerService))
             }
         }
         config.adminStaticDir?.let { dir ->

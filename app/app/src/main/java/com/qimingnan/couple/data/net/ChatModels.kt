@@ -16,7 +16,14 @@ data class ChatMessage(
     val clientTs: Long = 0,
     val createdAt: Long = 0,
     val recalledAt: Long? = null,
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 )
+
+/** GET /chat/stickers/search 的一项。 */
+@Serializable
+data class StickerResult(val url: String, val width: Int? = null, val height: Int? = null)
 
 @Serializable
 data class ChatPage(val messages: List<ChatMessage> = emptyList(), val hasMore: Boolean = false)
@@ -27,6 +34,11 @@ data class SendMessageRequest(
     val text: String,
     val replyTo: String? = null,
     val clientTs: Long,
+    val type: String = "text",
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val stickerUrl: String? = null,
 )
 
 @Serializable
