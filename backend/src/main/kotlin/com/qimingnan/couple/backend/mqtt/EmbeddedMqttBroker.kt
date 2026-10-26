@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - Auth: username = userId, password = access JWT ([MqttAccessService.authenticate], same as the EMQX hook),
  *   plus a client-id-to-user binding because persistent sessions are keyed by client id.
  * - ACL: [MqttAccessService.canRead] for SUBSCRIBE and [MqttAccessService.canWrite] for PUBLISH
- *   (clients publish only their own presence; feed/chat events are server-pushed), same rules as the EMQX ACL hook.
+ *   (clients publish only their own presence/typing; feed/chat/events are server-pushed), same rules as the EMQX ACL hook.
  * - Persistent sessions (cleanSession=false) keep subscriptions and queue QoS1/2 messages while the client is away;
  *   with [AppConfig.mqttDataDir] set they survive restarts. Sessions idle longer than
  *   [AppConfig.mqttSessionExpiry] are purged (Moquette 0.17 has no per-session queue length cap; expiry is the bound).
@@ -105,7 +105,8 @@ class EmbeddedMqttBroker(
     }
 
     /** Server→client event push (contract "Feed" §MQTT push): QoS 1, not retained. */
-    fun publishToCouple(coupleId: String, topic: String, payload: String) {
+    /** Server push (QoS 1, not retained) to any topic; bypasses the client ACL. */
+    fun publishServer(topic: String, payload: String) {
         if (!running) return
         publish(topic, payload.toByteArray(), MqttQoS.AT_LEAST_ONCE, retain = false)
     }

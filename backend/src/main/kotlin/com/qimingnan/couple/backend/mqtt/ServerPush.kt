@@ -17,13 +17,17 @@ import java.util.Base64
  * after the DB commit. MQTT is a hint — clients merge by id and refetch; push being disabled only costs latency.
  */
 interface ServerPush {
-    suspend fun publish(coupleId: String, topic: String, payload: String)
+    /** Publishes to `couple/{coupleId}/{topic}`. */
+    suspend fun publish(coupleId: String, topic: String, payload: String) = publishTopic("couple/$coupleId/$topic", payload)
+
+    /** Publishes to an absolute topic (e.g. `user/{userId}/events`), QoS 1, not retained. */
+    suspend fun publishTopic(topic: String, payload: String)
 }
 
 /** Embedded broker: publish in-process through Moquette's internalPublish. */
 class EmbeddedServerPush(private val broker: EmbeddedMqttBroker) : ServerPush {
-    override suspend fun publish(coupleId: String, topic: String, payload: String) {
-        broker.publishToCouple(coupleId, "couple/$coupleId/$topic", payload)
+    override suspend fun publishTopic(topic: String, payload: String) {
+        broker.publishServer(topic, payload)
     }
 }
 
@@ -35,11 +39,11 @@ class EmqxHttpPush(apiUrl: String, apiKey: String, apiSecret: String) : ServerPu
     private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
     private val json = Json { encodeDefaults = true }
 
-    override suspend fun publish(coupleId: String, topic: String, payload: String) {
+    override suspend fun publishTopic(topic: String, payload: String) {
         val body = json.encodeToString(
             kotlinx.serialization.json.JsonObject.serializer(),
             buildJsonObject {
-                put("topic", "couple/$coupleId/$topic")
+                put("topic", topic)
                 put("payload", payload)
                 put("qos", 1)
                 put("retain", false)
@@ -60,7 +64,7 @@ class EmqxHttpPush(apiUrl: String, apiKey: String, apiSecret: String) : ServerPu
 
 /** No config (or embedded broker without a broker instance): push disabled, catch-up still works. */
 object NullServerPush : ServerPush {
-    override suspend fun publish(coupleId: String, topic: String, payload: String) {}
+    override suspend fun publishTopic(topic: String, payload: String) {}
 }
 
 fun serverPushFor(config: AppConfig, broker: EmbeddedMqttBroker?): ServerPush = when {

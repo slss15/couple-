@@ -33,6 +33,23 @@ class MqttHookTest {
         assertFalse(MqttTopics.allowedWrite("couple/C1/presence/extra", "C1"))
         assertFalse(MqttTopics.allowedWrite("couple/C1/#", "C1"))
         assertFalse(MqttTopics.allowedWrite("couple/C2/presence", "C1"))
+
+        // Typing: clients publish and subscribe; events: subscribe only.
+        assertTrue(MqttTopics.allowedWrite("couple/C1/typing", "C1"))
+        assertTrue(MqttTopics.allowedRead("couple/C1/typing", "C1"))
+        assertFalse(MqttTopics.allowedWrite("couple/C2/typing", "C1"))
+        assertTrue(MqttTopics.allowedRead("couple/C1/events", "C1"))
+        assertFalse(MqttTopics.allowedWrite("couple/C1/events", "C1"))
+
+        // user/{uid}/events: only one's own, subscribe only, works before pairing.
+        assertTrue(MqttTopics.allowedRead("user/U1/events", null, "U1"))
+        assertTrue(MqttTopics.allowedRead("user/U1/events", "C1", "U1"))
+        assertFalse(MqttTopics.allowedRead("user/U2/events", "C1", "U1"))
+        assertFalse(MqttTopics.allowedRead("user/+/events", null, "U1"))
+        assertFalse(MqttTopics.allowedRead("user/U1/#", null, "U1"))
+        assertFalse(MqttTopics.allowedRead("user/U1/events/x", null, "U1"))
+        assertFalse(MqttTopics.allowedRead("user/U1/events", null, null))
+        assertFalse(MqttTopics.allowedWrite("user/U1/events", "C1"))
     }
 
     @Test
@@ -74,8 +91,18 @@ class MqttHookTest {
         assertEquals("deny", hook("acl", acl(a.user.id, "couple/OTHER/presence")).json()["result"]!!.jsonPrimitive.content)
         assertEquals("deny", hook("acl", acl(a.user.id, "couple/+/presence")).json()["result"]!!.jsonPrimitive.content)
 
+        assertEquals("allow", hook("acl", acl(a.user.id, "couple/$cid/typing", "publish")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("allow", hook("acl", acl(b.user.id, "couple/$cid/typing")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("allow", hook("acl", acl(b.user.id, "couple/$cid/events")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("deny", hook("acl", acl(b.user.id, "couple/$cid/events", "publish")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("allow", hook("acl", acl(a.user.id, "user/${a.user.id}/events")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("deny", hook("acl", acl(a.user.id, "user/${b.user.id}/events")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("deny", hook("acl", acl(a.user.id, "user/${a.user.id}/events", "publish")).json()["result"]!!.jsonPrimitive.content)
+
         // Unpaired user gets nothing
         val c = client.register("carol")
         assertEquals("deny", hook("acl", acl(c.user.id, "couple/$cid/presence")).json()["result"]!!.jsonPrimitive.content)
+        // ... except its own pairing-event topic.
+        assertEquals("allow", hook("acl", acl(c.user.id, "user/${c.user.id}/events")).json()["result"]!!.jsonPrimitive.content)
     }
 }
