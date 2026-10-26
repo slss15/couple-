@@ -5,7 +5,9 @@ import com.qimingnan.couple.data.demo.DemoBackend
 import com.qimingnan.couple.data.net.CommentView
 import com.qimingnan.couple.data.net.Couple
 import com.qimingnan.couple.data.net.FeedPage
+import com.qimingnan.couple.data.net.ImportantDay
 import com.qimingnan.couple.data.net.PostView
+import com.qimingnan.couple.data.net.TaSummary
 import com.qimingnan.couple.data.net.TokenPair
 import com.qimingnan.couple.data.update.UpdateLogic
 import org.junit.After
@@ -116,5 +118,30 @@ class DemoBackendTest {
     @Test fun `post requires text or media`() {
         DemoBackend.demoBody = """{"id":"01TESTEMPTY000000000000000","text":"  "}"""
         assertEquals(400, DemoBackend.respond("POST", "/api/v1/feed/posts", now).first)
+    }
+
+    @Test fun `ta summary and days round trip`() {
+        val s = DemoBackend.respond("GET", "/api/v1/ta/summary", now)
+        assertEquals(200, s.first)
+        val summary = CoupleJson.decodeFromString(TaSummary.serializer(), s.second)
+        assertEquals("TA（演示）", summary.partner.displayName)
+        assertEquals("06-20", summary.partner.birthday)
+        assertTrue(summary.days.isNotEmpty())
+
+        DemoBackend.demoBody = """{"name":"第一次见面","month":3,"day":14}"""
+        val add = DemoBackend.respond("POST", "/api/v1/ta/days", now)
+        assertEquals(200, add.first)
+        val day = CoupleJson.decodeFromString(ImportantDay.serializer(), add.second)
+        assertEquals(3, day.month)
+
+        DemoBackend.demoBody = """{"bio":"新的签名"}"""
+        assertEquals(204, DemoBackend.respond("PUT", "/api/v1/ta/me", now).first)
+        val s2 = CoupleJson.decodeFromString(TaSummary.serializer(), DemoBackend.respond("GET", "/api/v1/ta/summary", now).second)
+        assertEquals("新的签名", s2.me.bio)
+
+        assertEquals(204, DemoBackend.respond("DELETE", "/api/v1/ta/days/${day.id}", now).first)
+        // 无效月份 400
+        DemoBackend.demoBody = """{"name":"x","month":13,"day":1}"""
+        assertEquals(400, DemoBackend.respond("POST", "/api/v1/ta/days", now).first)
     }
 }

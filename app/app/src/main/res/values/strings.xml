@@ -96,4 +96,22 @@
     <string name="notify_channel_chat_desc">新消息提醒</string>
     <string name="notify_channel_calls">通话</string>
     <string name="notify_channel_calls_desc">来电与未接来电</string>
+
+    <!-- TA 页 -->
+    <string name="ta_days_title">重要的日子</string>
+    <string name="ta_days_empty">还没有添加。纪念日、生日、第一次见面……</string>
+    <string name="ta_add_day">添加日子</string>
+    <string name="ta_days_together">在一起 %1$d 天了 ❤️</string>
+    <string name="ta_days_until"> · 还有 %1$d 天</string>
+    <string name="ta_birthday">生日 %1$s</string>
+    <string name="ta_birthday_hidden">生日已隐藏</string>
+    <string name="ta_edit_me">编辑我的档案</string>
+    <string name="ta_bio">一句话签名（≤200 字）</string>
+    <string name="ta_birthday_hint">生日 MM-DD</string>
+    <string name="ta_birth_year">出生年份（可空）</string>
+    <string name="ta_show_birthday">让 TA 看到我的生日</string>
+    <string name="ta_day_name">名称（如：第一次见面）</string>
+    <string name="ta_month">月</string>
+    <string name="ta_day">日</string>
+    <string name="ta_year_optional">年份（可空）</string>
 </resources>

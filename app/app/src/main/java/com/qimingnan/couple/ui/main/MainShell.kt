@@ -71,6 +71,7 @@ fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
         when (tab) {
             MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, modifier = Modifier.padding(padding))
             MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
+            MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             else -> Placeholder(tab, Modifier.padding(padding))
         }
     }

@@ -69,6 +69,23 @@ interface CoupleApi {
     @DELETE("feed/comments/{id}")
     suspend fun deleteComment(@Path("id") id: String): Response<Unit>
 
+    // ---- TA 页（contract "TA"） ----
+
+    @GET("ta/summary")
+    suspend fun taSummary(): TaSummary
+
+    @PUT("ta/me")
+    suspend fun updateTaMe(@Body body: UpdateMeRequest): Response<Unit>
+
+    @POST("ta/days")
+    suspend fun addDay(@Body body: UpsertDayRequest): ImportantDay
+
+    @PUT("ta/days/{id}")
+    suspend fun updateDay(@Path("id") id: String, @Body body: UpsertDayRequest): ImportantDay
+
+    @DELETE("ta/days/{id}")
+    suspend fun deleteDay(@Path("id") id: String): Response<Unit>
+
     /** Also reports this device's app/partner-protocol versions to the server (OTA v2 partner gate). */
     @GET("app/update")
     suspend fun checkUpdate(

@@ -169,6 +169,10 @@ object DemoBackend {
             }
             "GET app/update" -> 200 to NO_UPDATE
             "POST app/health-report" -> 204 to ""
+            "GET ta/summary" -> {
+                if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
+                200 to taSummaryJson(now)
+            }
             "POST feed/posts" -> {
                 val body = json.parseToJsonElement(demoBody).jsonObject
                 val id = body["id"]?.jsonPrimitive?.content ?: return 400 to err("VALIDATION_ERROR", "id required")
@@ -225,7 +229,52 @@ object DemoBackend {
             val removed = posts.removeAll { it.id == id }
             return if (removed) 204 to "" else 404 to err("POST_NOT_FOUND", "no post")
         }
+        if (p == "ta/me" && method == "PUT") {
+            val body = json.parseToJsonElement(demoBody).jsonObject
+            (body["bio"] as? JsonPrimitive)?.contentOrNull?.let { demoBio = it.take(200) }
+            (body["birthday"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.matches(Regex("^\\d{2}-\\d{2}$")) }?.let { demoBirthday = it }
+            (body["birthYear"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.let { demoBirthYear = it }
+            (body["showBirthday"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull()?.let { demoShowBirthday = it }
+            return 204 to ""
+        }
+        if (p == "ta/days" && method == "POST") {
+            if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
+            val body = json.parseToJsonElement(demoBody).jsonObject
+            val name = body["name"]?.jsonPrimitive?.contentOrNull?.trim() ?: return 400 to err("VALIDATION_ERROR", "name required")
+            if (name.isEmpty() || name.length > 50) return 400 to err("VALIDATION_ERROR", "name 1..50")
+            val month = body["month"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return 400 to err("VALIDATION_ERROR", "month required")
+            val day = body["day"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return 400 to err("VALIDATION_ERROR", "day required")
+            if (month !in 1..12 || day !in 1..31) return 400 to err("VALIDATION_ERROR", "month 1..12, day 1..31")
+            val id = Ulid.next(now)
+            demoDays += Triple(id, name, "%02d-%02d".format(month, day))
+            return 200 to """{"id":"$id","name":${JsonPrimitive(name)},"month":$month,"day":$day,"year":null,"createdBy":"${self().id}"}"""
+        }
+        val delDay = Regex("^ta/days/([^/]+)$").find(p)
+        if (delDay != null && method == "DELETE") {
+            demoDays.removeAll { it.first == delDay.groupValues[1] }
+            return 204 to ""
+        }
         return 404 to err("NOT_FOUND", "演示后端未实现：$method /$p")
+    }
+
+    // ---- TA 演示数据（me = 我的档案可编辑；partner = TA 固定档案） ----
+    @Volatile private var demoBio: String = "喜欢在傍晚散步"
+    @Volatile private var demoBirthday: String? = "06-20"
+    @Volatile private var demoBirthYear: Int? = 2000
+    @Volatile private var demoShowBirthday: Boolean = true
+    private val demoDays = mutableListOf(Triple("01DEMODAY0000000000000000A", "第一次见面", "03-14"))
+
+    private fun taSummaryJson(now: Long): String {
+        val me = self()
+        val days = demoDays.joinToString(",") { (id, name, md) ->
+            val (m, d) = md.split('-')
+            """{"id":"$id","name":${JsonPrimitive(name)},"month":${m.toInt()},"day":${d.toInt()},"year":null,"createdBy":"${partner.id}"}"""
+        }
+        return """{"me":{"displayName":${JsonPrimitive(me.displayName)},"bio":${JsonPrimitive(demoBio)},""" +
+            """"birthday":${JsonPrimitive(demoBirthday)},"birthYear":${demoBirthYear ?: "null"},"showBirthday":$demoShowBirthday},""" +
+            """"partner":{"id":"${partner.id}","displayName":${JsonPrimitive(partner.displayName)},"username":"${partner.username}",""" +
+            """"avatarUrl":null,"bio":"喜欢在傍晚散步","birthday":"06-20","birthYear":2000,"birthdayVisible":true},""" +
+            """"anniversary":1735689600000,"pairedAt":1735689600000,"days":[$days]}"""
     }
 
     /** 上一次 POST 的 body（respond() 是纯函数签名，multipart 之外的场景由拦截器暂存于此）。 */
