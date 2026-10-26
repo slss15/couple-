@@ -48,7 +48,7 @@ Placeholder app name: "Couple" (to be renamed). Android package: com.qimingnan.c
 
 ## MQTT (P0: connect-only, prove it works)
 - EMQX over WSS. Clients authenticate with username=userId, password=accessToken (EMQX HTTP auth hook -> POST /internal/mqtt/auth; ACL hook -> /internal/mqtt/acl).
-- Topic root: couple/{coupleId}/... ; a client can only pub/sub under its own couple. P0 topic: couple/{cid}/presence (retained, {userId, online, ts}).
+- Topic root: couple/{coupleId}/... ; a client can only access its own couple. Clients may **subscribe** to any topic under their couple; client **publishes** are limited to `couple/{cid}/presence` (retained, {userId, online, ts}). Server-push topics (`feed`, `chat`) are read-only for clients; the ACL hook receives `action` and enforces this per direction. P0 topic: couple/{cid}/presence (retained, {userId, online, ts}).
 
 ## Env (backend)
 DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET, REGISTRATION_CODE(optional), BOOTSTRAP_PRIVATE_KEY(optional), ADMIN_USERNAME(optional), SETUP_TOKEN(optional), DATA_DIR(optional), PORT=8080. Never commit secrets; ship .env.example only.

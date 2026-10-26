@@ -1,10 +1,6 @@
 package com.qimingnan.couple.ui.main
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
@@ -22,14 +18,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import com.qimingnan.couple.R
 import com.qimingnan.couple.theme.LocalCoupleTokens
+import com.qimingnan.couple.ui.chat.ChatScreen
 import com.qimingnan.couple.ui.feed.FeedScreen
-import com.qimingnan.couple.ui.feed.FeedViewModel
 import com.qimingnan.couple.ui.me.MeScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 
@@ -72,19 +67,7 @@ fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
             MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, modifier = Modifier.padding(padding))
             MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
-            else -> Placeholder(tab, Modifier.padding(padding))
-        }
-    }
-}
-
-@Composable
-private fun Placeholder(tab: MainTab, modifier: Modifier) {
-    val t = LocalCoupleTokens.current
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-            Icon(tab.icon, contentDescription = null, tint = t.colors.primary)
-            Text(stringResource(tab.label), style = t.typography.headline, color = t.colors.onBackground)
-            Text(stringResource(R.string.placeholder_coming), style = t.typography.body, color = t.colors.onSurfaceVariant)
+            MainTab.Chat -> ChatScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
         }
     }
 }

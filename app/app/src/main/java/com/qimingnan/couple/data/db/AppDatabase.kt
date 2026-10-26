@@ -98,13 +98,17 @@ interface ProfileDao {
 }
 
 @Database(
-    entities = [UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class],
-    version = 2,
+    entities = [
+        UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class,
+        ChatMessageEntity::class,
+    ],
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun profileDao(): ProfileDao
     abstract fun feedDao(): FeedDao
+    abstract fun chatDao(): ChatDao
 
     companion object {
         /** v1 → v2：feed 缓存表（纯新增，旧表不动）。 */
@@ -126,6 +130,18 @@ abstract class AppDatabase : RoomDatabase() {
                         "FOREIGN KEY(`postId`) REFERENCES `posts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_post_comments_postId` ON `post_comments` (`postId`)")
+            }
+        }
+
+        /** v2 → v3：聊天缓存表（纯新增，旧表不动）。 */
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `chat_messages` (`id` TEXT NOT NULL, `senderId` TEXT NOT NULL, " +
+                        "`text` TEXT NOT NULL, `replyTo` TEXT, `clientTs` INTEGER NOT NULL, `createdAt` INTEGER, " +
+                        "`sortAt` INTEGER NOT NULL, `recalledAt` INTEGER, `pendingState` TEXT, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_messages_sortAt` ON `chat_messages` (`sortAt`)")
             }
         }
     }

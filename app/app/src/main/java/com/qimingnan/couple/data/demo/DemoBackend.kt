@@ -4,6 +4,9 @@ import com.qimingnan.couple.BuildConfig
 import com.qimingnan.couple.core.CoupleJson
 import com.qimingnan.couple.core.Ulid
 import com.qimingnan.couple.data.bootstrap.ServerConfig
+import com.qimingnan.couple.data.net.ChatMessage
+import com.qimingnan.couple.data.net.ChatPage
+import com.qimingnan.couple.data.net.ChatReadState
 import com.qimingnan.couple.data.net.Couple
 import com.qimingnan.couple.data.net.PairCode
 import com.qimingnan.couple.data.net.TokenPair
@@ -99,8 +102,41 @@ object DemoBackend {
     private val mediaStore = LinkedHashMap<String, DemoMedia>()
     private val posts = mutableListOf<DemoPost>()
 
+    // ---- 聊天内存状态（UI 演示） ----
+
+    private data class DemoChat(
+        val id: String,
+        val senderId: String,
+        var text: String,
+        val replyTo: String?,
+        val clientTs: Long,
+        val createdAt: Long,
+        var recalledAt: Long?,
+    )
+
+    private val chatMessages = mutableListOf<DemoChat>()
+    private var demoMyReadUpTo: String? = null
+    private var demoPartnerReadUpTo: String? = null
+
+    /** 与 MQTT couple/{cid}/chat 载荷同构的事件流。 */
+    val chatEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
+
     init {
         seed()
+        seedChat()
+    }
+
+    private fun seedChat() {
+        val at = 1_736_000_200_000L
+        chatMessages += DemoChat(Ulid.next(at), partner.id, "在呢～今天过得怎么样？", null, at, at, null)
+    }
+
+    /** JVM 测试用：把聊天恢复到初始状态。 */
+    fun resetChat() {
+        chatMessages.clear()
+        demoMyReadUpTo = null
+        demoPartnerReadUpTo = null
+        seedChat()
     }
 
     private fun seed() {
@@ -150,7 +186,12 @@ object DemoBackend {
     }
 
     /** 纯函数：根据方法 + 路径给出 (HTTP 状态码, JSON body)。方便 JVM 单测。 */
-    fun respond(method: String, path: String, now: Long): Pair<Int, String> {
+    fun respond(
+        method: String,
+        path: String,
+        now: Long,
+        query: Map<String, String?> = emptyMap(),
+    ): Pair<Int, String> {
         val p = path.removePrefix("/api/v1/").removePrefix("/api/v1").trimEnd('/')
         fun <T> ok(s: KSerializer<T>, v: T) = 200 to CoupleJson.encodeToString(s, v)
         return when ("$method $p") {
@@ -173,6 +214,9 @@ object DemoBackend {
                 if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
                 200 to taSummaryJson(now)
             }
+            "GET chat/messages" -> chatPage(query)
+            "GET chat/state" -> ok(ChatReadState.serializer(), ChatReadState(demoMyReadUpTo, demoPartnerReadUpTo))
+            "POST chat/messages" -> sendChat(now)
             "POST feed/posts" -> {
                 val body = json.parseToJsonElement(demoBody).jsonObject
                 val id = body["id"]?.jsonPrimitive?.content ?: return 400 to err("VALIDATION_ERROR", "id required")
@@ -191,8 +235,122 @@ object DemoBackend {
         }
     }
 
-    /** 需要可变状态的 feed 子路径（like/comment/delete）。 */
+    private fun DemoChat.toModel() = ChatMessage(
+        id = id, coupleId = COUPLE_ID, senderId = senderId, type = "text", text = text,
+        replyTo = replyTo, clientTs = clientTs, createdAt = createdAt, recalledAt = recalledAt,
+    )
+
+    private fun emitChat(payload: String) {
+        demoScope.launch { chatEvents.emit(payload) }
+    }
+
+    private fun emitChatMessage(m: DemoChat) {
+        emitChat("""{"kind":"message","message":${CoupleJson.encodeToString(ChatMessage.serializer(), m.toModel())}}""")
+    }
+
+    private fun chatPage(query: Map<String, String?>): Pair<Int, String> {
+        if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
+        val after = query["after"]?.trim()?.takeIf { it.isNotEmpty() }
+        val before = query["before"]?.trim()?.takeIf { it.isNotEmpty() }
+        if (after != null && before != null) return 400 to err("VALIDATION_ERROR", "after and before are mutually exclusive")
+        val limit = (query["limit"]?.toIntOrNull() ?: 50).coerceIn(1, 200)
+        val ordered = chatMessages.sortedWith(compareBy({ it.createdAt }, { it.id }))
+        val page: List<DemoChat>
+        val hasMore: Boolean
+        when {
+            after != null -> {
+                val index = ordered.indexOfFirst { it.id == after }
+                if (index < 0) return 404 to err("MESSAGE_NOT_FOUND", "no message $after")
+                val rest = ordered.drop(index + 1)
+                page = rest.take(limit)
+                hasMore = rest.size > limit
+            }
+            before != null -> {
+                val index = ordered.indexOfFirst { it.id == before }
+                if (index < 0) return 404 to err("MESSAGE_NOT_FOUND", "no message $before")
+                val older = ordered.take(index)
+                page = older.takeLast(limit)
+                hasMore = older.size > limit
+            }
+            else -> {
+                page = ordered.takeLast(limit)
+                hasMore = ordered.size > limit
+            }
+        }
+        return 200 to CoupleJson.encodeToString(ChatPage.serializer(), ChatPage(page.map { it.toModel() }, hasMore))
+    }
+
+    private fun sendChat(now: Long): Pair<Int, String> {
+        if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
+        val body = json.parseToJsonElement(demoBody).jsonObject
+        val id = body["id"]?.jsonPrimitive?.content ?: return 400 to err("VALIDATION_ERROR", "id required")
+        if (!Regex("^[0-9A-HJKMNP-TV-Z]{26}$").matches(id)) return 400 to err("VALIDATION_ERROR", "id must be a ULID")
+        chatMessages.firstOrNull { it.id == id }?.let { existing ->
+            if (existing.senderId != self().id) return 409 to err("ID_CONFLICT", "id already used by another message")
+            return 200 to CoupleJson.encodeToString(ChatMessage.serializer(), existing.toModel())
+        }
+        val text = body["text"]?.jsonPrimitive?.contentOrNull?.trim() ?: ""
+        if (text.isEmpty() || text.length > 4000) return 400 to err("VALIDATION_ERROR", "text must be 1..4000 chars")
+        val replyTo = body["replyTo"]?.jsonPrimitive?.contentOrNull
+        if (replyTo != null && chatMessages.none { it.id == replyTo }) {
+            return 400 to err("VALIDATION_ERROR", "replyTo must be a message of your couple")
+        }
+        val clientTs = body["clientTs"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: now
+        val msg = DemoChat(id, self().id, text, replyTo, clientTs, now, null)
+        chatMessages += msg
+        emitChatMessage(msg)
+        scheduleDemoReply()
+        return 200 to CoupleJson.encodeToString(ChatMessage.serializer(), msg.toModel())
+    }
+
+    private fun scheduleDemoReply() {
+        val replies = listOf("我在呢，怎么啦？", "刚看到～想你了", "好呀，听你的", "哈哈哈哈，真的吗？")
+        demoScope.launch {
+            delay(1_500)
+            val id = Ulid.next()
+            val at = System.currentTimeMillis()
+            val reply = DemoChat(id, partner.id, replies[(chatMessages.size - 1) % replies.size], null, at, at, null)
+            chatMessages += reply
+            emitChatMessage(reply)
+            // 演示 TA 已读了我方最后一条消息。
+            chatMessages.lastOrNull { it.senderId == self().id }?.let { mine ->
+                demoPartnerReadUpTo = mine.id
+                emitChat("""{"kind":"read","userId":"${partner.id}","upToId":"${mine.id}","ts":$at}""")
+            }
+        }
+    }
+
+    /** 需要可变状态的 feed 子路径（like/comment/delete）与 chat 子路径（recall/read）。 */
     private fun feedMutableEndpoints(method: String, p: String, now: Long): Pair<Int, String> {
+        val recallMatch = Regex("^chat/messages/([^/]+)/recall$").find(p)
+        if (recallMatch != null && method == "POST") {
+            val msg = chatMessages.firstOrNull { it.id == recallMatch.groupValues[1] }
+                ?: return 404 to err("MESSAGE_NOT_FOUND", "no message")
+            if (msg.senderId != self().id) return 403 to err("RECALL_FORBIDDEN", "Only the sender can recall a message")
+            if (msg.recalledAt != null) {
+                return 200 to CoupleJson.encodeToString(ChatMessage.serializer(), msg.toModel())
+            }
+            if (now - msg.createdAt > 120_000) return 409 to err("RECALL_EXPIRED", "Messages can only be recalled within 120 seconds")
+            msg.text = ""
+            msg.recalledAt = now
+            emitChat("""{"kind":"recall","id":"${msg.id}","recalledAt":$now}""")
+            return 200 to CoupleJson.encodeToString(ChatMessage.serializer(), msg.toModel())
+        }
+        if (p == "chat/read" && method == "POST") {
+            if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
+            val body = json.parseToJsonElement(demoBody).jsonObject
+            val upToId = body["upToId"]?.jsonPrimitive?.contentOrNull
+                ?: return 400 to err("VALIDATION_ERROR", "upToId required")
+            val ordered = chatMessages.sortedWith(compareBy({ it.createdAt }, { it.id }))
+            val incoming = ordered.indexOfFirst { it.id == upToId }
+            if (incoming < 0) return 404 to err("MESSAGE_NOT_FOUND", "no message $upToId")
+            val current = demoMyReadUpTo?.let { id -> ordered.indexOfFirst { it.id == id } } ?: -1
+            if (incoming > current) {
+                demoMyReadUpTo = upToId
+                emitChat("""{"kind":"read","userId":"${self().id}","upToId":"$upToId","ts":$now}""")
+            }
+            return 204 to ""
+        }
         val likeMatch = Regex("^feed/posts/([^/]+)/like$").find(p)
         if (likeMatch != null) {
             val post = posts.firstOrNull { it.id == likeMatch.groupValues[1] } ?: return 404 to err("POST_NOT_FOUND", "no post")
@@ -377,7 +535,16 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
                 buf.readUtf8()
             }.getOrDefault("{}")
         }
-        val (code, body) = DemoBackend.respond(req.method, req.url.encodedPath, now())
+        val (code, body) = DemoBackend.respond(
+            req.method,
+            req.url.encodedPath,
+            now(),
+            mapOf(
+                "after" to req.url.queryParameter("after"),
+                "before" to req.url.queryParameter("before"),
+                "limit" to req.url.queryParameter("limit"),
+            ),
+        )
         return json(req, code, body)
     }
 

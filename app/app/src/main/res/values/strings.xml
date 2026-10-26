@@ -89,6 +89,22 @@
     <string name="feed_retry">重试</string>
     <string name="feed_me">我</string>
 
+    <!-- 聊天 -->
+    <string name="chat_empty_title">还没有消息</string>
+    <string name="chat_empty_hint">和 TA 说第一句话吧</string>
+    <string name="chat_input_hint">说点什么…</string>
+    <string name="chat_send">发送</string>
+    <string name="chat_reply">回复</string>
+    <string name="chat_recall">撤回</string>
+    <string name="chat_recalled">消息已撤回</string>
+    <string name="chat_sending">发送中…</string>
+    <string name="chat_failed_retry">发送失败，点按重试</string>
+    <string name="chat_read">已读</string>
+    <string name="chat_replying_to">回复：%1$s</string>
+    <string name="chat_cancel_reply">取消回复</string>
+    <string name="chat_reply_missing">[原消息]</string>
+    <string name="chat_load_older">加载更早的消息</string>
+
     <!-- 通知渠道 -->
     <string name="notify_channel_feed">动态</string>
     <string name="notify_channel_feed_desc">TA 发布了新动态或评论</string>

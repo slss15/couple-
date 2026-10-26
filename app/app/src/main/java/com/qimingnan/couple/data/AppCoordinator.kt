@@ -4,6 +4,7 @@ import com.qimingnan.couple.data.auth.SessionManager
 import com.qimingnan.couple.data.auth.SessionState
 import com.qimingnan.couple.data.bootstrap.BootstrapManager
 import com.qimingnan.couple.data.bootstrap.BootstrapStore
+import com.qimingnan.couple.data.chat.ChatRepository
 import com.qimingnan.couple.data.couple.CoupleRepository
 import com.qimingnan.couple.data.couple.CoupleState
 import com.qimingnan.couple.data.demo.DemoBackend
@@ -37,6 +38,7 @@ class AppCoordinator @Inject constructor(
     private val mqtt: MqttManager,
     private val updates: UpdateRepository,
     private val feed: FeedRepository,
+    private val chat: ChatRepository,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     fun start() {
@@ -45,6 +47,7 @@ class AppCoordinator @Inject constructor(
             bootstrapManager.verifyPending()
         }
         feed.start()
+        chat.start()
         scope.launch {
             combine(bootstrapStore.state, session.state, couple.state) { b, s, c ->
                 val url = b?.takeIf { it.pendingSince == null }?.current?.mqttUrl
@@ -80,6 +83,7 @@ class AppCoordinator @Inject constructor(
                 if (it is SessionState.LoggedOut) {
                     couple.reset()
                     feed.clearLocal()
+                    chat.clearLocal()
                 }
             }
         }

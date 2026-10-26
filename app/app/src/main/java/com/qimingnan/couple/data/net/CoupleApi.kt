@@ -87,6 +87,27 @@ interface CoupleApi {
     @DELETE("ta/days/{id}")
     suspend fun deleteDay(@Path("id") id: String): Response<Unit>
 
+    // ---- 聊天 P1a（contract "Chat"） ----
+
+    @POST("chat/messages")
+    suspend fun sendMessage(@Body body: SendMessageRequest): ChatMessage
+
+    @GET("chat/messages")
+    suspend fun chatMessages(
+        @Query("after") after: String? = null,
+        @Query("before") before: String? = null,
+        @Query("limit") limit: Int = 50,
+    ): ChatPage
+
+    @POST("chat/messages/{id}/recall")
+    suspend fun recallMessage(@Path("id") id: String): ChatMessage
+
+    @POST("chat/read")
+    suspend fun markChatRead(@Body body: ChatReadRequest): Response<Unit>
+
+    @GET("chat/state")
+    suspend fun chatState(): ChatReadState
+
     /** Also reports this device's app/partner-protocol versions to the server (OTA v2 partner gate). */
     @GET("app/update")
     suspend fun checkUpdate(

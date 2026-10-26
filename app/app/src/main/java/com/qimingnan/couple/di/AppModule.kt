@@ -18,6 +18,7 @@ import com.qimingnan.couple.data.bootstrap.OkHttpServerProbe
 import com.qimingnan.couple.data.bootstrap.ServerProbe
 import com.qimingnan.couple.data.bootstrap.apiRoot
 import com.qimingnan.couple.data.db.AppDatabase
+import com.qimingnan.couple.data.db.ChatDao
 import com.qimingnan.couple.data.db.FeedDao
 import com.qimingnan.couple.data.db.ProfileDao
 import com.qimingnan.couple.data.demo.DemoInterceptor
@@ -132,7 +133,7 @@ object AppModule {
     @Provides @Singleton
     fun database(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "couple.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
 
     @Provides
@@ -140,6 +141,9 @@ object AppModule {
 
     @Provides
     fun feedDao(db: AppDatabase): FeedDao = db.feedDao()
+
+    @Provides
+    fun chatDao(db: AppDatabase): ChatDao = db.chatDao()
 
     @Provides @Singleton
     fun bootstrapManager(
