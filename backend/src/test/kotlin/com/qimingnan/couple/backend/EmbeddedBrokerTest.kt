@@ -6,6 +6,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.json.jsonPrimitive
@@ -114,8 +115,10 @@ class EmbeddedBrokerTest {
             assertFailsWith<MqttException> { bob.paho.subscribe("couple/+/presence", 1) }
             // QoS0: Moquette drops a denied QoS1 publish without PUBACK (a blocking client would wait forever).
             alice.paho.publish("couple/OTHER/presence", "x".toByteArray(), 0, false)
-            alice.paho.publish("couple/$cid/ping", "hello".toByteArray(), 1, false)
-            assertEquals("couple/$cid/ping", bob.next()!!.topic) // only the allowed one arrives
+            // Server-push topics are read-only for clients: a forged chat event must never reach the partner.
+            alice.paho.publish("couple/$cid/chat", "forged".toByteArray(), 0, false)
+            alice.paho.publish(presence, "hello".toByteArray(), 1, false)
+            assertEquals(presence, bob.next()!!.topic) // only the allowed presence arrives
 
             // Abrupt disconnect (no DISCONNECT packet): the will reaches the partner ...
             val raw = MqttAsyncClient("ws://127.0.0.1:$port/mqtt", "a-${a.user.id}-tablet", MemoryPersistence())
@@ -164,6 +167,32 @@ class EmbeddedBrokerTest {
     }
 
     @Test
+    fun chatMessagesArePushedAfterCommit() {
+        val port = freePort()
+        appTest(embedded(port)) { http ->
+            startApplication()
+            val a = http.register("alice"); val b = http.register("bob")
+            val cid = http.pair(a, b)
+            val bob = connect(port, b.user.id, b.accessToken)
+            bob.paho.subscribeWithResponse("couple/$cid/chat", 1)
+
+            val id = com.github.f4b6a3.ulid.UlidCreator.getMonotonicUlid().toString()
+            val sent = http.postJson(
+                "/api/v1/chat/messages",
+                obj("id" to id, "text" to "hello", "clientTs" to System.currentTimeMillis()),
+                a.accessToken,
+            )
+            assertEquals(200, sent.status.value, sent.bodyAsText())
+
+            val pushed = assertNotNull(bob.next(5_000), "chat event not pushed")
+            assertEquals("couple/$cid/chat", pushed.topic)
+            assertTrue(pushed.payload.contains("\"kind\":\"message\""), pushed.payload)
+            assertTrue(pushed.payload.contains("\"text\":\"hello\""), pushed.payload)
+            bob.close()
+        }
+    }
+
+    @Test
     fun persistentSessionQueuesQos1WhileOffline() {
         val port = freePort()
         val dir = java.nio.file.Files.createTempDirectory("mqtt-store").toString()
@@ -171,14 +200,14 @@ class EmbeddedBrokerTest {
             startApplication()
             val a = http.register("alice"); val b = http.register("bob")
             val cid = http.pair(a, b)
-            val chat = "couple/$cid/chat/${b.user.id}"
+            val topic = "couple/$cid/presence"
 
             val bob = connect(port, b.user.id, b.accessToken, clean = false)
-            bob.paho.subscribe(chat, 1)
+            bob.paho.subscribe(topic, 1)
             bob.paho.disconnect(1_000); bob.paho.close()
 
             val alice = connect(port, a.user.id, a.accessToken)
-            repeat(3) { i -> alice.paho.publish(chat, "m$i".toByteArray(), 1, false) }
+            repeat(3) { i -> alice.paho.publish(topic, "m$i".toByteArray(), 1, false) }
 
             val back = connect(port, b.user.id, b.accessToken, clean = false)
             val got = (0 until 3).mapNotNull { back.next()?.payload }

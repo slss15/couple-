@@ -8,6 +8,7 @@
 BeforeAll {
     $script:root = Split-Path -Parent $PSScriptRoot
     . (Join-Path $script:root 'lib/common.ps1')
+    . (Join-Path $script:root 'backup.ps1')   # dot-source only: the entry-point guard keeps main from running
     $script:tmp = Join-Path ([IO.Path]::GetTempPath()) ("couple-pester-{0}" -f [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $script:tmp | Out-Null
 }
@@ -296,5 +297,71 @@ Describe 'Watchdog helpers' {
         $x.SelectSingleNode('//t:MultipleInstancesPolicy', $ns).InnerText | Should -Be 'IgnoreNew'
         $x.SelectSingleNode('//t:Exec/t:Arguments', $ns).InnerText | Should -Be '-File "C:\couple\watchdog\watchdog.ps1" -InstallDir "C:\a&b"'
         $x.SelectSingleNode('//t:DisallowStartIfOnBatteries', $ns).InnerText | Should -Be 'false'
+    }
+}
+
+Describe 'Backup helpers' {
+    It 'parses jdbc url database name' {
+        Get-DatabaseNameFromJdbcUrl 'jdbc:mysql://127.0.0.1:3306/couple?useSSL=false&allowPublicKeyRetrieval=true' | Should -Be 'couple'
+        Get-DatabaseNameFromJdbcUrl 'jdbc:mysql://db.local:3307/couple' | Should -Be 'couple'
+        Get-DatabaseNameFromJdbcUrl '' | Should -Be 'couple'
+        Get-DatabaseNameFromJdbcUrl 'garbage' | Should -Be 'couple'
+    }
+
+    It 'parses jdbc url host/port' {
+        $hp = Get-HostPortFromJdbcUrl 'jdbc:mysql://127.0.0.1:3306/couple?x=1'
+        $hp.Host | Should -Be '127.0.0.1'; $hp.Port | Should -Be '3306'
+        $hp2 = Get-HostPortFromJdbcUrl 'jdbc:mysql://db.local/couple'
+        $hp2.Host | Should -Be 'db.local'; $hp2.Port | Should -Be '3306'
+        $hp3 = Get-HostPortFromJdbcUrl ''
+        $hp3.Host | Should -Be '127.0.0.1'; $hp3.Port | Should -Be '3306'
+    }
+
+    It 'retention: keeps the newest N dumps, keeps everything when keep < 1' {
+        $f = @(1..4 | ForEach-Object {
+            [pscustomobject]@{ Name = "couple-2026-01-0$_-020000.sql.gz"; LastWriteTime = [DateTime]"2026-01-0$_" }
+        })
+        # returned newest-first (deletion order is irrelevant; the sort is newest-first by contract)
+        @(Get-BackupFilesToDelete $f 2).Name | Should -Be @('couple-2026-01-02-020000.sql.gz', 'couple-2026-01-01-020000.sql.gz')
+        Get-BackupFilesToDelete $f 4 | Should -Be @()
+        Get-BackupFilesToDelete $f 9 | Should -Be @()
+        Get-BackupFilesToDelete $f 0 | Should -Be @()
+        Get-BackupFilesToDelete @() 5 | Should -Be @()
+    }
+
+    It 'retention tiebreaks by name' {
+        $f = @(
+            [pscustomobject]@{ Name = 'b.sql.gz'; LastWriteTime = [DateTime]'2026-01-01' },
+            [pscustomobject]@{ Name = 'a.sql.gz'; LastWriteTime = [DateTime]'2026-01-01' }
+        )
+        @(Get-BackupFilesToDelete $f 1).Name | Should -Be 'a.sql.gz'
+    }
+
+    It 'scheduled task XML: daily calendar trigger, SYSTEM, escaped arguments' {
+        [xml]$x = New-BackupTaskXml 'C:\Windows\powershell.exe' '-File "C:\couple\scripts\backup.ps1" -InstallDir "C:\a&b"' '2026-01-01T02:30:00'
+        $ns = New-Object Xml.XmlNamespaceManager $x.NameTable
+        $ns.AddNamespace('t', 'http://schemas.microsoft.com/windows/2004/02/mit/task')
+        $x.SelectSingleNode('//t:Principal/t:UserId', $ns).InnerText | Should -Be 'S-1-5-18'
+        $x.SelectSingleNode('//t:CalendarTrigger/t:StartBoundary', $ns).InnerText | Should -Be '2026-01-01T02:30:00'
+        $x.SelectSingleNode('//t:CalendarTrigger/t:ScheduleByDay/t:DaysInterval', $ns).InnerText | Should -Be '1'
+        $x.SelectSingleNode('//t:MultipleInstancesPolicy', $ns).InnerText | Should -Be 'IgnoreNew'
+        $x.SelectSingleNode('//t:StartWhenAvailable', $ns).InnerText | Should -Be 'true'
+        $x.SelectSingleNode('//t:Exec/t:Arguments', $ns).InnerText | Should -Be '-File "C:\couple\scripts\backup.ps1" -InstallDir "C:\a&b"'
+    }
+
+    It 'gzip round-trips' {
+        $src = Join-Path $script:tmp 'gzip-src.txt'
+        $dst = Join-Path $script:tmp 'gzip-dst.gz'
+        [IO.File]::WriteAllText($src, ("你好 couple " * 1000))
+        Compress-GzipFile $src $dst
+        (Get-Item $dst).Length | Should -BeGreaterThan 0
+        (Get-Item $dst).Length | Should -BeLessThan ([IO.FileInfo]::new($src).Length)
+        Add-Type -AssemblyName System.IO.Compression
+        $in = [IO.File]::OpenRead($dst)
+        try {
+            $gz = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
+            try { $round = (New-Object IO.StreamReader($gz, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $gz.Dispose() }
+        } finally { $in.Dispose() }
+        $round | Should -Be (("你好 couple " * 1000))
     }
 }

@@ -140,6 +140,9 @@ export interface JwtClaims {
 
 export type ReleaseStatus = 'MIRRORED' | 'PUBLISHED' | 'WITHDRAWN'
 
+/** OTA v2 staged rollout：CANARY = 仅发布设置里 canaryDeviceIds 中的设备；ALL = 所有设备（仍受灰度比例限制） */
+export type ReleaseStage = 'CANARY' | 'ALL'
+
 /** GET /admin/releases 的一项 */
 export interface AppReleaseView {
   id: string
@@ -156,6 +159,15 @@ export interface AppReleaseView {
   createdAt: number
   /** 服务器磁盘上的 APK 是否还在 */
   fileExists: boolean
+  /** 镜像时附带了 release.json.sig（OTA v2 签名清单） */
+  signed: boolean
+  protocolVersion: number
+  minPeerProtocol: number
+  minSdk: number
+  stage: ReleaseStage
+  /** 非空 = 已暂停（自动暂停或手动），暂停的版本对所有设备不可见（含强制更新） */
+  pausedAt: number | null
+  pauseReason: string | null
 }
 
 /** PATCH /admin/releases/{versionCode}，字段均可选 */
@@ -164,6 +176,11 @@ export interface ReleasePatch {
   rolloutPercent?: number
   minSupportedVersionCode?: number
   notes?: string
+  stage?: ReleaseStage
+  /** true = 立即暂停（原因记为 manual）；false = 恢复 */
+  paused?: boolean
+  /** 发布时跳过“有设备跟不上强制更新”的检查（PEER_CANNOT_FOLLOW） */
+  overridePeerCheck?: boolean
 }
 
 /** POST/GET /admin/releases/sync */
@@ -184,16 +201,19 @@ export interface ReleaseSettingsView {
   autoPublish: boolean
   pollMinutes: number
   expectedSigningCertSha256: string | null
+  /** canary 设备 ID（最多 10 个，每个 1–128 字符）；CANARY 阶段的版本仅对这些设备可见 */
+  canaryDeviceIds: string[]
   updatedAt: number | null
 }
 
-/** PUT /admin/releases/settings：githubToken 缺省 = 保持，"" = 清除 */
+/** PUT /admin/releases/settings：githubToken 缺省 = 保持，"" = 清除；canaryDeviceIds 缺省 = 保持 */
 export interface ReleaseSettingsUpdate {
   repo?: string
   githubToken?: string
   autoPublish?: boolean
   pollMinutes?: number
   expectedSigningCertSha256?: string
+  canaryDeviceIds?: string[]
 }
 
 /** server-updater 上报的状态（原样转发，字段可能缺失） */
@@ -212,4 +232,28 @@ export interface ServerUpdateStatus {
   backend: { version: string; buildVersion: string; revision: string | null }
   updater: UpdaterReport | null
   updaterReportedAt: number | null
+}
+
+/** GET /admin/releases/{versionCode}/health 的一项 */
+export interface ReleaseHealthView {
+  versionCode: number
+  deviceId: string
+  userId: string
+  /** "OK" | "CRASH" | "FAILED" */
+  status: string
+  fromVersionCode: number | null
+  mqttConnected: boolean | null
+  detail: string | null
+  createdAt: number
+}
+
+/** GET /admin/devices 的一项（每台设备最近一次上报） */
+export interface DeviceReportView {
+  deviceId: string
+  userId: string
+  versionCode: number
+  protocolVersion: number
+  minPeerProtocol: number
+  sdkInt: number | null
+  reportedAt: number
 }

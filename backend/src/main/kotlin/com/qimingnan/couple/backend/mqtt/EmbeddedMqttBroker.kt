@@ -24,7 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
  * - MQTT over WebSocket on [AppConfig.mqttBindHost]:[AppConfig.mqttWsPort][AppConfig.mqttWsPath]; optional plain TCP.
  * - Auth: username = userId, password = access JWT ([MqttAccessService.authenticate], same as the EMQX hook),
  *   plus a client-id-to-user binding because persistent sessions are keyed by client id.
- * - ACL: [MqttAccessService.canAccess] for every SUBSCRIBE and PUBLISH, same rule as the EMQX ACL hook.
+ * - ACL: [MqttAccessService.canRead] for SUBSCRIBE and [MqttAccessService.canWrite] for PUBLISH
+ *   (clients publish only their own presence; feed/chat events are server-pushed), same rules as the EMQX ACL hook.
  * - Persistent sessions (cleanSession=false) keep subscriptions and queue QoS1/2 messages while the client is away;
  *   with [AppConfig.mqttDataDir] set they survive restarts. Sessions idle longer than
  *   [AppConfig.mqttSessionExpiry] are purged (Moquette 0.17 has no per-session queue length cap; expiry is the bound).
@@ -103,6 +104,12 @@ class EmbeddedMqttBroker(
         server.internalPublish(msg, INTERNAL_CLIENT_ID)
     }
 
+    /** Server→client event push (contract "Feed" §MQTT push): QoS 1, not retained. */
+    fun publishToCouple(coupleId: String, topic: String, payload: String) {
+        if (!running) return
+        publish(topic, payload.toByteArray(), MqttQoS.AT_LEAST_ONCE, retain = false)
+    }
+
     private inner class Authenticator : IAuthenticator {
         override fun checkValid(clientId: String?, username: String?, password: ByteArray?): Boolean = runBlocking {
             val user = username.orEmpty()
@@ -115,10 +122,11 @@ class EmbeddedMqttBroker(
     }
 
     private inner class Authorizer : IAuthorizatorPolicy {
-        override fun canWrite(topic: Topic, user: String?, client: String?): Boolean = check(topic, user)
-        override fun canRead(topic: Topic, user: String?, client: String?): Boolean = check(topic, user)
-        private fun check(topic: Topic, user: String?): Boolean =
-            runCatching { runBlocking { access.canAccess(user, topic.toString()) } }.getOrDefault(false)
+        override fun canWrite(topic: Topic, user: String?, client: String?): Boolean =
+            runCatching { runBlocking { access.canWrite(user, topic.toString()) } }.getOrDefault(false)
+
+        override fun canRead(topic: Topic, user: String?, client: String?): Boolean =
+            runCatching { runBlocking { access.canRead(user, topic.toString()) } }.getOrDefault(false)
     }
 
     private data class RetainedWill(val topic: String, val payload: ByteArray, val qos: MqttQoS)
@@ -143,7 +151,7 @@ class EmbeddedMqttBroker(
             wills.remove(clientId)
             if (!msg.isWillFlag) return
             val topic = msg.willTopic
-            val allowed = runCatching { runBlocking { access.canAccess(msg.username, topic) } }.getOrDefault(false)
+            val allowed = runCatching { runBlocking { access.canWrite(msg.username, topic) } }.getOrDefault(false)
             if (!allowed) {
                 log.warn("MQTT client {} (user {}) set a will on a forbidden topic; stripping it and disconnecting", clientId, msg.username)
                 stripWill(clientId)

@@ -20,15 +20,22 @@ const view: ReleaseSettingsView = {
   autoPublish: false,
   pollMinutes: 30,
   expectedSigningCertSha256: HEX,
+  canaryDeviceIds: ['dev-a', 'dev-b'],
   updatedAt: 1,
 }
 
 describe('版本发布设置表单 → 请求体', () => {
-  it('未修改的令牌不发送，不会回传脱敏值', () => {
+  it('未修改的令牌不发送，不会回传脱敏值；canary 设备原样提交', () => {
     const p = releaseSettingsPayload(releaseSettingsForm(view))
     expect('githubToken' in p).toBe(false)
     expect(JSON.stringify(p)).not.toContain('****')
-    expect(p).toEqual({ repo: 'slss15/couple-', autoPublish: false, pollMinutes: 30, expectedSigningCertSha256: HEX })
+    expect(p).toEqual({
+      repo: 'slss15/couple-',
+      autoPublish: false,
+      pollMinutes: 30,
+      expectedSigningCertSha256: HEX,
+      canaryDeviceIds: ['dev-a', 'dev-b'],
+    })
   })
 
   it('新令牌覆盖、勾选清除发送空串；证书指纹规范化，留空清除固定', () => {
@@ -43,11 +50,18 @@ describe('版本发布设置表单 → 请求体', () => {
     expect(releaseSettingsPayload(f).expectedSigningCertSha256).toBe('')
   })
 
+  it('canary 设备 ID 逐项 trim、过滤空串', () => {
+    const f = releaseSettingsForm(view)
+    f.canaryIds = [' dev-a ', '', 'dev-c']
+    expect(releaseSettingsPayload(f).canaryDeviceIds).toEqual(['dev-a', 'dev-c'])
+  })
+
   it('空视图给出默认值', () => {
     const f = releaseSettingsForm(null)
     expect(f.repo).toBe('slss15/couple-')
     expect(f.pollMinutes).toBe(30)
     expect(f.token.masked).toBeNull()
+    expect(f.canaryIds).toEqual([])
   })
 })
 

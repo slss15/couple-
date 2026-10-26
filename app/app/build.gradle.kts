@@ -173,6 +173,8 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    // 帖子图片/头像加载：走 apiClient（带 Bearer，媒体一律经后端代理）；Coil 2.x 的 okhttp 支持内置于 coil-base
+    implementation(libs.coil.compose)
 
     implementation(libs.camerax.core)
     implementation(libs.camerax.camera2)

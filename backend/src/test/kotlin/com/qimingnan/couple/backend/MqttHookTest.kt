@@ -16,14 +16,23 @@ class MqttHookTest {
 
     @Test
     fun topicRules() {
-        assertTrue(MqttTopics.allowed("couple/C1/presence", "C1"))
-        assertTrue(MqttTopics.allowed("couple/C1/#", "C1"))
-        assertFalse(MqttTopics.allowed("couple/C2/presence", "C1"))
-        assertFalse(MqttTopics.allowed("couple/+/presence", "C1"))
-        assertFalse(MqttTopics.allowed("couple/#", "C1"))
-        assertFalse(MqttTopics.allowed("#", "C1"))
-        assertFalse(MqttTopics.allowed("\$share/g/couple/C1/presence", "C1"))
-        assertFalse(MqttTopics.allowed("couple/C1/presence", null))
+        assertTrue(MqttTopics.allowedRead("couple/C1/presence", "C1"))
+        assertTrue(MqttTopics.allowedRead("couple/C1/#", "C1"))
+        assertTrue(MqttTopics.allowedRead("couple/C1/chat", "C1"))
+        assertFalse(MqttTopics.allowedRead("couple/C2/presence", "C1"))
+        assertFalse(MqttTopics.allowedRead("couple/+/presence", "C1"))
+        assertFalse(MqttTopics.allowedRead("couple/#", "C1"))
+        assertFalse(MqttTopics.allowedRead("#", "C1"))
+        assertFalse(MqttTopics.allowedRead("\$share/g/couple/C1/presence", "C1"))
+        assertFalse(MqttTopics.allowedRead("couple/C1/presence", null))
+
+        // Clients only publish their own presence; feed/chat are server-push topics.
+        assertTrue(MqttTopics.allowedWrite("couple/C1/presence", "C1"))
+        assertFalse(MqttTopics.allowedWrite("couple/C1/chat", "C1"))
+        assertFalse(MqttTopics.allowedWrite("couple/C1/feed", "C1"))
+        assertFalse(MqttTopics.allowedWrite("couple/C1/presence/extra", "C1"))
+        assertFalse(MqttTopics.allowedWrite("couple/C1/#", "C1"))
+        assertFalse(MqttTopics.allowedWrite("couple/C2/presence", "C1"))
     }
 
     @Test
@@ -57,6 +66,11 @@ class MqttHookTest {
         fun acl(user: String, topic: String, action: String = "subscribe") = obj("username" to user, "topic" to topic, "action" to action)
         assertEquals("allow", hook("acl", acl(a.user.id, "couple/$cid/presence", "publish")).json()["result"]!!.jsonPrimitive.content)
         assertEquals("allow", hook("acl", acl(b.user.id, "couple/$cid/presence")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("allow", hook("acl", acl(b.user.id, "couple/$cid/chat")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("allow", hook("acl", acl(b.user.id, "couple/$cid/feed")).json()["result"]!!.jsonPrimitive.content)
+        // Server-push topics are read-only for clients.
+        assertEquals("deny", hook("acl", acl(a.user.id, "couple/$cid/chat", "publish")).json()["result"]!!.jsonPrimitive.content)
+        assertEquals("deny", hook("acl", acl(a.user.id, "couple/$cid/feed", "publish")).json()["result"]!!.jsonPrimitive.content)
         assertEquals("deny", hook("acl", acl(a.user.id, "couple/OTHER/presence")).json()["result"]!!.jsonPrimitive.content)
         assertEquals("deny", hook("acl", acl(a.user.id, "couple/+/presence")).json()["result"]!!.jsonPrimitive.content)
 

@@ -77,8 +77,14 @@ CI：`../.github/workflows/app.yml`，只在 `app/**` 变更时运行 `assembleD
 
 ### 4. 主界面
 
-底部四个 Tab：**聊天 / 动态 / TA / 我的**。P0 只有“我的”是真页面：资料、配对信息与 TA 在线状态、
-MQTT 连接状态、服务器配置（地址、版本、签名状态、公钥指纹、重新扫码）、解绑、退出登录。
+底部四个 Tab：**聊天 / 动态 / TA / 我的**。
+
+- 聊天（P1a）：文本、引用回复、120 秒撤回、已读回执；Room 缓存 + `after`/`before` 分页；
+  发送走本地 PENDING → WorkManager outbox（离线退避重试、进程死亡后续跑，服务端按消息 id 幂等）；
+  `couple/{cid}/chat` MQTT 推送与重连/进入页面补拉合并。
+- 动态（P1）：文字+图片帖、点赞、评论、分页、离线发布 outbox、纪念日倒数卡。
+- TA（P1b）：对方资料卡（生日隐私开关）、在一起天数、重要日子 CRUD、我的档案编辑。
+- 我的：资料、配对信息与 TA 在线状态、MQTT 连接状态、服务器配置（地址、版本、签名状态、公钥指纹、重新扫码）、解绑、退出登录。
 
 ### 5. MQTT（R6：可靠连接）
 
@@ -87,6 +93,7 @@ MQTT 连接状态、服务器配置（地址、版本、签名状态、公钥指
 - `keepAlive = 30s`（Cloudflare 约 100 秒断开空闲 WebSocket）；
 - 默认网络变化（Wi-Fi ↔ 移动数据、断网恢复）立即重连；其他失败按 1s → 60s 指数退避，±20% 抖动；断网时不空转重试；
 - 连上后订阅并发布 retained 的 `couple/{cid}/presence`：`{userId, online:true, ts, mid}`；遗嘱消息为 `online:false`；
+  同时订阅服务端推送的 `couple/{cid}/feed` 与 `couple/{cid}/chat`（客户端只订阅；ACL 拒绝客户端向这两个话题发布）；
   `mid` 为 ULID 消息 ID（可选字段，旧客户端缺省时用确定性 ID），接收端按 mid 去重、按发送者保持顺序（过期状态丢弃）；
 - 每条消息记录发送 ts / 接收 ts：回环（自己发出的）与 TA→我 两组 p50/p95，以及重连、切网、去重计数，
   显示在“我的 → 后台保活 · 连接诊断”，并写入 logcat（tag `CoupleMqtt`）；
@@ -134,13 +141,15 @@ app/src/main/java/com/qimingnan/couple/
 │   ├── auth/        token 存储（加密）、刷新、会话
 │   ├── net/         Retrofit 接口、拦截器、Authenticator、错误码
 │   ├── couple/      配对 / 解绑
-│   ├── db/          Room
-│   ├── mqtt/        MQTT over WSS + presence
+│   ├── feed/        动态仓库 + 发布 outbox worker
+│   ├── chat/        聊天仓库 + 发送 outbox worker + 已读回执逻辑
+│   ├── db/          Room（users/couples/posts/comments/chat_messages）
+│   ├── mqtt/        MQTT over WSS + presence/feed/chat
 │   └── AppCoordinator.kt  进程级编排（何时连 MQTT、换服务器后清会话）
 ├── di/              Hilt 模块
 ├── theme/           token、色板、对比度
 ├── layout/          布局模型与校验器
-└── ui/              bootstrap / auth / pairing / main / me / components
+└── ui/              bootstrap / auth / pairing / main / feed / chat / ta / me / components
 ```
 
 ## 单元测试
@@ -156,10 +165,14 @@ app/src/main/java/com/qimingnan/couple/
 | `TrustCheckTest` | 指纹格式（与管理后台同字节）、主机名规范化、主机/公钥变化判定、确认页流程、换钥失败回滚 |
 | `PairCodeExpiryTest` | 配对码过期时间与时钟偏差 |
 | `OemKeepAliveTest` | 厂商识别、自启动/电池页面候选、Shizuku 命令（拒绝注入） |
+| `ChatReadReceiptsTest` | 已读回执定位（含 PENDING 消息排除、未知游标） |
+| `ChatEventTest` | 聊天 MQTT 载荷解析与坏载荷丢弃 |
+| `DemoBackendTest` | 调试后端：登录/配对/动态/TA/聊天幂等、撤回、已读、分页 |
 
-## 已知限制（P0）
+## 已知限制（P1）
 
-- 聊天 / 动态 / TA 三个 Tab 只是占位。
-- 没有 FCM；MQTT 只在进程存活时连接（可在“后台保活”中开启常驻连接前台服务）。
-- 发码方通过轮询 `GET /couple` 发现配对成功（P1 改为 MQTT 通知）。
-- 解绑申请编号需要口头告诉对方（P1 通过 MQTT 推送给对方）。
+- 聊天仅文本（P2 加图片/语音/表情包）；`couple/{cid}/typing`（正在输入）尚未接入。
+- 没有 FCM；MQTT 只在进程存活时连接（可在“后台保活”中开启常驻连接前台服务）；App 被杀时的 WxPusher 候补推送待做。
+- 发码方仍通过轮询 `GET /couple` 发现配对成功（待改 MQTT 通知）。
+- 解绑申请编号仍需口头告诉对方（待改 MQTT 推送）。
+- 聊天记录导出、双机 e2e 脚本未做。

@@ -18,6 +18,8 @@ import com.qimingnan.couple.data.bootstrap.OkHttpServerProbe
 import com.qimingnan.couple.data.bootstrap.ServerProbe
 import com.qimingnan.couple.data.bootstrap.apiRoot
 import com.qimingnan.couple.data.db.AppDatabase
+import com.qimingnan.couple.data.db.ChatDao
+import com.qimingnan.couple.data.db.FeedDao
 import com.qimingnan.couple.data.db.ProfileDao
 import com.qimingnan.couple.data.demo.DemoInterceptor
 import com.qimingnan.couple.data.net.AuthHeaderInterceptor
@@ -120,12 +122,28 @@ object AppModule {
     @Provides @Singleton
     fun coupleApi(retrofit: Retrofit): CoupleApi = retrofit.create(CoupleApi::class.java)
 
+    /** Coil 全局 ImageLoader（媒体经 apiClient 带 Bearer 加载）。 */
+    @Provides @Singleton
+    fun imageLoader(@ApplicationContext context: Context, @ApiClient client: OkHttpClient): coil.ImageLoader =
+        coil.ImageLoader.Builder(context)
+            .okHttpClient(client)
+            .crossfade(true)
+            .build()
+
     @Provides @Singleton
     fun database(@ApplicationContext context: Context): AppDatabase =
-        Room.databaseBuilder(context, AppDatabase::class.java, "couple.db").build()
+        Room.databaseBuilder(context, AppDatabase::class.java, "couple.db")
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .build()
 
     @Provides
     fun profileDao(db: AppDatabase): ProfileDao = db.profileDao()
+
+    @Provides
+    fun feedDao(db: AppDatabase): FeedDao = db.feedDao()
+
+    @Provides
+    fun chatDao(db: AppDatabase): ChatDao = db.chatDao()
 
     @Provides @Singleton
     fun bootstrapManager(

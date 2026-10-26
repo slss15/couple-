@@ -205,7 +205,7 @@ $cf = 'C:\couple\cloudflared\cloudflared.exe'
 | `/mqtt*` | 127.0.0.1:8083（内置 broker） | App 填 `wss://couple.example.com/mqtt` |
 | 其余 | 127.0.0.1:8080（couple-backend） | REST API + 管理后台网页（后端直接托管） |
 
-`protocol: http2`（QUIC/UDP 在 NAT4、国内运营商常被限速/阻断）、`no-autoupdate: true`。**注意**：`config.yml` 里的 8080/8083 是写死的，改了 `PORT` / `MQTT_WS_PORT` 要同步手改 `C:\couple\config\cloudflared\config.yml` 并 `Restart-Service couple-cloudflared`。
+`protocol: http2`（QUIC/UDP 在 NAT4、国内运营商常被限速/阻断）、`no-autoupdate: true`。端口不用手改：`config.yml` 由 `install.ps1` 从模板 `config.yml.in` 渲染，自动跟随 `couple.env` 里的 `PORT` / `MQTT_WS_PORT` / `HOOK_PORT`（端口变了重跑 `install.ps1` 会自动重新渲染，旧文件保留为 `config.yml.bak`）。
 
 ## 2. MySQL 8.4（LTS）
 
@@ -383,7 +383,7 @@ New-Secret 32                                             # 64 位十六进制
 | `UPDATE_WINDOW` | | 空 | 轮询时段（本机时区），如 `03:00-05:00`，可跨午夜；webhook 不受限 | — |
 | `HEALTH_TIMEOUT` | | `90` | 新版本健康检查超时秒数，超时即回滚 | — |
 | `UPDATE_REPO` | | `slss15/couple-` | 允许下载安装包的 GitHub 仓库（白名单） | — |
-| `UPDATE_GITHUB_TOKEN` | 可选 | 空 | 只读 GitHub token，用于查询 Release API（限流时）。注意：目前**下载 zip 时不带 token**，私有仓库的推送即部署走不通（待实机确认） | — |
+| `UPDATE_GITHUB_TOKEN` | 可选 | 空 | 只读 GitHub token（`contents:read`）。设置后查询 Release API **和下载 zip** 都带上它（走 API asset URL，token 只发给 api.github.com、不跟随跳转发到存储），私有仓库的推送即部署也能用 | `ghp_…`（GitHub → Settings → Developer settings → Tokens） |
 | `HOOK_BIND` / `HOOK_PORT` | | `127.0.0.1` / `9000` | webhook 监听地址，改端口要同步改 `config.yml`；一般不改 | — |
 | `HOOK_MAX_SKEW` | | `300` | 签名时间戳允许误差（秒） | — |
 | `KEEP_RELEASES` | | `3`（最少 2） | `C:\couple\releases` 下保留几个版本（当前和上一个总是保留） | — |
@@ -624,47 +624,34 @@ Select-String -Path C:\couple\services\couple-backend.xml -Pattern '<arguments>'
 | 隧道凭证 + `cert.pem` | `C:\couple\config\cloudflared\`、`%USERPROFILE%\.cloudflared\cert.pem` | 需重建隧道 |
 | APK 签名 keystore | 你的电脑（离线） | 只能卸载重装 App |
 
-每天 04:00 自动备份（SYSTEM 计划任务，保留 14 天）：
+自动备份随包发布：`install.ps1` 把 `backup.ps1` 装到 `C:\couple\scripts\` 并注册 SYSTEM 计划任务 `\Couple\couple-backup`（每天 `BACKUP_TIME`，默认 02:30，错过点开机后补跑）。每次运行：
+
+1. 用 `couple.env` 里的 `DB_USER` / `DB_PASSWORD` 做 `mysqldump --single-transaction`（整库，gzip 后存 `C:\couple\backups\couple-<时间>.sql.gz`）；
+2. 复制 `couple.env` 到备份目录（`JWT_SECRET`、可选的引导私钥都在里面）；目录权限仅 Administrators/SYSTEM；
+3. `BACKUP_EXTRA_DIRS` 里列的目录（分号分隔，如本地媒体存储）打包成 `extra-<目录名>.zip`；
+4. 只保留最近 `BACKUP_KEEP`（默认 14）个数据库备份。
+
+日志在 `C:\couple\logs\backup.log`。相关键见 `couple.env.example` 第 7 节（`BACKUP_ENABLED=false` 停用；改 `BACKUP_TIME` 后重跑 `install.ps1` 或 `backup.ps1 -Install` 生效）。
+
+立即跑一次验证：
 
 ```powershell
-New-Item -ItemType Directory -Force C:\couple-backup | Out-Null
-& icacls.exe C:\couple-backup /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' | Out-Null
-
-# mysqldump 的凭据文件（不把密码写在命令行里）
-@'
-[client]
-user=root
-password=<ROOT密码>      # setup.ps1 装的 MySQL：见 C:\couple\config\mysql-root.txt
-host=127.0.0.1
-'@ | Set-Content C:\couple-backup\mysqldump.cnf -Encoding ASCII
-
-@'
-$ErrorActionPreference = 'Stop'
-$d = Get-Date -Format 'yyyy-MM-dd'
-$dir = 'C:\couple-backup'
-$sql = Join-Path $dir "couple-$d.sql"
-# 用 --result-file，不要用 > 重定向（PowerShell 5.1 会写成 UTF-16）
-& 'C:\mysql\bin\mysqldump.exe' --defaults-extra-file="$dir\mysqldump.cnf" --single-transaction --routines --events --default-character-set=utf8mb4 --result-file="$sql" couple
-if ($LASTEXITCODE -ne 0) { throw "mysqldump failed ($LASTEXITCODE)" }
-Compress-Archive -Path $sql, 'C:\couple\config\couple.env', 'C:\couple\config\cloudflared' -DestinationPath (Join-Path $dir "couple-$d.zip") -Force
-Remove-Item $sql
-Get-ChildItem $dir -Filter 'couple-*.zip' | Where-Object LastWriteTime -lt (Get-Date).AddDays(-14) | Remove-Item
-'@ | Set-Content C:\couple-backup\backup.ps1 -Encoding UTF8
-
-$action  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File C:\couple-backup\backup.ps1'
-$trigger = New-ScheduledTaskTrigger -Daily -At 4:00am
-Register-ScheduledTask -TaskName 'couple-backup' -Action $action -Trigger $trigger -User 'SYSTEM' -RunLevel Highest -Force
-Start-ScheduledTask couple-backup; Start-Sleep 20; Get-ChildItem C:\couple-backup     # 立即跑一次验证
+& C:\couple\scripts\backup.ps1                      # 现在就备份一次
+Get-ChildItem C:\couple\backups                     # 应看到 couple-*.sql.gz 和 couple.env
+Get-Content C:\couple\logs\backup.log -Tail 5
 ```
 
-- MSI 装的 MySQL 把路径换成 `C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe`。
-- [ ] 备份文件定期拷到另一台机器/网盘并加密；`cert.pem` 和 keystore 单独离线保存。
-- 恢复（先解压出 `.sql`；不要用 PowerShell 管道喂给 mysql，5.1 会按 ASCII 转码弄坏中文）：
+- MSI 装的 MySQL：`BACKUP_MYSQLDUMP` 默认已指向 `C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqldump.exe`；ZIP 装的（`C:\mysql\bin\`）在 `couple.env` 里设置 `BACKUP_MYSQLDUMP`。
+- 隧道凭证不在备份里（丢了可重建隧道），`cert.pem` 和 keystore 单独离线保存。
+- [ ] **备份文件定期拷到另一台机器/网盘并加密**——本机磁盘坏了备份也没了。
+- 恢复（先 `Rename-Item` 解压 gzip 或用 7-Zip 解出 `.sql`；不要用 PowerShell 管道喂给 mysql，5.1 会按 ASCII 转码弄坏中文）：
   ```powershell
   Stop-Service couple-updater, couple-backend
-  cmd /c "C:\mysql\bin\mysql.exe --defaults-extra-file=C:\couple-backup\mysqldump.cnf --default-character-set=utf8mb4 couple < C:\restore\couple-2026-01-01.sql"
+  # setup.ps1 装的 MySQL：root 密码见 C:\couple\config\mysql-root.txt（或备份里的 couple.env，用 DB_USER/DB_PASSWORD 亦可）
+  cmd /c "C:\mysql\bin\mysql.exe -u root -p<ROOT密码> --default-character-set=utf8mb4 couple < C:\restore\couple-20260101-023000.sql"
   Start-Service couple-backend, couple-updater
   ```
+  换机恢复：装好 MySQL → 建空库 `couple` 和用户（2.3）→ 灌入 dump → 恢复 `couple.env` → `install.ps1` 重装服务（`BOOTSTRAP_PRIVATE_KEY` 在数据库里，两台手机不用重新扫码）。
 
 ## 11. 故障排查
 

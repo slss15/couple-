@@ -68,6 +68,66 @@
     <string name="online">在线</string>
     <string name="offline">离线</string>
     <string name="demo_title">调试账号（仅 debug 包）</string>
-    <string name="demo_hint">不需要服务器：使用内置的离线假后端登录账号 demo，并与“TA（演示）”配对。可以调试登录、配对、解绑、我的、后台保活等页面；不会发出任何网络请求。换回真实服务器：我的 → 重新扫码。</string>
+    <string name="demo_hint">不需要服务器：使用内置的离线假后端登录账号 demo，并与“TA（演示）”配对。可以调试登录、配对、动态、解绑、我的、后台保活等页面；不会发出任何网络请求。换回真实服务器：我的 → 重新扫码。</string>
     <string name="demo_enter">使用调试账号进入</string>
+
+    <!-- 动态（Feed） -->
+    <string name="feed_publish">发布</string>
+    <string name="feed_publish_action">发布动态</string>
+    <string name="feed_publish_hint">记录这一刻…</string>
+    <string name="feed_pick_image">选图片</string>
+    <string name="feed_image_count">已选 %1$d 张（最多 9 张）</string>
+    <string name="feed_empty_title">还没有动态</string>
+    <string name="feed_empty_hint">点右下角「+」发第一条动态吧</string>
+    <string name="feed_anniversary_title">我们在一起</string>
+    <string name="feed_anniversary_days">%1$d 天 ❤️</string>
+    <string name="feed_like">点赞</string>
+    <string name="feed_comment_count">评论 %1$d</string>
+    <string name="feed_comment_hint">说点什么…</string>
+    <string name="feed_send">发送</string>
+    <string name="feed_delete">删除</string>
+    <string name="feed_retry">重试</string>
+    <string name="feed_me">我</string>
+
+    <!-- 聊天 -->
+    <string name="chat_empty_title">还没有消息</string>
+    <string name="chat_empty_hint">和 TA 说第一句话吧</string>
+    <string name="chat_input_hint">说点什么…</string>
+    <string name="chat_send">发送</string>
+    <string name="chat_reply">回复</string>
+    <string name="chat_recall">撤回</string>
+    <string name="chat_recalled">消息已撤回</string>
+    <string name="chat_sending">发送中…</string>
+    <string name="chat_failed_retry">发送失败，点按重试</string>
+    <string name="chat_read">已读</string>
+    <string name="chat_replying_to">回复：%1$s</string>
+    <string name="chat_cancel_reply">取消回复</string>
+    <string name="chat_reply_missing">[原消息]</string>
+    <string name="chat_load_older">加载更早的消息</string>
+
+    <!-- 通知渠道 -->
+    <string name="notify_channel_feed">动态</string>
+    <string name="notify_channel_feed_desc">TA 发布了新动态或评论</string>
+    <string name="notify_channel_chat">聊天</string>
+    <string name="notify_channel_chat_desc">新消息提醒</string>
+    <string name="notify_channel_calls">通话</string>
+    <string name="notify_channel_calls_desc">来电与未接来电</string>
+
+    <!-- TA 页 -->
+    <string name="ta_days_title">重要的日子</string>
+    <string name="ta_days_empty">还没有添加。纪念日、生日、第一次见面……</string>
+    <string name="ta_add_day">添加日子</string>
+    <string name="ta_days_together">在一起 %1$d 天了 ❤️</string>
+    <string name="ta_days_until"> · 还有 %1$d 天</string>
+    <string name="ta_birthday">生日 %1$s</string>
+    <string name="ta_birthday_hidden">生日已隐藏</string>
+    <string name="ta_edit_me">编辑我的档案</string>
+    <string name="ta_bio">一句话签名（≤200 字）</string>
+    <string name="ta_birthday_hint">生日 MM-DD</string>
+    <string name="ta_birth_year">出生年份（可空）</string>
+    <string name="ta_show_birthday">让 TA 看到我的生日</string>
+    <string name="ta_day_name">名称（如：第一次见面）</string>
+    <string name="ta_month">月</string>
+    <string name="ta_day">日</string>
+    <string name="ta_year_optional">年份（可空）</string>
 </resources>

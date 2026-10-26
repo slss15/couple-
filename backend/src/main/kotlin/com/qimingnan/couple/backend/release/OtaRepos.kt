@@ -76,6 +76,9 @@ object ReleaseHealthRepo {
     fun hasFailure(versionCode: Int): Boolean =
         ReleaseHealth.selectAll().where { (ReleaseHealth.versionCode eq versionCode) and (ReleaseHealth.status neq "OK") }.limit(1).any()
 
+    fun hasOk(versionCode: Int): Boolean =
+        ReleaseHealth.selectAll().where { (ReleaseHealth.versionCode eq versionCode) and (ReleaseHealth.status eq "OK") }.limit(1).any()
+
     fun forVersion(versionCode: Int, limit: Int = 100): List<HealthView> =
         ReleaseHealth.selectAll().where { ReleaseHealth.versionCode eq versionCode }
             .orderBy(ReleaseHealth.createdAt to SortOrder.DESC).limit(limit).map {

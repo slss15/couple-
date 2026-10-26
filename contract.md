@@ -33,6 +33,7 @@ Placeholder app name: "Couple" (to be renamed). Android package: com.qimingnan.c
 ## Admin
 - Preferred: the first admin is created through first-run setup (below). Legacy, still supported: the first registered user (or env ADMIN_USERNAME) gets role=admin.
 - GET /admin/config, PUT /admin/config {baseUrl, mqttUrl, turn:{provider:"cloudflare"|"coturn", ...}, storage:{...}} — secrets are write-only and come back masked.
+- Admin config also carries `notify`: `{"wxpusher": {"appToken": "<secret>", "uids": ["UID_..."]}}` (appToken is write-only/masked like other secrets; uids are plain). When configured, the backend sends best-effort operator alerts via WxPusher (`POST https://wxpusher.zjiecode.com/api/send/message`): deploy failure/rollback reported by the server-updater, a release auto-paused by a failed health report, and a canary release with no OK health report within 2 h (auto-paused by the periodic sweep / POST /admin/releases/sweep). Sends are debounced per alert key (10 min); unconfigured = disabled; failures never affect the API path. Content is operator-level only — never message bodies.
 - GET /admin/audit?limit&before -> [{id, actorId, action, target, meta, ts}]
 
 ## First-run setup
@@ -47,7 +48,7 @@ Placeholder app name: "Couple" (to be renamed). Android package: com.qimingnan.c
 
 ## MQTT (P0: connect-only, prove it works)
 - EMQX over WSS. Clients authenticate with username=userId, password=accessToken (EMQX HTTP auth hook -> POST /internal/mqtt/auth; ACL hook -> /internal/mqtt/acl).
-- Topic root: couple/{coupleId}/... ; a client can only pub/sub under its own couple. P0 topic: couple/{cid}/presence (retained, {userId, online, ts}).
+- Topic root: couple/{coupleId}/... ; a client can only access its own couple. Clients may **subscribe** to any topic under their couple; client **publishes** are limited to `couple/{cid}/presence` (retained, {userId, online, ts}). Server-push topics (`feed`, `chat`) are read-only for clients; the ACL hook receives `action` and enforces this per direction. P0 topic: couple/{cid}/presence (retained, {userId, online, ts}).
 
 ## Env (backend)
 DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET, REGISTRATION_CODE(optional), BOOTSTRAP_PRIVATE_KEY(optional), ADMIN_USERNAME(optional), SETUP_TOKEN(optional), DATA_DIR(optional), PORT=8080. Never commit secrets; ship .env.example only.
@@ -152,3 +153,63 @@ Scope of P1a: text only, reply/quote, recall, read receipts, offline outbox. Ima
 - Room is the source the UI renders. Sending = insert locally with state=PENDING → outbox worker POSTs (retry with backoff while offline, survives process death) → SENT with server createdAt. 4xx other than 409/429 → FAILED (tap to retry). Duplicate events (MQTT + catch-up) are merged by id.
 - Read: when the chat screen is visible, POST /chat/read with the newest partner message id (debounced). Show "已读" under my last message that is ≤ partnerReadUpTo.
 - Debug demo account: DemoBackend implements these endpoints in memory and the partner "TA（演示）" auto-replies ~1.5 s later; events reach the app through an in-process flow instead of MQTT.
+
+## Feed (P1: 动态) — authoritative for backend + app
+Scope of P1 feed: posts with text + images, likes, comments, deletion. Video/voice posts come later. Uses the shared media storage below.
+
+### Media storage (shared by feed / avatar / later chat images)
+- Providers come from admin config `storage` (local | minio | r2). Buckets are **always private**: every download goes through the backend.
+- POST /api/v1/media (Bearer, multipart/form-data, single `file` field) -> {storageKey, mimeType, size, width, height, thumbKey|null}. Only images in P1: image/jpeg, image/png, image/webp; ≤ 10 MB; EXIF/GPS metadata is stripped server-side on ingest; thumbnails (≤ 512 px JPEG) are generated server-side when width or height > 512.
+- GET /api/v1/media/{storageKey} and GET /api/v1/media/{storageKey}/thumb (Bearer): streams the bytes, `ETag: "<sha256>"`, If-None-Match → 304, Cache-Control private. **403 MEDIA_FORBIDDEN unless the media belongs to the caller's couple** (or is an avatar of the couple's members). Unknown key → 404 MEDIA_NOT_FOUND.
+- Uploads are couple-scoped by the uploader's coupleId. Uploads not referenced by any post/avatar within 24 h are deleted by a periodic orphan sweep; deleting a post deletes its media files immediately.
+- POST /api/v1/users/me/avatar {storageKey} -> 204. Sets the caller's avatarUrl to "/api/v1/media/{storageKey}" (relative; clients resolve against baseUrl). The previous avatar file is deleted.
+
+### Model
+- Post = {id (client ULID, server idempotent on id: re-POSTing the same id returns the stored post 200; a different couple reusing an id → 409 ID_CONFLICT), coupleId, authorId, text (0..4000 chars after trim; at least one of text/media must be non-empty, else VALIDATION_ERROR), media: [PostMedia] (0..9), createdAt, likes: {count, likedByMe}, comments: [Comment] (full list — the couple has 2 people), commentCount}
+- PostMedia = {storageKey, thumbKey|null, mimeType, width, height, size}. Every referenced storageKey must be an upload of the same couple, else VALIDATION_ERROR; a key may be used by only one post ever (409 MEDIA_ALREADY_USED otherwise).
+- Comment = {id (client ULID, same idempotency rule as posts), postId, authorId, text (1..1000 chars after trim), createdAt}
+- Likes: PK (postId, userId); liking twice is a no-op (200).
+
+### REST (under /api/v1, Bearer, requires a paired user 403 NOT_PAIRED)
+- POST /feed/posts {id, text, mediaKeys?: [storageKey...]} -> Post
+- GET /feed/posts?before=<id>&limit=N -> {posts: [Post...] (desc by createdAt, ties by id), hasMore}. Omit before for the newest page. limit default 20, max 50.
+- DELETE /feed/posts/{id} -> 204. Only the author (403 NOT_AUTHOR).
+- POST /feed/posts/{id}/like -> 200 {count}; DELETE /feed/posts/{id}/like -> 200 {count}
+- POST /feed/posts/{id}/comments {id, text} -> Comment; DELETE /feed/comments/{id} -> 204 (comment author only)
+
+### MQTT push (server → clients)
+- Topic couple/{cid}/feed, QoS 1, not retained. Clients subscribe; client publishes denied by ACL. Payloads:
+  - {kind:"post", post:Post} — sent after the DB commit, post includes likes/comments as of send time
+  - {kind:"delete", id}
+  - {kind:"like", postId, userId, count}
+  - {kind:"comment", postId, comment:Comment}
+  - {kind:"comment_delete", postId, id}
+- MQTT is a hint: clients merge by id and may refetch. Catch-up on (re)connect/foreground = GET /feed/posts (newest page) + merge.
+- Server→client publish infra: embedded broker uses internalPublish; external EMQX uses its HTTP publish API (env EMQX_API_URL/EMQX_API_KEY/EMQX_API_SECRET — missing config just disables push, catch-up still works).
+
+### App rules
+- Room caches posts/comments/likes; UI renders from Room. Publish = insert locally (author view) → upload media (already done via the publish flow) → POST /feed/posts → replace local row with the server Post. Offline publish queues like the chat outbox.
+- 空状态：未发过任何动态时显示引导卡（「发第一条动态」）。
+
+
+## TA (P1b: TA 页) — authoritative for backend + app
+Scope: partner card (profile + presence), shared important days (anniversary/birthdays/custom dates), and a minimal privacy toggle. TA 页数据量小、改动低频：**没有 MQTT 推送**，App 每次进入 Tab 时拉取一次（下拉刷新同路径）。
+
+### Model
+- Profile = {bio: String|null (≤200 chars), birthday: "MM-DD"|null, birthYear: Int|null (1900..2100; null = 不展示年龄), showBirthday: Boolean (default true)}
+- ImportantDay = {id (server ULID), coupleId, name (1..50 chars), month (1..12), day (1..31), year: Int|null (null = 不计年龄/周年数), createdBy, createdAt}
+- 两人共享同一份 days 列表；任一成员可增改删。
+- 生日存在用户档案上（自己的 month/day/year），TA 卡展示的是**对方**的生日；对方 `showBirthday=false` 时，服务器对生日字段返回 null（`birthdayVisible:false` 提示前端显示「已隐藏」）。
+
+### REST (under /api/v1, Bearer, requires a paired user 403 NOT_PAIRED)
+- GET /ta/summary -> {me: Profile & {displayName}, partner: {id, displayName, username, avatarUrl, bio, birthday, birthYear, birthdayVisible}, anniversary: Long|null, pairedAt: Long, days: [ImportantDay]}
+- PUT /ta/me {bio?, birthday?, birthYear?, showBirthday?} -> 204（只改自己的档案；字段缺省 = 保持；显式 null = 清除）
+- POST /ta/days {name, month, day, year?} -> ImportantDay（服务端生成 id）
+- PUT /ta/days/{id} {name?, month?, day?, year?} -> ImportantDay
+- DELETE /ta/days/{id} -> 204
+- Validation: month 1..12, day 1..31（不校验月份天数——2 月 30 日允许，回忆类日子没有严格日历语义）; bio ≤ 200; name 1..50. Errors: VALIDATION_ERROR (400), NOT_PAIRED (403), DAY_NOT_FOUND (404).
+
+### App rules
+- TA Tab = 对方资料卡（头像/昵称/bio/生日/在线状态圆点——在线状态复用 MQTT presence，不进 /ta/summary）+ 在一起天数 + 重要日子列表（距下次周年/生日的天数升序）+ 「我的档案」编辑入口（bio/生日/showBirthday 开关）。
+- days 不进 Room（低频、实时拉取）；进入 Tab 时 GET /ta/summary，下拉刷新同路径。
+- Demo 后端在内存里实现同一组端点（TA 卡 + 两条示例日子）。

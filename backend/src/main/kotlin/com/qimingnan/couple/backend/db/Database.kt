@@ -20,6 +20,24 @@ object Users : Table("users") {
     val role = varchar("role", 16)
     val coupleId = varchar("couple_id", 26).nullable()
     val createdAt = long("created_at")
+    // V6 (TA page)
+    val bio = varchar("bio", 200).nullable()
+    val birthday = varchar("birthday", 5).nullable() // "MM-DD"
+    val birthYear = short("birth_year").nullable()
+    val showBirthday = bool("show_birthday").default(true)
+    override val primaryKey = PrimaryKey(id)
+}
+
+/** Shared important days (V6, contract "TA"): anniversary-type dates, birthdays live on users. */
+object ImportantDays : Table("important_days") {
+    val id = varchar("id", 26)
+    val coupleId = varchar("couple_id", 26)
+    val name = varchar("name", 50)
+    val month = short("date_month")   // month/day/year 是 H2 保留字，列名加 date_ 前缀
+    val day = short("date_day")
+    val year = short("date_year").nullable()
+    val createdBy = varchar("created_by", 26)
+    val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -121,6 +139,70 @@ object DeviceReports : Table("device_reports") {
     val sdkInt = integer("sdk_int").nullable()
     val reportedAt = long("reported_at")
     override val primaryKey = PrimaryKey(deviceId)
+}
+
+/** Uploaded media objects (V5): images for feed posts and avatars; couple-scoped (contract "Media storage"). */
+object MediaObjects : Table("media_objects") {
+    val storageKey = varchar("storage_key", 26)
+    val coupleId = varchar("couple_id", 26)
+    val purpose = varchar("purpose", 16).default("post")
+    val mimeType = varchar("mime_type", 64)
+    val size = long("size")
+    val width = integer("width")
+    val height = integer("height")
+    val thumbKey = varchar("thumb_key", 26).nullable()
+    val usedByPost = varchar("used_by_post", 26).nullable()
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(storageKey)
+}
+
+/** Feed posts (V5, contract "Feed"). */
+object Posts : Table("posts") {
+    val id = varchar("id", 26)
+    val coupleId = varchar("couple_id", 26)
+    val authorId = varchar("author_id", 26)
+    val text = varchar("text", 4000)
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+object PostLikes : Table("post_likes") {
+    val postId = varchar("post_id", 26)
+    val userId = varchar("user_id", 26)
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(postId, userId)
+}
+
+object PostComments : Table("post_comments") {
+    val id = varchar("id", 26)
+    val postId = varchar("post_id", 26)
+    val authorId = varchar("author_id", 26)
+    val text = varchar("text", 1000)
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+/** Chat messages (V7, contract "Chat"). `createdAt` is server time and the sort key; ties break on id. */
+object ChatMessages : Table("chat_messages") {
+    val id = varchar("id", 26)
+    val coupleId = varchar("couple_id", 26)
+    val senderId = varchar("sender_id", 26)
+    val msgType = varchar("msg_type", 16).default("text")
+    val text = varchar("text", 4000)
+    val replyTo = varchar("reply_to", 26).nullable()
+    val clientTs = long("client_ts")
+    val createdAt = long("created_at")
+    val recalledAt = long("recalled_at").nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+/** Per-user read cursor (V7): the newest message id each member has read, monotonic. */
+object ChatReads : Table("chat_reads") {
+    val coupleId = varchar("couple_id", 26)
+    val userId = varchar("user_id", 26)
+    val upToId = varchar("up_to_id", 26)
+    val updatedAt = long("updated_at")
+    override val primaryKey = PrimaryKey(coupleId, userId)
 }
 
 /** Post-install health reports (V4). */

@@ -38,6 +38,14 @@ const rules: Record<string, FormItemRule[]> = {
         !v || normalizeCertSha256(v) ? cb() : cb(new Error('需为 64 位十六进制 SHA-256（可带冒号）')),
     },
   ],
+  canaryIds: [
+    {
+      validator: (_r, v: string[], cb) =>
+        v.length <= 10 && v.every((s) => s.trim().length >= 1 && s.trim().length <= 128)
+          ? cb()
+          : cb(new Error('最多 10 台，每个设备 ID 为 1–128 字符')),
+    },
+  ],
 }
 
 async function load() {
@@ -100,6 +108,22 @@ onMounted(load)
         <el-input v-model="form.certPin" placeholder="留空 = 首次镜像时自动固定（TOFU）" class="mono" />
         <div class="muted">APK 签名证书的 SHA-256。证书不符的版本一律拒绝；清空后下一次镜像会重新固定。</div>
       </el-form-item>
+      <el-form-item label="Canary 设备" prop="canaryIds">
+        <el-select
+          v-model="form.canaryIds"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          :reserve-keyword="false"
+          placeholder="输入设备 ID 后回车添加（最多 10 台）"
+          class="wide"
+        />
+        <div class="muted">
+          CANARY 阶段的版本仅对这些设备可见，健康上报 OK 后自动扩大到全部。设备 ID 在「设备」页复制；带
+          <code>rollout: staged</code> 注释的 tag 发布时默认只发 canary。
+        </div>
+      </el-form-item>
       <div class="actions">
         <el-button @click="load">重新加载</el-button>
         <el-button type="primary" :loading="saving" @click="save">保存发布设置</el-button>
@@ -114,4 +138,5 @@ onMounted(load)
 .mb { margin-bottom: 12px; }
 .ml { margin-left: 8px; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; }
+.wide { width: 100%; }
 </style>

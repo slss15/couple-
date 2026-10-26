@@ -4,15 +4,21 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { api } from '@/api'
 import { errorText } from '@/api/errors'
-import type { AppReleaseView, ReleasePatch, SyncState } from '@/types/api'
+import type { AppReleaseView, ReleaseHealthView, ReleasePatch, ReleaseStage, SyncState } from '@/types/api'
 import { formatTs } from '@/utils/format'
-import { STATUS_LABEL, STATUS_TAG, formatSize, shortDigest } from '@/utils/releases'
+import { HEALTH_TAG, STATUS_LABEL, STATUS_TAG, formatSize, shortDigest } from '@/utils/releases'
 
 const releases = ref<AppReleaseView[]>([])
 const loading = ref(false)
 const loadErr = ref('')
 const sync = ref<SyncState | null>(null)
 const busy = ref<number | null>(null)
+const health = ref<{ visible: boolean; loading: boolean; release: AppReleaseView | null; rows: ReleaseHealthView[] }>({
+  visible: false,
+  loading: false,
+  release: null,
+  rows: [],
+})
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 最新的已发布版本（App 实际会收到的） */
@@ -133,6 +139,42 @@ async function editNotes(r: AppReleaseView) {
   await patch(r, { notes: value ?? '' }, '更新说明已保存')
 }
 
+async function pause(r: AppReleaseView) {
+  await ElMessageBox.confirm(
+    `暂停 ${r.versionName} 后，所有设备（包括强制更新的设备）都看不到它，下载链接也会失效。`,
+    '暂停版本',
+    { type: 'warning', confirmButtonText: '暂停', cancelButtonText: '取消' },
+  )
+  await patch(r, { paused: true }, '已暂停（恢复请点“恢复”）')
+}
+
+async function resume(r: AppReleaseView) {
+  await patch(r, { paused: false }, '已恢复')
+}
+
+async function toggleStage(r: AppReleaseView) {
+  const to: ReleaseStage = r.stage === 'ALL' ? 'CANARY' : 'ALL'
+  await ElMessageBox.confirm(
+    to === 'CANARY'
+      ? '切换为 CANARY 后，仅“发布设置”中 canaryDeviceIds 里的设备能看到该版本。'
+      : '切换为 ALL 后，该版本对所有设备可见（仍受灰度比例限制）。',
+    `切换发布阶段 · ${r.versionName}`,
+    { type: 'warning', confirmButtonText: `切换为 ${to}`, cancelButtonText: '取消' },
+  )
+  await patch(r, { stage: to }, `发布阶段已切换为 ${to}`)
+}
+
+async function showHealth(r: AppReleaseView) {
+  health.value = { visible: true, loading: true, release: r, rows: [] }
+  try {
+    health.value.rows = await api.releaseHealth(r.versionCode)
+  } catch (e) {
+    ElMessage.error(errorText(e))
+  } finally {
+    health.value.loading = false
+  }
+}
+
 /** ElMessageBox 取消会 reject 'cancel'，这里吞掉 */
 function run(fn: (r: AppReleaseView) => Promise<void>, r: AppReleaseView) {
   fn(r).catch(() => undefined)
@@ -190,10 +232,18 @@ onBeforeUnmount(() => {
           <div class="muted mono small">{{ row.versionCode }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="150">
+      <el-table-column label="状态" width="210">
         <template #default="{ row }">
-          <el-tag :type="STATUS_TAG[row.status as keyof typeof STATUS_TAG]">{{ STATUS_LABEL[row.status as keyof typeof STATUS_LABEL] }}</el-tag>
-          <el-tag v-if="!row.fileExists" type="danger" size="small" class="ml">文件缺失</el-tag>
+          <div>
+            <el-tag :type="STATUS_TAG[row.status as keyof typeof STATUS_TAG]">{{ STATUS_LABEL[row.status as keyof typeof STATUS_LABEL] }}</el-tag>
+            <el-tag v-if="!row.fileExists" type="danger" size="small" class="ml">文件缺失</el-tag>
+          </div>
+          <div v-if="row.stage === 'CANARY' || row.pausedAt" class="mt4">
+            <el-tag v-if="row.stage === 'CANARY'" type="warning" size="small">CANARY</el-tag>
+            <el-tooltip v-if="row.pausedAt" :content="`暂停于 ${formatTs(row.pausedAt)}：${row.pauseReason ?? '未知原因'}`" placement="top">
+              <el-tag type="danger" size="small" :class="{ ml: row.stage === 'CANARY' }">已暂停</el-tag>
+            </el-tooltip>
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="灰度" width="90">
@@ -218,16 +268,48 @@ onBeforeUnmount(() => {
           </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column label="操作" min-width="300" fixed="right">
+      <el-table-column label="操作" min-width="360" fixed="right">
         <template #default="{ row }">
           <el-button v-if="row.status !== 'PUBLISHED'" link type="primary" :disabled="!row.fileExists || busy === row.versionCode" @click="run(publish, row)">发布</el-button>
           <el-button v-else link type="danger" :disabled="busy === row.versionCode" @click="run(withdraw, row)">撤回</el-button>
+          <el-button v-if="row.status === 'PUBLISHED' && !row.pausedAt" link type="warning" :disabled="busy === row.versionCode" @click="run(pause, row)">暂停</el-button>
+          <el-button v-if="row.pausedAt" link type="success" :disabled="busy === row.versionCode" @click="run(resume, row)">恢复</el-button>
+          <el-button link :disabled="busy === row.versionCode" @click="run(toggleStage, row)">{{ row.stage === 'ALL' ? '设为 CANARY' : '设为全量' }}</el-button>
           <el-button link :disabled="busy === row.versionCode" @click="run(setRollout, row)">设置灰度比例</el-button>
           <el-button link :disabled="busy === row.versionCode" @click="run(setMinSupported, row)">设置最低支持版本</el-button>
           <el-button link :disabled="busy === row.versionCode" @click="run(editNotes, row)">说明</el-button>
+          <el-button link :disabled="busy === row.versionCode" @click="run(showHealth, row)">健康上报</el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <el-dialog v-model="health.visible" :title="`健康上报 · ${health.release?.versionName ?? ''}（${health.release?.versionCode ?? ''}）`" width="860px">
+      <el-table v-loading="health.loading" :data="health.rows" border stripe max-height="480" empty-text="该版本还没有健康上报（App 安装后首次启动会自动上报）">
+        <el-table-column label="设备 / 用户" min-width="230">
+          <template #default="{ row }">
+            <div class="mono small">{{ row.deviceId }}</div>
+            <div class="muted small">{{ row.userId }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="HEALTH_TAG[row.status as keyof typeof HEALTH_TAG] ?? 'info'">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="MQTT" width="90">
+          <template #default="{ row }">{{ row.mqttConnected == null ? '—' : row.mqttConnected ? '已连接' : '未连接' }}</template>
+        </el-table-column>
+        <el-table-column label="来自版本" width="95">
+          <template #default="{ row }">{{ row.fromVersionCode ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column label="详情" min-width="170">
+          <template #default="{ row }"><span class="small">{{ row.detail || '—' }}</span></template>
+        </el-table-column>
+        <el-table-column label="时间" width="170">
+          <template #default="{ row }">{{ formatTs(row.createdAt) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -236,6 +318,7 @@ onBeforeUnmount(() => {
 .actions { display: flex; gap: 8px; }
 .mb { margin-bottom: 12px; }
 .ml { margin-left: 6px; }
+.mt4 { margin-top: 4px; }
 .small { font-size: 12px; }
 .strong { font-weight: 600; }
 </style>

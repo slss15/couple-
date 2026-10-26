@@ -12,6 +12,8 @@ import com.qimingnan.couple.backend.auth.authRoutes
 import com.qimingnan.couple.backend.auth.clientIp
 import com.qimingnan.couple.backend.bootstrap.BootstrapService
 import com.qimingnan.couple.backend.bootstrap.bootstrapPublicRoutes
+import com.qimingnan.couple.backend.chat.ChatService
+import com.qimingnan.couple.backend.chat.chatRoutes
 import com.qimingnan.couple.backend.common.ApiException
 import com.qimingnan.couple.backend.common.AppJson
 import com.qimingnan.couple.backend.common.ErrorBody
@@ -24,12 +26,17 @@ import com.qimingnan.couple.backend.mqtt.mqttHookRoutes
 import com.qimingnan.couple.backend.admin.adminStaticRoutes
 import com.qimingnan.couple.backend.config.MqttBrokerMode
 import com.qimingnan.couple.backend.db.Couples
+import com.qimingnan.couple.backend.feed.adminMediaRoutes
+import com.qimingnan.couple.backend.feed.feedRoutes
+import com.qimingnan.couple.backend.feed.mediaRoutes
 import com.qimingnan.couple.backend.health.SERVER_VERSION
 import org.jetbrains.exposed.sql.selectAll
 import com.qimingnan.couple.backend.pairing.PairingService
 import com.qimingnan.couple.backend.setup.SetupService
 import com.qimingnan.couple.backend.setup.setupRoutes
 import com.qimingnan.couple.backend.pairing.pairingRoutes
+import com.qimingnan.couple.backend.ta.TaService
+import com.qimingnan.couple.backend.ta.taRoutes
 import com.qimingnan.couple.backend.release.ReleaseMirror
 import com.qimingnan.couple.backend.release.ReleaseService
 import com.qimingnan.couple.backend.release.ReleaseSettingsService
@@ -57,6 +64,9 @@ import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
@@ -88,6 +98,7 @@ fun Application.module(config: AppConfig) {
     val audit = AuditService(db, config.clock)
     val jwtService = JwtService(config.jwtSecret, config.accessTokenTtlMs, config.clock)
     val mqttAccess = MqttAccessService(db, jwtService, audit)
+    var embeddedBroker: EmbeddedMqttBroker? = null
     if (config.mqttBrokerMode == MqttBrokerMode.EMBEDDED) {
         val broker = EmbeddedMqttBroker(
             config,
@@ -95,6 +106,7 @@ fun Application.module(config: AppConfig) {
             activeCoupleIds = { db.tx { Couples.selectAll().where { Couples.deletedAt.isNull() }.map { it[Couples.id] } } },
         )
         broker.start()
+        embeddedBroker = broker
         // Stop the broker (clean disconnects, persistent store flushed) before the DB pool closes.
         monitor.subscribe(ApplicationStopping) { broker.stop() }
     }
@@ -108,10 +120,37 @@ fun Application.module(config: AppConfig) {
     val bootstrapService = BootstrapService(keys, adminConfigService, config)
     log.info("Bootstrap Ed25519 public key: {}", keys.publicKeyBase64)
     val releaseSettings = ReleaseSettingsService(db, config.clock)
-    val releaseService = ReleaseService(db, config, releaseSettings, audit)
+    val wxPusher = com.qimingnan.couple.backend.notify.WxPusherService(
+        config,
+        settingsProvider = {
+            com.qimingnan.couple.backend.notify.WxPusherSettings.fromConfig(adminConfigService.snapshot().stored.notify)
+        },
+    )
+    val releaseService = ReleaseService(db, config, releaseSettings, audit, wxPusher)
     val releaseMirror = ReleaseMirror(db, config, releaseSettings, audit)
     attributes.put(ReleaseMirrorKey, releaseMirror)
     if (config.releasePollEnabled) releaseMirror.startScheduler(this)
+    // OTA design §9-5: periodically auto-pause canary releases that got no OK health report in time (2 h).
+    launch(Dispatchers.IO) {
+        while (true) {
+            runCatching { releaseService.sweepStaleCanaries() }
+            delay(30 * 60_000L)
+        }
+    }
+
+    // Media + feed (contract "Media storage", "Feed"): server→client events over the couple topics.
+    val serverPush = com.qimingnan.couple.backend.mqtt.serverPushFor(config, embeddedBroker)
+    val storageManager = com.qimingnan.couple.backend.media.StorageManager(config) {
+        adminConfigService.snapshot().stored.storage
+    }
+    val mediaService = com.qimingnan.couple.backend.media.MediaService(db, config, storageManager)
+    val feedService = com.qimingnan.couple.backend.feed.FeedService(db, config, storageManager, serverPush)
+    launch(Dispatchers.IO) {
+        while (true) {
+            runCatching { mediaService.orphanSweep() }
+            delay(60 * 60_000L)
+        }
+    }
 
     install(ContentNegotiation) { json(AppJson) }
     install(CallLogging) {
@@ -171,6 +210,11 @@ fun Application.module(config: AppConfig) {
                 adminRoutes(db, audit, adminConfigService, bootstrapService, config.mqttWsPath)
                 appUpdateRoutes(releaseService)
                 adminReleaseRoutes(db, audit, releaseService, releaseMirror, releaseSettings, this@module)
+                mediaRoutes(mediaService)
+                feedRoutes(feedService)
+                adminMediaRoutes(db, audit, mediaService)
+                taRoutes(TaService(db, config))
+                chatRoutes(ChatService(db, config, serverPush))
             }
         }
         config.adminStaticDir?.let { dir ->

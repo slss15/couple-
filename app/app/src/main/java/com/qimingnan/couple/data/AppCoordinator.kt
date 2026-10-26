@@ -4,9 +4,11 @@ import com.qimingnan.couple.data.auth.SessionManager
 import com.qimingnan.couple.data.auth.SessionState
 import com.qimingnan.couple.data.bootstrap.BootstrapManager
 import com.qimingnan.couple.data.bootstrap.BootstrapStore
+import com.qimingnan.couple.data.chat.ChatRepository
 import com.qimingnan.couple.data.couple.CoupleRepository
 import com.qimingnan.couple.data.couple.CoupleState
 import com.qimingnan.couple.data.demo.DemoBackend
+import com.qimingnan.couple.data.feed.FeedRepository
 import com.qimingnan.couple.data.mqtt.MqttManager
 import com.qimingnan.couple.data.mqtt.Presence
 import com.qimingnan.couple.data.mqtt.MqttState
@@ -35,6 +37,8 @@ class AppCoordinator @Inject constructor(
     private val couple: CoupleRepository,
     private val mqtt: MqttManager,
     private val updates: UpdateRepository,
+    private val feed: FeedRepository,
+    private val chat: ChatRepository,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     fun start() {
@@ -42,6 +46,8 @@ class AppCoordinator @Inject constructor(
             bootstrapStore.load()
             bootstrapManager.verifyPending()
         }
+        feed.start()
+        chat.start()
         scope.launch {
             combine(bootstrapStore.state, session.state, couple.state) { b, s, c ->
                 val url = b?.takeIf { it.pendingSince == null }?.current?.mqttUrl
@@ -72,8 +78,14 @@ class AppCoordinator @Inject constructor(
             }
         }
         scope.launch {
-            // 退出登录 / 会话失效 → 清空配对状态，回到未知
-            session.state.collect { if (it is SessionState.LoggedOut) couple.reset() }
+            // 退出登录 / 会话失效 → 清空配对与动态缓存，回到未知
+            session.state.collect {
+                if (it is SessionState.LoggedOut) {
+                    couple.reset()
+                    feed.clearLocal()
+                    chat.clearLocal()
+                }
+            }
         }
         scope.launch {
             // App update check (/app/update needs a session): on start / login, at most once per 6 h.

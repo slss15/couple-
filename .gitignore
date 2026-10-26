@@ -11,3 +11,7 @@ cert.pem
 # build-package.sh download cache and output
 .cache/
 dist-windows/
+# Mimosa hook local state (scanner artifacts)
+.mimosa/
+# ZCode session artifacts
+.zcode/

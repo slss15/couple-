@@ -31,6 +31,11 @@ try {
         & schtasks.exe /Delete /TN '\Couple\couple-watchdog' /F 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) { Write-Host 'removed scheduled task \Couple\couple-watchdog' } else { Write-Warning "schtasks /Delete returned $LASTEXITCODE" }
     }
+    & schtasks.exe /Query /TN '\Couple\couple-backup' 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        & schtasks.exe /Delete /TN '\Couple\couple-backup' /F 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { Write-Host 'removed scheduled task \Couple\couple-backup (files in backups\ kept)' } else { Write-Warning "schtasks /Delete returned $LASTEXITCODE" }
+    }
     & schtasks.exe /Delete /TN '\Couple\' /F 2>&1 | Out-Null   # empty task folder (fails harmlessly when not empty/missing)
 } finally {
     $ErrorActionPreference = $old

@@ -73,6 +73,12 @@ data class MqttTarget(val url: String, val userId: String, val coupleId: String)
 
 object MqttTopics {
     fun presence(coupleId: String) = "couple/$coupleId/presence"
+
+    /** 服务端事件推送（contract "Feed"；客户端只订阅，ACL 拒绝客户端发布）。 */
+    fun feed(coupleId: String) = "couple/$coupleId/feed"
+
+    /** 服务端事件推送（contract "Chat"；客户端只订阅，ACL 拒绝客户端发布）。 */
+    fun chat(coupleId: String) = "couple/$coupleId/chat"
 }
 
 /**
@@ -122,6 +128,14 @@ class MqttManager @Inject constructor(
     private val _presence = MutableStateFlow<Map<String, Presence>>(emptyMap())
     /** 订阅到的在线状态（userId -> Presence），“我的”页面显示 TA 是否在线。 */
     val presence: StateFlow<Map<String, Presence>> = _presence.asStateFlow()
+
+    private val _feedEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 128)
+    /** couple/{cid}/feed 的原始 JSON 载荷（由 FeedRepository 解析合并）。 */
+    val feedEvents: kotlinx.coroutines.flow.SharedFlow<String> = _feedEvents
+
+    private val _chatEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 128)
+    /** couple/{cid}/chat 的原始 JSON 载荷（由 ChatRepository 解析合并）。 */
+    val chatEvents: kotlinx.coroutines.flow.SharedFlow<String> = _chatEvents
 
     private val _stats = MutableStateFlow(latency.snapshot())
     val stats: StateFlow<LatencyStats.Snapshot> = _stats.asStateFlow()
@@ -236,8 +250,15 @@ class MqttManager @Inject constructor(
             }
 
             override fun messageArrived(topicName: String?, message: MqttMessage?) {
-                if (message == null || topicName != topic) return
-                onPresence(t, message)
+                if (message == null || topicName == null) return
+                if (topicName == topic) {
+                    onPresence(t, message)
+                } else if (topicName == MqttTopics.feed(t.coupleId)) {
+                    // 服务端事件：载荷原样下发，解析与合并在 FeedRepository（坏载荷不影响连接）。
+                    _feedEvents.tryEmit(message.payload.toString(Charsets.UTF_8))
+                } else if (topicName == MqttTopics.chat(t.coupleId)) {
+                    _chatEvents.tryEmit(message.payload.toString(Charsets.UTF_8))
+                }
             }
 
             override fun deliveryComplete(token: IMqttDeliveryToken?) = Unit
@@ -250,6 +271,8 @@ class MqttManager @Inject constructor(
             connectedBefore = true
             // Re-subscribing is cheap and also restores the subscription if the broker expired our session.
             c.subscribe(topic, 1).await()
+            c.subscribe(MqttTopics.feed(t.coupleId), 1).await()
+            c.subscribe(MqttTopics.chat(t.coupleId), 1).await()
             c.publish(topic, presenceBytes(t.userId, online = true, track = true), 1, true).await()
             _state.value = MqttState.Connected(t.url)
             publishStats("connected")

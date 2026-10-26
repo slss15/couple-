@@ -6,7 +6,9 @@ import type {
   BootstrapPubkey,
   BootstrapResponse,
   Couple,
+  DeviceReportView,
   HealthInfo,
+  ReleaseHealthView,
   ReleasePatch,
   ReleaseSettingsUpdate,
   ReleaseSettingsView,
@@ -74,4 +76,7 @@ export const api = {
   putReleaseSettings: (s: ReleaseSettingsUpdate) =>
     http.put<ReleaseSettingsView>('/admin/releases/settings', s).then((r) => r.data),
   serverUpdateStatus: () => http.get<ServerUpdateStatus>('/admin/server/update-status').then((r) => r.data),
+  releaseHealth: (versionCode: number) =>
+    http.get<ReleaseHealthView[]>(`/admin/releases/${versionCode}/health`).then((r) => r.data),
+  devices: () => http.get<DeviceReportView[]>('/admin/devices').then((r) => r.data),
 }

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { Brush, DataLine, Document, Grid, Odometer, Setting, Connection, Iphone, Upload } from '@element-plus/icons-vue'
+import { Brush, DataLine, Document, Grid, Monitor, Odometer, Setting, Connection, Iphone, Upload } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -34,6 +34,7 @@ async function onLogout() {
         <el-menu-item index="/dashboard"><el-icon><Odometer /></el-icon><span>仪表盘</span></el-menu-item>
         <el-menu-item index="/config"><el-icon><Setting /></el-icon><span>服务器配置</span></el-menu-item>
         <el-menu-item index="/releases"><el-icon><Upload /></el-icon><span>版本发布</span></el-menu-item>
+        <el-menu-item index="/devices"><el-icon><Monitor /></el-icon><span>设备</span></el-menu-item>
         <el-menu-item index="/bootstrap"><el-icon><Iphone /></el-icon><span>引导二维码</span></el-menu-item>
         <el-menu-item index="/audit"><el-icon><Document /></el-icon><span>审计日志</span></el-menu-item>
         <el-menu-item-group title="即将推出">

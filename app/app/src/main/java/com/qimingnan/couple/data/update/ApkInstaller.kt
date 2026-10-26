@@ -94,7 +94,8 @@ class ApkInstaller @Inject constructor(@ApplicationContext private val context: 
     private fun installViaShizuku(apk: File): InstallOutcome {
         val service = IShizukuService.Stub.asInterface(Shizuku.getBinder()) ?: error("Shizuku binder unavailable")
         val component = "${context.packageName}/${MainActivity::class.java.name}"
-        val cmd = "pm install -r -S ${apk.length()} && am start -n $component"
+        // -i keeps us the installer of record (docs/ota-design.md §9-2): ROM app stores cannot silently replace us.
+        val cmd = "pm install -r -S ${apk.length()} -i ${context.packageName} && am start -n $component"
         val proc = service.newProcess(arrayOf("sh", "-c", cmd), null, null) ?: error("Shizuku newProcess returned null")
         try {
             ParcelFileDescriptor.AutoCloseOutputStream(proc.outputStream).use { out ->

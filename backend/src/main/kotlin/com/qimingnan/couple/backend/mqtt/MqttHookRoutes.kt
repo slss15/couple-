@@ -50,7 +50,12 @@ fun Route.mqttHookRoutes(config: AppConfig, access: MqttAccessService) {
         post("/acl") {
             call.guard()
             val req = call.receive<MqttAclRequest>()
-            val ok = access.canAccess(req.username, req.topic)
+            // EMQX sends action=publish|subscribe; anything else is treated as a read.
+            val ok = if (req.action == "publish") {
+                access.canWrite(req.username, req.topic)
+            } else {
+                access.canRead(req.username, req.topic)
+            }
             call.respond(MqttAclResponse(if (ok) "allow" else "deny"))
         }
     }

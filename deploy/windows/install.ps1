@@ -40,6 +40,8 @@ param(
     [switch]$CloudflaredOnly,
     # Do not register the watchdog scheduled task (\Couple\couple-watchdog). Implied by -NoStart for a fresh install.
     [switch]$NoWatchdog,
+    # Do not register the daily backup scheduled task (\Couple\couple-backup). Implied by -NoStart for a fresh install.
+    [switch]$NoBackup,
     # Install this package even when it is older than the release in releases\CURRENT (manual rollback).
     [switch]$AllowDowngrade
 )
@@ -62,6 +64,24 @@ function Install-WinswService([string]$Name, [string]$WinswExe) {
 }
 
 $script:WatchdogTask = '\Couple\couple-watchdog'
+
+# Installs <InstallDir>\scripts\backup.ps1 (+ lib) and, when [Register], registers the daily task \Couple\couple-backup
+# (unless BACKUP_ENABLED=false in couple.env). Backup files land in <InstallDir>\backups (SETUP-windows.md 10.7).
+function Install-Backup([string]$Pkg, [string]$Dir, [bool]$Register) {
+    $bd = Join-Path $Dir 'scripts'
+    New-Item -ItemType Directory -Force -Path (Join-Path $bd 'lib') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $Pkg 'backup.ps1') -Destination (Join-Path $bd 'backup.ps1') -Force
+    Copy-Item -LiteralPath (Join-Path $Pkg 'lib\common.ps1') -Destination (Join-Path $bd 'lib\common.ps1') -Force
+    # The task runs these files as SYSTEM: only Administrators / SYSTEM may change them.
+    Protect-Directory $bd
+    $cfg = Read-KeyValueFile (Join-Path $Dir 'config\couple.env')
+    if ($cfg['BACKUP_ENABLED'] -match '^(?i:false|0|no|off)$') { Write-Host '    backup disabled (BACKUP_ENABLED=false)'; return }
+    $exists = (Invoke-NativeCapture 'schtasks.exe' @('/Query', '/TN', '\Couple\couple-backup')).ExitCode -eq 0
+    if (-not $Register -and -not $exists) { Write-Host '    backup task not registered (-NoBackup / -NoStart)'; return }
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & $ps -NoProfile -ExecutionPolicy Bypass -File (Join-Path $bd 'backup.ps1') -Install -InstallDir $Dir
+    if ($LASTEXITCODE -ne 0) { throw "registering $bd\backup.ps1 task failed" }
+}
 
 function Install-Watchdog([string]$Pkg, [string]$Dir, [bool]$Register) {
     $wd = Join-Path $Dir 'watchdog'
@@ -246,6 +266,9 @@ try {
 
     Write-Step 'Watchdog (scheduled task)'
     Install-Watchdog $pkg $InstallDir (-not $NoStart -and -not $NoWatchdog)
+
+    Write-Step 'Backup (scheduled task)'
+    Install-Backup $pkg $InstallDir (-not $NoStart -and -not $NoBackup)
 
     if ($NoStart) {
         Write-Step 'Done (-NoStart: services registered but not started)'
