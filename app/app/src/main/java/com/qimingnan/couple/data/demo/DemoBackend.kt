@@ -120,13 +120,14 @@ object DemoBackend {
         val media = p.media.joinToString(",") {
             """{"storageKey":"${it.key}","thumbKey":null,"mimeType":"${it.mime}","width":${it.w},"height":${it.h},"size":${it.bytes.size}}"""
         }
-        val comments = p.comments.map { (id, both) ->
+        val commentList = p.comments.map { (id, both) ->
             val (author, text) = both.split("|", limit = 2)
             commentJson(id, author, text, p.createdAt + 60_000)
-        }.joinToString(",")
+        }
+        val comments = commentList.joinToString(",")
         return """{"id":"${p.id}","coupleId":"$COUPLE_ID","authorId":"${p.authorId}","text":${JsonPrimitive(p.text)},""" +
             """"media":[$media],"createdAt":${p.createdAt},"likes":{"count":${p.likeCount()},"likedByMe":${p.likedBySelf}},""" +
-            """"comments":[$comments],"commentCount":${comments.size}}"""
+            """"comments":[$comments],"commentCount":${commentList.size}}"""
     }
 
     private fun emit(payload: String) {
