@@ -2,6 +2,9 @@ package com.qimingnan.couple.ui.main
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Favorite
@@ -40,6 +43,16 @@ enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: Im
 fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
     val t = LocalCoupleTokens.current
     var tab by rememberSaveable { mutableStateOf(MainTab.Chat) }
+    var showScheduled by rememberSaveable { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = showScheduled) { showScheduled = false }
+    if (showScheduled) {
+        com.qimingnan.couple.ui.chat.ScheduledScreen(
+            vm = hiltViewModel(),
+            onBack = { showScheduled = false },
+            modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
+        )
+        return
+    }
     Scaffold(
         containerColor = t.colors.background,
         contentColor = t.colors.onBackground,
@@ -67,7 +80,7 @@ fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
             MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, modifier = Modifier.padding(padding))
             MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
-            MainTab.Chat -> ChatScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
+            MainTab.Chat -> ChatScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding), onOpenScheduled = { showScheduled = true })
         }
     }
 }

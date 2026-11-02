@@ -170,6 +170,17 @@ Scope: text, images, stickers (表情包), reply/quote, recall, read receipts, o
 - Images / stickers: the outbox uploads a picked image (compressed like Feed: longest side 2048, JPEG 85, kept under filesDir/outbox until sent) before POSTing the message; stickers are sent by URL. Bubbles show the media (thumb for images, original for stickers so GIFs animate); tap opens a full-screen viewer.
 - Debug demo account: DemoBackend implements these endpoints in memory (image messages via its in-memory /media; sticker search returns built-in sample URLs, or proxies oiapi directly when online) and the partner "TA（演示）" auto-replies ~1.5 s later, showing "正在输入" for ~1 s first; events (chat and typing) reach the app through an in-process flow instead of MQTT.
 
+### Scheduled messages (定时消息)
+- Rules live on the server; it sends each due rule as a normal chat message from the creator (same MQTT `message` push), so delivery does not depend on the phone being on. Max 50 active rules per user (409 SCHEDULE_LIMIT).
+- `GET /chat/scheduled` → `{items:[ScheduledMessage]}`, newest first (own rules only).
+- `POST /chat/scheduled` `{type:"text"|"image"|"sticker", text?, mediaId?, stickerUrl?, rule, tz?}` → ScheduledMessage. `tz` defaults to `Asia/Shanghai`. A ONCE rule whose `at` is not in the future → 400 SCHEDULE_IN_PAST.
+- `PATCH /chat/scheduled/{id}` `{paused?, text?, rule?, tz?}` → ScheduledMessage. `text` is editable on text rules only. Resuming recomputes nextFireAt from now (missed fires are skipped). A finished ONCE rule (nextFireAt=null) can't be resumed as-is → 409 SCHEDULE_FINISHED; give it a new rule/time to reuse it (text rules only).
+- `DELETE /chat/scheduled/{id}` → 204 (404 SCHEDULE_NOT_FOUND).
+- Rule JSON: `{kind:"ONCE", at:<epoch ms>}` | `{kind:"DAILY", time:"HH:mm"}` | `{kind:"WEEKLY", time, dayOfWeek:1..7 (Mon=1)}` | `{kind:"YEARLY", time, month:1..12, day}`; `time` is local to `tz`. YEARLY Feb 29 fires on Feb 28 in non-leap years.
+- ScheduledMessage: `{id, senderId, type, text, mediaId?, width?, height?, rule, tz, nextFireAt (null = finished), paused, lastFiredAt?, createdAt}`.
+- Media: an image rule owns its media; each fire copies it into a new media object for that message, so deleting the rule never breaks sent messages. A sticker is downloaded once at creation (same checks as sending a sticker) and then treated like an image.
+- App: long-press the send button → 定时发送 dialog (date, time, 单次/每天/每周/每年), text only; the header's calendar icon opens the list (describe + next time or 已发送, pause switch, delete). Errors are shown as a toast. The demo backend implements all four endpoints in memory and fires due rules every 5 s.
+
 ## Feed (P1: 动态) — authoritative for backend + app
 Scope of P1 feed: posts with text + images, likes, comments, deletion. Video/voice posts come later. Uses the shared media storage below.
 

@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
@@ -69,13 +70,19 @@ private fun chatTime(ts: Long): String =
 
 /** 聊天 P1a（contract "Chat"）：文本、引用回复、撤回、已读、离线 outbox、上滑加载更早。 */
 @Composable
-fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
+fun ChatScreen(
+    vm: ChatViewModel,
+    modifier: Modifier = Modifier,
+    onOpenScheduled: () -> Unit = {},
+    scheduledVm: ScheduledViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+) {
     val t = LocalCoupleTokens.current
     val state by vm.state.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
     var replyingTo by rememberSaveable { mutableStateOf<String?>(null) }
     var actionFor by rememberSaveable { mutableStateOf<String?>(null) }
     var stickerOpen by rememberSaveable { mutableStateOf(false) }
+    var scheduleOpen by rememberSaveable { mutableStateOf(false) }
     var viewing by remember { mutableStateOf<String?>(null) } // 全屏查看的图片地址
     val stickers by vm.stickers.collectAsStateWithLifecycle()
     val stickerLoading by vm.stickerLoading.collectAsStateWithLifecycle()
@@ -105,7 +112,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
     }
 
     Column(modifier.fillMaxSize().imePadding()) {
-        ChatHeader(name = state.partnerName, online = state.partnerOnline, typing = state.partnerTyping)
+        ChatHeader(name = state.partnerName, online = state.partnerOnline, typing = state.partnerTyping, onOpenScheduled = onOpenScheduled)
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (state.empty) {
@@ -164,6 +171,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
                     replyingTo = null
                 }
             },
+            onLongPressSend = { if (input.isNotBlank()) scheduleOpen = true },
             onPickImage = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             stickerOpen = stickerOpen,
             onToggleSticker = { stickerOpen = !stickerOpen },
@@ -180,6 +188,15 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
                 },
             )
         }
+    }
+
+    if (scheduleOpen) {
+        ScheduleSendDialog(
+            text = input,
+            vm = scheduledVm,
+            onDismiss = { scheduleOpen = false },
+            onCreated = { scheduleOpen = false; input = "" },
+        )
     }
 
     viewing?.let { model ->
@@ -215,7 +232,7 @@ fun ChatScreen(vm: ChatViewModel, modifier: Modifier = Modifier) {
 private const val RECALL_WINDOW_MS = 120_000L
 
 @Composable
-private fun ChatHeader(name: String, online: Boolean, typing: Boolean) {
+private fun ChatHeader(name: String, online: Boolean, typing: Boolean, onOpenScheduled: () -> Unit = {}) {
     val t = LocalCoupleTokens.current
     Surface(color = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
         Row(
@@ -237,6 +254,10 @@ private fun ChatHeader(name: String, online: Boolean, typing: Boolean) {
                     style = t.typography.caption,
                     color = if (typing) t.colors.primary else t.colors.onSurfaceVariant,
                 )
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onOpenScheduled, modifier = Modifier.size(t.spacing.minTouchTarget)) {
+                Icon(Icons.Filled.DateRange, contentDescription = stringResource(R.string.sched_open), tint = t.colors.onSurfaceVariant)
             }
         }
     }
@@ -356,6 +377,7 @@ private fun MessageBubble(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatComposer(
     value: String,
@@ -363,6 +385,7 @@ private fun ChatComposer(
     replyText: String?,
     onCancelReply: () -> Unit,
     onSend: () -> Unit,
+    onLongPressSend: () -> Unit = {},
     onPickImage: () -> Unit = {},
     stickerOpen: Boolean = false,
     onToggleSticker: () -> Unit = {},
@@ -402,7 +425,20 @@ private fun ChatComposer(
                     shape = t.shapes.medium,
                     textStyle = t.typography.body,
                 )
-                IconButton(onClick = onSend, enabled = value.isNotBlank(), modifier = Modifier.size(t.spacing.minTouchTarget)) {
+                // 点按 = 发送；长按 = 定时发送
+                Box(
+                    Modifier
+                        .size(t.spacing.minTouchTarget)
+                        .clip(t.shapes.medium)
+                        .combinedClickable(
+                            enabled = value.isNotBlank(),
+                            onClickLabel = stringResource(R.string.chat_send),
+                            onLongClickLabel = stringResource(R.string.sched_send_title),
+                            onLongClick = onLongPressSend,
+                            onClick = onSend,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = stringResource(R.string.chat_send),

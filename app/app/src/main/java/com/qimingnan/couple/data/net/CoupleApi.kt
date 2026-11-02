@@ -6,6 +6,7 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Multipart
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Part
@@ -110,6 +111,19 @@ interface CoupleApi {
 
     @GET("chat/state")
     suspend fun chatState(): ChatReadState
+
+    // ---- 定时消息（contract "Chat → Scheduled messages"）----
+    @GET("chat/scheduled")
+    suspend fun scheduledList(): ScheduledList
+
+    @POST("chat/scheduled")
+    suspend fun createScheduled(@Body body: CreateScheduledRequest): ScheduledMessage
+
+    @PATCH("chat/scheduled/{id}")
+    suspend fun patchScheduled(@Path("id") id: String, @Body body: PatchScheduledRequest): ScheduledMessage
+
+    @DELETE("chat/scheduled/{id}")
+    suspend fun deleteScheduled(@Path("id") id: String): Response<Unit>
 
     /** Also reports this device's app/partner-protocol versions to the server (OTA v2 partner gate). */
     @GET("app/update")
