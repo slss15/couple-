@@ -21,6 +21,8 @@ data class StoredConfig(
     val storage: JsonObject = JsonObject(emptyMap()),
     /** Out-of-band alert channel config, e.g. {"wxpusher": {"appToken": "<secret>", "uids": [...]}}. */
     val notify: JsonObject = JsonObject(emptyMap()),
+    /** Sticker search fallback (apihz), e.g. {"apihz": {"id": "...", "apiKey": "<secret>"}}. Optional. */
+    val stickers: JsonObject = JsonObject(emptyMap()),
 )
 
 /** Body of PUT /admin/config. */
@@ -31,6 +33,7 @@ data class AdminConfigUpdate(
     val turn: JsonObject? = null,
     val storage: JsonObject? = null,
     val notify: JsonObject? = null,
+    val stickers: JsonObject? = null,
 )
 
 /**
@@ -44,6 +47,7 @@ data class AdminConfigView(
     val turn: JsonObject,
     val storage: JsonObject,
     val notify: JsonObject,
+    val stickers: JsonObject = JsonObject(emptyMap()),
     val configVersion: Long,
     val updatedAt: Long?,
     /** Values derived from the request (forwarded headers) for empty fields; see contract "First-run setup". */
@@ -86,6 +90,7 @@ class AdminConfigService(private val db: Db, private val config: AppConfig) {
                 turn = req.turn?.let { mergeSecrets(cur.stored.turn, it, "turn", changedSecrets) } ?: cur.stored.turn,
                 storage = req.storage?.let { mergeSecrets(cur.stored.storage, it, "storage", changedSecrets) } ?: cur.stored.storage,
                 notify = req.notify?.let { mergeSecrets(cur.stored.notify, it, "notify", changedSecrets) } ?: cur.stored.notify,
+                stickers = req.stickers?.let { mergeSecrets(cur.stored.stickers, it, "stickers", changedSecrets) } ?: cur.stored.stickers,
             )
             val version = cur.version + 1
             SettingsRepo.put(KEY_CONFIG, AppJson.encodeToString(StoredConfig.serializer(), next), now)
@@ -132,6 +137,7 @@ class AdminConfigService(private val db: Db, private val config: AppConfig) {
         turn = mask(stored.turn),
         storage = mask(stored.storage),
         notify = mask(stored.notify),
+        stickers = mask(stored.stickers),
         configVersion = version,
         updatedAt = updatedAt,
     )

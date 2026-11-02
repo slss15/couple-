@@ -11,6 +11,14 @@ import io.ktor.server.routing.post
 
 /** Chat P1a (contract "Chat"). Must be mounted inside authenticate(JWT_AUTH). */
 fun Route.chatRoutes(service: ChatService) {
+    get("/chat/stickers/search") {
+        val svc = service.stickers ?: throw badRequest("VALIDATION_ERROR", "stickers are not available")
+        service.requirePaired(call.authUser())
+        val page = call.request.queryParameters["page"]?.let {
+            it.toIntOrNull() ?: throw badRequest("VALIDATION_ERROR", "page must be an integer")
+        }
+        call.respond(svc.search(call.request.queryParameters["q"], page))
+    }
     post("/chat/messages") {
         call.respond(service.send(call.authUser(), call.receive<SendMessageRequest>()))
     }

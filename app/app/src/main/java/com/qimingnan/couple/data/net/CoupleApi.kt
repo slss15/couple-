@@ -105,6 +105,9 @@ interface CoupleApi {
     @POST("chat/read")
     suspend fun markChatRead(@Body body: ChatReadRequest): Response<Unit>
 
+    @GET("chat/stickers/search")
+    suspend fun searchStickers(@Query("q") q: String, @Query("page") page: Int = 1): List<StickerResult>
+
     @GET("chat/state")
     suspend fun chatState(): ChatReadState
 

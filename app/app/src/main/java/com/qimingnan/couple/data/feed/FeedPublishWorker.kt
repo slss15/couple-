@@ -28,21 +28,27 @@ class FeedPublishWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val postId = inputData.getString(KEY_POST_ID) ?: return Result.failure()
-        val done = runCatching { repo.sendPending(postId) }.getOrDefault(false)
-        return if (done) Result.success() else Result.retry()
+        return when (runCatching { repo.sendPending(postId) }.getOrDefault(FeedRepository.SendOutcome.RETRY)) {
+            FeedRepository.SendOutcome.DONE -> Result.success()
+            FeedRepository.SendOutcome.RETRY -> Result.retry()
+            // 已标记 FAILED：结束这条工作，等用户点「重试」（REPLACE 重新入队），不在后台无限退避
+            FeedRepository.SendOutcome.FAILED -> Result.failure()
+        }
     }
 
     companion object {
         const val KEY_POST_ID = "postId"
 
-        fun enqueue(context: Context, postId: String) {
+        fun enqueue(context: Context, postId: String, requireNetwork: Boolean = true, replace: Boolean = false) {
+            val net = if (requireNetwork) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED
             val req = OneTimeWorkRequestBuilder<FeedPublishWorker>()
                 .setInputData(workDataOf(KEY_POST_ID to postId))
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(net).build())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
-            // APPEND：按入队顺序逐条发（帖子之间的时间顺序尽量保持）
-            WorkManager.getInstance(context).enqueueUniqueWork("feed-publish-$postId", ExistingWorkPolicy.KEEP, req)
+            // 每帖一条唯一工作；手动重试用 REPLACE，避免被仍在退避中的旧工作吞掉
+            val policy = if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
+            WorkManager.getInstance(context).enqueueUniqueWork("feed-publish-$postId", policy, req)
         }
     }
 }

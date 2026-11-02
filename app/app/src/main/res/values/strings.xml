@@ -94,6 +94,11 @@
     <string name="chat_empty_hint">和 TA 说第一句话吧</string>
     <string name="chat_input_hint">说点什么…</string>
     <string name="chat_send">发送</string>
+    <string name="chat_pick_image">发送图片</string>
+    <string name="chat_sticker">表情包</string>
+    <string name="chat_sticker_search_hint">搜索表情包，如「开心」</string>
+    <string name="chat_sticker_hint">输入关键词搜索表情包</string>
+    <string name="chat_sticker_empty">没有找到表情包</string>
     <string name="chat_reply">回复</string>
     <string name="chat_recall">撤回</string>
     <string name="chat_recalled">消息已撤回</string>

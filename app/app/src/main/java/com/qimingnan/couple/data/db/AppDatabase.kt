@@ -102,7 +102,7 @@ interface ProfileDao {
         UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class,
         ChatMessageEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -142,6 +142,18 @@ abstract class AppDatabase : RoomDatabase() {
                         "`sortAt` INTEGER NOT NULL, `recalledAt` INTEGER, `pendingState` TEXT, PRIMARY KEY(`id`))",
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_messages_sortAt` ON `chat_messages` (`sortAt`)")
+            }
+        }
+
+        /** v3 → v4：聊天图片/表情包列（纯新增，可空或带默认值）。 */
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `type` TEXT NOT NULL DEFAULT 'text'")
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `mediaId` TEXT")
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `width` INTEGER")
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `height` INTEGER")
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `localUri` TEXT")
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `stickerUrl` TEXT")
             }
         }
     }
