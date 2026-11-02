@@ -41,7 +41,7 @@ try {
     $ErrorActionPreference = $old
 }
 
-foreach ($name in @('couple-cloudflared', 'couple-updater', 'couple-backend')) {
+foreach ($name in @('couple-tunnelwatch', 'couple-cloudflared', 'couple-updater', 'couple-backend')) {
     $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
     if ($null -eq $svc) { continue }
     if ($svc.Status -ne 'Stopped') {

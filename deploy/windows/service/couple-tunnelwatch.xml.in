@@ -1,0 +1,25 @@
+<!--
+  WinSW 2.x config of the couple-tunnelwatch service, rendered by install.ps1 into @INSTALL_DIR@\services\.
+  Runs watchdog\tunnel-watchdog.ps1 in a loop: probes https://<hostname>/api/v1/health every 60 s and restarts
+  couple-cloudflared after 3 consecutive failures while the local /api/v1/health is OK (at most once per 5 min).
+  Its own log: @INSTALL_DIR@\logs\tunnel-watchdog.log; WinSW's stdout/stderr wrapper logs land next to it.
+-->
+<service>
+  <id>couple-tunnelwatch</id>
+  <name>Couple Tunnel Watchdog</name>
+  <description>Restarts couple-cloudflared when the public health URL fails through the tunnel</description>
+  <executable>%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe</executable>
+  <arguments>-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "@INSTALL_DIR@\watchdog\tunnel-watchdog.ps1" -InstallDir "@INSTALL_DIR@"</arguments>
+  <workingdirectory>@INSTALL_DIR@</workingdirectory>
+  <logpath>@INSTALL_DIR@\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>1024</sizeThreshold>
+    <keepFiles>3</keepFiles>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>10 sec</stoptimeout>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart/>
+</service>

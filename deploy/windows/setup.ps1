@@ -18,7 +18,9 @@
     3. JAVA_OPTS -Xmx by RAM (only while JAVA_OPTS is not customized)
     4. SETUP_TOKEN for the first-run page https://<host>/setup?token=...
     5. Cloudflare Tunnel: cloudflared login (browser), tunnel create/reuse, DNS route, credentials
-    6. install.ps1 (services + local health check), then https://<host>/api/v1/health through the tunnel
+    6. install.ps1 (services + local health check, plus the couple-tunnelwatch service that restarts cloudflared
+       after 3 failed public probes in a row; -NoTunnelWatch skips it), then https://<host>/api/v1/health through
+       the tunnel
     7. prints the admin link and the GitHub Secrets; saves them to <InstallDir>\SETUP-RESULT.txt (admins only)
   This file is saved as UTF-8 with BOM so Windows PowerShell 5.1 reads its Chinese messages correctly.
 #>
@@ -42,6 +44,8 @@ param(
     [switch]$SkipTunnel,
     # Continue even when doctor.ps1 reports FAIL (it still runs and prints its table).
     [switch]$IgnoreDoctor,
+    # Passed to install.ps1: do not install the couple-tunnelwatch service (cloudflared drop-out auto-restart).
+    [switch]$NoTunnelWatch,
     # Passed to install.ps1: allow installing this package over a newer installed release (manual rollback).
     [switch]$AllowDowngrade
 )
@@ -485,6 +489,7 @@ try {
     Enter-Step 5 'Cloudflare Tunnel'
     $installArgs = @{ InstallDir = $InstallDir }
     if ($AllowDowngrade) { $installArgs['AllowDowngrade'] = $true }
+    if ($NoTunnelWatch) { $installArgs['NoTunnelWatch'] = $true }
     if ($SkipTunnel) {
         Write-Info '-SkipTunnel：跳过（只在本机 127.0.0.1 可访问）'
     } else {
@@ -503,6 +508,11 @@ try {
         Write-Info "经 Cloudflare 检查 $healthUrl（最多 60 秒）"
         $publicOk = Test-PublicHealth $healthUrl 60
         if ($publicOk) { Write-Ok '公网访问正常' } else { Write-Warning "公网暂时访问不到 $healthUrl（DNS 生效可能要几分钟）；稍后在浏览器里再试，仍不行看附录 11 故障排查" }
+    }
+    $tunnelWatchState = Get-ServiceState 'couple-tunnelwatch'
+    if (-not $SkipTunnel -and -not $NoTunnelWatch) {
+        if ($tunnelWatchState -eq 'Running') { Write-Ok '掉线自动重启已开启（couple-tunnelwatch：每 60 秒探测公网，连续 3 次失败重启 cloudflared）' }
+        else { Write-Warning "couple-tunnelwatch 状态：$tunnelWatchState（cloudflared 掉线不会自动重启；看 $InstallDir\logs\tunnel-watchdog.log）" }
     }
 
     Enter-Step 7 '完成'
@@ -528,6 +538,7 @@ try {
         '  ④ 在管理后台生成“引导二维码”，两台手机扫码。',
         '',
         "  公网健康检查：$(if ($SkipTunnel) { '已跳过（-SkipTunnel）' } elseif ($publicOk) { '正常' } else { '暂未通过，稍后重试' })",
+        "  掉线自动重启：$(if ($SkipTunnel -or $NoTunnelWatch) { '未启用' } elseif ($tunnelWatchState -eq 'Running') { '已开启（couple-tunnelwatch）' } else { "未运行（$tunnelWatchState）" })",
         "  配置文件：$script:envFile",
         $(if (Test-Path -LiteralPath $script:rootFile) { "  MySQL root 密码：$script:rootFile" } else { $null }),
         "  安装日志：$log",
