@@ -30,6 +30,11 @@ import com.qimingnan.couple.ui.chat.ChatScreen
 import com.qimingnan.couple.ui.feed.FeedScreen
 import com.qimingnan.couple.ui.me.MeScreen
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.qimingnan.couple.data.settings.TabVisibility
+import com.qimingnan.couple.ui.settings.SettingsScreen
+import com.qimingnan.couple.ui.settings.SettingsViewModel
 
 /** 底部四个 Tab；id 与布局 JSON 的 bottomBar 条目一致（me_entry 为锁定项）。 */
 enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: ImageVector) {
@@ -40,11 +45,33 @@ enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: Im
 }
 
 @Composable
-fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
+fun MainShell(
+    onRescan: () -> Unit,
+    onOpenKeepAlive: () -> Unit = {},
+    settingsVm: SettingsViewModel = hiltViewModel(),
+) {
     val t = LocalCoupleTokens.current
+    val settings by settingsVm.settings.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(MainTab.Chat) }
     var showScheduled by rememberSaveable { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    val allIds = MainTab.entries.map { it.layoutId }
+    val visibleIds = TabVisibility.visible(allIds, settings.hiddenTabs)
+    val visibleTabs = MainTab.entries.filter { it.layoutId in visibleIds }
+    LaunchedEffect(settings.hiddenTabs, tab) {
+        val resolved = TabVisibility.resolveSelected(tab.layoutId, allIds, settings.hiddenTabs)
+        if (resolved != tab.layoutId) tab = MainTab.entries.first { it.layoutId == resolved }
+    }
     androidx.activity.compose.BackHandler(enabled = showScheduled) { showScheduled = false }
+    androidx.activity.compose.BackHandler(enabled = showSettings) { showSettings = false }
+    if (showSettings) {
+        SettingsScreen(
+            vm = settingsVm,
+            onBack = { showSettings = false },
+            modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
+        )
+        return
+    }
     if (showScheduled) {
         com.qimingnan.couple.ui.chat.ScheduledScreen(
             vm = hiltViewModel(),
@@ -58,7 +85,7 @@ fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
         contentColor = t.colors.onBackground,
         bottomBar = {
             NavigationBar(containerColor = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
-                MainTab.entries.forEach { item ->
+                visibleTabs.forEach { item ->
                     NavigationBarItem(
                         selected = tab == item,
                         onClick = { tab = item },
@@ -77,7 +104,7 @@ fun MainShell(onRescan: () -> Unit, onOpenKeepAlive: () -> Unit = {}) {
         },
     ) { padding ->
         when (tab) {
-            MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, modifier = Modifier.padding(padding))
+            MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, onOpenSettings = { showSettings = true }, modifier = Modifier.padding(padding))
             MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Chat -> ChatScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding), onOpenScheduled = { showScheduled = true })
