@@ -48,7 +48,13 @@ Placeholder app name: "Couple" (to be renamed). Android package: com.qimingnan.c
 
 ## MQTT (P0: connect-only, prove it works)
 - EMQX over WSS. Clients authenticate with username=userId, password=accessToken (EMQX HTTP auth hook -> POST /internal/mqtt/auth; ACL hook -> /internal/mqtt/acl).
-- Topic root: couple/{coupleId}/... ; a client can only access its own couple. Clients may **subscribe** to any topic under their couple; client **publishes** are limited to `couple/{cid}/presence` (retained, {userId, online, ts}). Server-push topics (`feed`, `chat`) are read-only for clients; the ACL hook receives `action` and enforces this per direction. P0 topic: couple/{cid}/presence (retained, {userId, online, ts}).
+- Topic root: couple/{coupleId}/... ; a client can only access its own couple. Clients may **subscribe** to any topic under their couple; client **publishes** are limited to `couple/{cid}/presence` (retained, {userId, online, ts}) and `couple/{cid}/typing` (QoS 0, not retained, see Chat §Typing). Server-push topics (`feed`, `chat`, `events`) are read-only for clients; the ACL hook receives `action` and enforces this per direction. P0 topic: couple/{cid}/presence (retained, {userId, online, ts}).
+- Per-user root: `user/{userId}/events` — a client may **subscribe** only to its own (exact topic, no wildcards; allowed even before pairing, when it has no coupleId); clients never publish under `user/`.
+
+### Pairing events (server → clients, P1)
+- `user/{userId}/events`, QoS 1, not retained: `{kind:"paired", coupleId}` — sent to the code owner when the partner joins with their code (there is no cid before pairing; the joiner already has the POST /pair/join response). Also `{kind:"unpaired", coupleId}` to both members after an unpair is confirmed (a client that reconnected after unpairing no longer holds its couple subscriptions).
+- `couple/{cid}/events`, QoS 1, not retained, subscribe-only: `{kind:"unpair_requested", requestId, by}` after POST /couple/unpair/request (both members receive it; the app shows a confirm prompt only when `by` is the partner) and `{kind:"unpaired", coupleId}` after the confirm.
+- Published after the DB commit through the same server-push path as chat/feed. MQTT is a hint: on `paired`/`unpaired` the app refreshes the access token (cid claim) and GET /couple; the code owner keeps a slow fallback poll (every 15 s) of GET /couple while the code is shown.
 
 ## Env (backend)
 DB_URL, DB_USER, DB_PASSWORD, JWT_SECRET, REGISTRATION_CODE(optional), BOOTSTRAP_PRIVATE_KEY(optional), ADMIN_USERNAME(optional), SETUP_TOKEN(optional), DATA_DIR(optional), PORT=8080. Never commit secrets; ship .env.example only.
@@ -149,10 +155,15 @@ Scope of P1a: text only, reply/quote, recall, read receipts, offline outbox. Ima
 - The server publishes after the DB commit (embedded broker: internal publish; EMQX: its HTTP publish API, env EMQX_API_URL/EMQX_API_KEY/EMQX_API_SECRET — missing config just disables push, catch-up still works). Clients may only **subscribe** to couple/{cid}/chat; client publishes to it are denied by ACL.
 - MQTT is a hint, not the source of truth: on every (re)connect and on app foreground the client calls GET /chat/messages?after=<last known id> until hasMore=false, and GET /chat/state.
 
+### Typing (client ↔ client)
+- Topic couple/{cid}/typing, QoS 0, not retained. Clients may publish **and** subscribe (ACL); the server does not store or relay anything itself. Payload {userId, typing:Boolean, ts}.
+- Sender: typing=true at most once per 3 s while the input text changes; typing=false on send, when the input is cleared, or after 5 s without changes (only if a true was sent).
+- Receiver: ignore its own echo (userId = self); show "TA 正在输入…" while the partner's last event is typing=true and under 6 s old (measured from local receive time, so clock skew does not matter); typing=false hides it at once.
+
 ### App rules
 - Room is the source the UI renders. Sending = insert locally with state=PENDING → outbox worker POSTs (retry with backoff while offline, survives process death) → SENT with server createdAt. 4xx other than 409/429 → FAILED (tap to retry). Duplicate events (MQTT + catch-up) are merged by id.
-- Read: when the chat screen is visible, POST /chat/read with the newest partner message id (debounced). Show "已读" under my last message that is ≤ partnerReadUpTo.
-- Debug demo account: DemoBackend implements these endpoints in memory and the partner "TA（演示）" auto-replies ~1.5 s later; events reach the app through an in-process flow instead of MQTT.
+- Read: when the chat screen is visible, POST /chat/read with the newest partner message id (debounced). Every one of my confirmed messages whose (createdAt, id) ≤ that of the partnerReadUpTo message shows "已读", newer ones "未读"; unconfirmed ones show "发送中" / "发送失败，点按重试" (if the cursor message is not loaded locally, compare ULID ids).
+- Debug demo account: DemoBackend implements these endpoints in memory and the partner "TA（演示）" auto-replies ~1.5 s later, showing "正在输入" for ~1 s first; events (chat and typing) reach the app through an in-process flow instead of MQTT.
 
 ## Feed (P1: 动态) — authoritative for backend + app
 Scope of P1 feed: posts with text + images, likes, comments, deletion. Video/voice posts come later. Uses the shared media storage below.

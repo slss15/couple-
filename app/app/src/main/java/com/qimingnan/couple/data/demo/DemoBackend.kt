@@ -121,6 +121,17 @@ object DemoBackend {
     /** 与 MQTT couple/{cid}/chat 载荷同构的事件流。 */
     val chatEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
 
+    /** 演示模式的 couple/{cid}/typing：TA 自动回复前约 1 秒显示「正在输入」。 */
+    val typingEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
+
+    /** 自动回复前 TA「正在输入」的时长。 */
+    const val DEMO_TYPING_MS = 1_000L
+
+    private fun emitTyping(typing: Boolean) {
+        val now = System.currentTimeMillis()
+        demoScope.launch { typingEvents.emit("""{"userId":"${partner.id}","typing":$typing,"ts":$now}""") }
+    }
+
     init {
         seed()
         seedChat()
@@ -306,7 +317,10 @@ object DemoBackend {
     private fun scheduleDemoReply() {
         val replies = listOf("我在呢，怎么啦？", "刚看到～想你了", "好呀，听你的", "哈哈哈哈，真的吗？")
         demoScope.launch {
-            delay(1_500)
+            delay(500)
+            emitTyping(true)
+            delay(DEMO_TYPING_MS)
+            emitTyping(false)
             val id = Ulid.next()
             val at = System.currentTimeMillis()
             val reply = DemoChat(id, partner.id, replies[(chatMessages.size - 1) % replies.size], null, at, at, null)

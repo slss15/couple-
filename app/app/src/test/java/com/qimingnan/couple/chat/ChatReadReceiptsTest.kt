@@ -1,40 +1,66 @@
 package com.qimingnan.couple.chat
 
 import com.qimingnan.couple.data.chat.ChatReadReceipts
+import com.qimingnan.couple.data.chat.ChatRepository
+import com.qimingnan.couple.data.chat.ReceiptStatus
+import com.qimingnan.couple.data.chat.ReceiptStatus.FAILED
+import com.qimingnan.couple.data.chat.ReceiptStatus.READ
+import com.qimingnan.couple.data.chat.ReceiptStatus.SENDING
+import com.qimingnan.couple.data.chat.ReceiptStatus.UNREAD
 import com.qimingnan.couple.data.db.ChatMessageEntity
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatReadReceiptsTest {
 
-    private fun msg(id: String, sender: String, pending: String? = null) = ChatMessageEntity(
-        id = id, senderId = sender, text = id, replyTo = null, clientTs = 0, createdAt = 0,
-        sortAt = 0, recalledAt = null, pendingState = pending,
+    private fun msg(id: String, sender: String, at: Long, pending: String? = null) = ChatMessageEntity(
+        id = id, senderId = sender, text = id, replyTo = null, clientTs = at,
+        createdAt = if (pending == null) at else null, sortAt = at, recalledAt = null, pendingState = pending,
     )
 
     private val rows = listOf(
-        msg("m1", "me"),
-        msg("m2", "ta"),
-        msg("m3", "me", pending = "PENDING"),
-        msg("m4", "ta"),
-        msg("m5", "me"),
+        msg("m1", "me", 100),
+        msg("m2", "me", 200),
+        msg("t3", "ta", 300),
+        msg("m4", "me", 400),
+        msg("m5", "me", 500),
+        msg("m6", "me", 600, pending = ChatRepository.PENDING),
+        msg("m7", "me", 700, pending = ChatRepository.FAILED),
     )
 
-    @Test fun `last own confirmed message at or before the partner cursor`() {
-        // Cursor on a partner message: the previous own message is m1 (m3 is still pending).
-        assertEquals("m1", ChatReadReceipts.lastMineReadId(rows, "m4", "me"))
-        // Cursor on my own message includes it.
-        assertEquals("m5", ChatReadReceipts.lastMineReadId(rows, "m5", "me"))
-        assertEquals("m1", ChatReadReceipts.lastMineReadId(rows, "m2", "me"))
+    private fun st(cursor: String?, list: List<ChatMessageEntity> = rows) = ChatReadReceipts.statuses(list, cursor, "me")
+
+    @Test fun `every own message at or before the cursor is read, newer ones unread`() {
+        assertEquals(
+            mapOf("m1" to READ, "m2" to READ, "m4" to UNREAD, "m5" to UNREAD, "m6" to SENDING, "m7" to FAILED),
+            st("t3"),
+        )
+        // Cursor on my own message includes it and everything before it, not only the newest.
+        assertEquals(
+            mapOf("m1" to READ, "m2" to READ, "m4" to READ, "m5" to UNREAD, "m6" to SENDING, "m7" to FAILED),
+            st("m4"),
+        )
     }
 
-    @Test fun `no receipt without a known cursor or self`() {
-        assertNull(ChatReadReceipts.lastMineReadId(rows, null, "me"))
-        assertNull(ChatReadReceipts.lastMineReadId(rows, "unknown", "me"))
-        assertNull(ChatReadReceipts.lastMineReadId(rows, "m5", null))
-        // Cursor before my first message: nothing of mine is covered.
-        val taFirst = listOf(msg("t1", "ta"), msg("m1", "me"))
-        assertNull(ChatReadReceipts.lastMineReadId(taFirst, "t1", "me"))
+    @Test fun `ties on createdAt are broken by id`() {
+        val tie = listOf(msg("a1", "me", 100), msg("a2", "ta", 100), msg("a3", "me", 100))
+        assertEquals(mapOf("a1" to READ, "a3" to UNREAD), st("a2", tie))
+    }
+
+    @Test fun `no cursor means all confirmed own messages are unread`() {
+        val s = st(null)
+        assertEquals(UNREAD, s["m1"]); assertEquals(UNREAD, s["m5"])
+        assertEquals(SENDING, s["m6"]); assertEquals(FAILED, s["m7"])
+        assertTrue("partner messages carry no status", "t3" !in s)
+    }
+
+    @Test fun `cursor outside the loaded page falls back to ULID order`() {
+        val ulids = listOf(msg("01A", "me", 100), msg("01C", "me", 300))
+        assertEquals(mapOf<String, ReceiptStatus>("01A" to READ, "01C" to UNREAD), st("01B", ulids))
+    }
+
+    @Test fun `no self id gives nothing`() {
+        assertTrue(ChatReadReceipts.statuses(rows, "m5", null).isEmpty())
     }
 }

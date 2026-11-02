@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -113,6 +116,21 @@ fun CoupleRoot(deepLinkUri: String?, onDeepLinkConsumed: () -> Unit, vm: RootVie
         }
         // App self-update prompt (blocking when forced), above every screen.
         UpdateDialogHost()
+        // 对方发起的解绑申请（MQTT unpair_requested 推送）。
+        val unpair by vm.unpairPrompt.collectAsStateWithLifecycle()
+        unpair?.let { p ->
+            AlertDialog(
+                onDismissRequest = vm::dismissUnpairPrompt,
+                title = { Text(stringResource(R.string.unpair_prompt_title)) },
+                text = { Text(stringResource(R.string.unpair_prompt_body)) },
+                confirmButton = {
+                    TextButton(onClick = { vm.confirmUnpair(p.requestId) }) {
+                        Text(stringResource(R.string.me_unpair_confirm), color = t.colors.error)
+                    }
+                },
+                dismissButton = { TextButton(onClick = vm::dismissUnpairPrompt) { Text(stringResource(R.string.unpair_prompt_later)) } },
+            )
+        }
     }
 }
 

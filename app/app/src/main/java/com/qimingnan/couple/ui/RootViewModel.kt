@@ -7,6 +7,8 @@ import com.qimingnan.couple.data.auth.SessionState
 import com.qimingnan.couple.data.bootstrap.BootstrapStore
 import com.qimingnan.couple.data.couple.CoupleRepository
 import com.qimingnan.couple.data.couple.CoupleState
+import com.qimingnan.couple.data.couple.UnpairPrompt
+import com.qimingnan.couple.data.net.ApiResult
 import com.qimingnan.couple.data.net.humanMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharedFlow
@@ -62,6 +64,19 @@ class RootViewModel @Inject constructor(
                 .collect { need -> if (need) couple.refresh() }
         }
     }
+
+    /** 对方发起的解绑申请（MQTT 推送），弹确认框。 */
+    val unpairPrompt: StateFlow<UnpairPrompt?> = couple.unpairPrompt
+
+    fun confirmUnpair(requestId: String) {
+        viewModelScope.launch {
+            couple.dismissUnpairPrompt()
+            val r = couple.confirmUnpair(requestId)
+            if (r is ApiResult.Err) session.postMessage(r.error.humanMessage())
+        }
+    }
+
+    fun dismissUnpairPrompt() = couple.dismissUnpairPrompt()
 
     fun retry() {
         viewModelScope.launch { couple.refresh() }

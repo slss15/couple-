@@ -6,6 +6,10 @@ import com.qimingnan.couple.data.auth.SessionManager
 import com.qimingnan.couple.data.auth.SessionState
 import com.qimingnan.couple.data.chat.ChatReadReceipts
 import com.qimingnan.couple.data.chat.ChatRepository
+import com.qimingnan.couple.data.chat.ReceiptStatus
+import com.qimingnan.couple.data.chat.TypingEvent
+import com.qimingnan.couple.data.chat.TypingThrottle
+import com.qimingnan.couple.data.demo.DemoBackend
 import com.qimingnan.couple.data.couple.CoupleRepository
 import com.qimingnan.couple.data.couple.CoupleState
 import com.qimingnan.couple.data.db.ChatMessageEntity
@@ -19,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -41,9 +46,11 @@ class ChatViewModel @Inject constructor(
         val partnerOnline: Boolean = false,
         val hasMore: Boolean = false,
         val error: String? = null,
-        /** 我的最后一条「TA 已读」的消息 id（显示在气泡下方）。 */
-        val lastMineReadId: String? = null,
+        /** 我方每条消息的状态：已读 / 未读 / 发送中 / 失败（显示在气泡下方）。 */
+        val receipts: Map<String, ReceiptStatus> = emptyMap(),
         val empty: Boolean = true,
+        /** 伴侣正在输入（最后一次 typing=true 不超过 6 秒）。 */
+        val partnerTyping: Boolean = false,
     )
 
     private data class Core(
@@ -54,6 +61,10 @@ class ChatViewModel @Inject constructor(
     )
 
     private val names = MutableStateFlow<Map<String, String>>(emptyMap())
+    private val partnerTyping = MutableStateFlow(false)
+    private var partnerTypingJob: Job? = null
+    private val typingThrottle = TypingThrottle()
+    private var idleJob: Job? = null
     private var visible = false
     private var readJob: Job? = null
 
@@ -62,10 +73,10 @@ class ChatViewModel @Inject constructor(
             Core(rows, hasMore, error, readUpTo)
         },
         names,
-        mqtt.presence,
+        combine(mqtt.presence, partnerTyping, ::Pair),
         couple.state,
         session.state,
-    ) { core, nameMap, presence, coupleState, sessionState ->
+    ) { core, nameMap, (presence, typing), coupleState, sessionState ->
         val selfId = (sessionState as? SessionState.LoggedIn)?.user?.id
         val members = (coupleState as? CoupleState.Paired)?.couple?.members.orEmpty()
         val partnerId = members.firstOrNull { it.id != selfId }?.id
@@ -78,13 +89,18 @@ class ChatViewModel @Inject constructor(
             partnerOnline = partnerId?.let { presence[it]?.online } == true,
             hasMore = core.hasMore,
             error = core.error,
-            lastMineReadId = ChatReadReceipts.lastMineReadId(core.rows, core.partnerReadUpTo, selfId),
+            receipts = ChatReadReceipts.statuses(core.rows, core.partnerReadUpTo, selfId),
             empty = core.rows.isEmpty(),
+            partnerTyping = typing,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UiState())
 
     init {
         repo.start()
+        viewModelScope.launch {
+            // MQTT 与演示进程内流不会同时活跃；两个都收。
+            merge(mqtt.typingEvents, DemoBackend.typingEvents).collect { onTypingEvent(it) }
+        }
         viewModelScope.launch {
             profileDao.observeAll().collect { list ->
                 names.value = list.associate { it.id to it.displayName.ifBlank { it.username } }
@@ -98,6 +114,47 @@ class ChatViewModel @Inject constructor(
                 scheduleRead(newest.id)
             }
         }
+    }
+
+    private fun onTypingEvent(payload: String) {
+        val e = TypingEvent.parse(payload) ?: return
+        if (e.userId == selfId()) return // 自己发出的回显
+        partnerTypingJob?.cancel()
+        if (!e.typing) {
+            partnerTyping.value = false
+            return
+        }
+        partnerTyping.value = true
+        // 以本地收到时间计 6 秒过期（不依赖两端时钟一致），丢了 typing=false 也会自动消失。
+        partnerTypingJob = viewModelScope.launch {
+            delay(TypingThrottle.STALE_MS)
+            partnerTyping.value = false
+        }
+    }
+
+    /** 输入框文本变化：节流发布 typing=true（≤1 次/3 秒），5 秒无变化发布 typing=false。 */
+    fun onInputChanged(text: String) {
+        if (text.isBlank()) {
+            stopTyping()
+            return
+        }
+        if (typingThrottle.onTextChanged(System.currentTimeMillis())) mqtt.publishTyping(true)
+        idleJob?.cancel()
+        idleJob = viewModelScope.launch {
+            delay(TypingThrottle.IDLE_MS)
+            stopTyping()
+        }
+    }
+
+    private fun stopTyping() {
+        idleJob?.cancel()
+        idleJob = null
+        if (typingThrottle.onStopped()) mqtt.publishTyping(false)
+    }
+
+    override fun onCleared() {
+        stopTyping()
+        super.onCleared()
     }
 
     private fun selfId(): String? = (session.state.value as? SessionState.LoggedIn)?.user?.id
@@ -129,6 +186,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun send(text: String, replyTo: String?) {
+        stopTyping()
         repo.send(text, replyTo)
     }
 

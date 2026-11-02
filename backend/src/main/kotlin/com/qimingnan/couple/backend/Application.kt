@@ -111,7 +111,8 @@ fun Application.module(config: AppConfig) {
         monitor.subscribe(ApplicationStopping) { broker.stop() }
     }
     val authService = AuthService(db, config, jwtService, PasswordHasher(), audit)
-    val pairingService = PairingService(db, config, audit)
+    val serverPush = com.qimingnan.couple.backend.mqtt.serverPushFor(config, embeddedBroker)
+    val pairingService = PairingService(db, config, audit, serverPush)
     val adminConfigService = AdminConfigService(db, config)
     val setupService = SetupService(config, authService, adminConfigService, audit)
     runBlocking { setupService.init() }
@@ -139,7 +140,6 @@ fun Application.module(config: AppConfig) {
     }
 
     // Media + feed (contract "Media storage", "Feed"): server→client events over the couple topics.
-    val serverPush = com.qimingnan.couple.backend.mqtt.serverPushFor(config, embeddedBroker)
     val storageManager = com.qimingnan.couple.backend.media.StorageManager(config) {
         adminConfigService.snapshot().stored.storage
     }

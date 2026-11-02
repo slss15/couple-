@@ -35,6 +35,10 @@ class CoupleRepository @Inject constructor(
     private val _state = MutableStateFlow<CoupleState>(CoupleState.Unknown)
     val state: StateFlow<CoupleState> = _state.asStateFlow()
 
+    private val _unpairPrompt = MutableStateFlow<UnpairPrompt?>(null)
+    /** 对方发起、等待我确认的解绑申请（MQTT `unpair_requested` 推送）。 */
+    val unpairPrompt: StateFlow<UnpairPrompt?> = _unpairPrompt.asStateFlow()
+
     private fun selfId(): String? = (session.state.value as? SessionState.LoggedIn)?.user?.id
 
     /** GET /couple；网络失败时退回 Room 缓存，保证离线也能进主界面。 */
@@ -79,7 +83,28 @@ class CoupleRepository @Inject constructor(
         return r
     }
 
-    /** 发码方轮询：对方输入成功后 GET /couple 会变成已配对。 */
+    /**
+     * MQTT 推送处理：
+     * - paired：发码方收到，刷新 GET /couple + token（新 token 带 cid）；
+     * - unpair_requested：对方发起的申请 → 弹确认框（自己发起的忽略）；
+     * - unpaired：清空本地配对并刷新 token。
+     */
+    suspend fun onPairEvent(e: PairEvent) {
+        when (e) {
+            is PairEvent.Paired -> if ((_state.value as? CoupleState.Paired)?.couple?.id != e.coupleId) pollPaired()
+            is PairEvent.UnpairRequested -> if (e.by != selfId()) _unpairPrompt.value = UnpairPrompt(e.requestId, e.by)
+            PairEvent.Unpaired -> {
+                _unpairPrompt.value = null
+                if (_state.value !is CoupleState.NotPaired) onUnpaired()
+            }
+        }
+    }
+
+    fun dismissUnpairPrompt() {
+        _unpairPrompt.value = null
+    }
+
+    /** 发码方兜底轮询（主路径是 MQTT `paired` 推送）：对方输入成功后 GET /couple 会变成已配对。 */
     suspend fun pollPaired(): Boolean {
         val s = refresh()
         if (s is CoupleState.Paired && !s.fromCache) {
@@ -105,12 +130,14 @@ class CoupleRepository @Inject constructor(
     }
 
     suspend fun onUnpaired() {
+        _unpairPrompt.value = null
         dao.clearCouple()
         session.forceRefresh()
         _state.value = CoupleState.NotPaired
     }
 
     fun reset() {
+        _unpairPrompt.value = null
         _state.value = CoupleState.Unknown
     }
 }

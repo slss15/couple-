@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.qimingnan.couple.data.auth.SessionManager
 import com.qimingnan.couple.data.couple.CoupleRepository
+import com.qimingnan.couple.data.couple.CoupleState
 import com.qimingnan.couple.data.net.ApiResult
 import com.qimingnan.couple.data.net.PairCode
 import com.qimingnan.couple.data.net.humanMessage
@@ -56,7 +57,10 @@ class PairingViewModel @Inject constructor(
         }
     }
 
-    /** 倒计时 + 每 3 秒查询一次 GET /couple（对方输入成功后这里会变成已配对）。 */
+    /**
+     * 倒计时。配对成功主要靠 MQTT `paired` 推送（AppCoordinator → CoupleRepository.state 变成 Paired）；
+     * 每 [FALLBACK_POLL_SECONDS] 秒兜底查询一次 GET /couple（MQTT 未连上时）。
+     */
     private fun startTicker(deadlineLocal: Long) {
         ticker?.cancel()
         ticker = viewModelScope.launch {
@@ -65,7 +69,11 @@ class PairingViewModel @Inject constructor(
                 val left = ((deadlineLocal - System.currentTimeMillis() + 999) / 1000).coerceAtLeast(0)
                 _state.update { it.copy(secondsLeft = left) }
                 if (left <= 0) break
-                if (tick % 3 == 0 && repo.pollPaired()) {
+                if (repo.state.value is CoupleState.Paired && !(repo.state.value as CoupleState.Paired).fromCache) {
+                    _state.update { it.copy(paired = true) }
+                    break
+                }
+                if (tick > 0 && tick % FALLBACK_POLL_SECONDS == 0 && repo.pollPaired()) {
                     _state.update { it.copy(paired = true) }
                     break
                 }
@@ -93,6 +101,9 @@ class PairingViewModel @Inject constructor(
         viewModelScope.launch { session.logout() }
     }
 }
+
+/** MQTT 推送失效时的兜底轮询间隔（原为 3 秒轮询）。 */
+const val FALLBACK_POLL_SECONDS = 15
 
 fun formatCountdown(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
 

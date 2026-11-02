@@ -7,6 +7,7 @@ import com.qimingnan.couple.data.bootstrap.BootstrapStore
 import com.qimingnan.couple.data.chat.ChatRepository
 import com.qimingnan.couple.data.couple.CoupleRepository
 import com.qimingnan.couple.data.couple.CoupleState
+import com.qimingnan.couple.data.couple.PairEvent
 import com.qimingnan.couple.data.demo.DemoBackend
 import com.qimingnan.couple.data.feed.FeedRepository
 import com.qimingnan.couple.data.mqtt.MqttManager
@@ -53,7 +54,13 @@ class AppCoordinator @Inject constructor(
                 val url = b?.takeIf { it.pendingSince == null }?.current?.mqttUrl
                 val user = (s as? SessionState.LoggedIn)?.user
                 val cid = (c as? CoupleState.Paired)?.couple?.id
-                if (url != null && user != null && cid != null) MqttTarget(url, user.id, cid) else null
+                // 未配对也连接（只订阅 user/{uid}/events，等待 `paired` 推送）；配对状态未知时先不连。
+                when {
+                    url == null || user == null -> null
+                    cid != null -> MqttTarget(url, user.id, cid)
+                    c is CoupleState.NotPaired -> MqttTarget(url, user.id, null)
+                    else -> null
+                }
             }.distinctUntilChanged().collect { target ->
                 if (target != null && DemoBackend.isDemoUrl(target.url)) {
                     // 调试账号：没有 broker，伴侣永远“在线”
@@ -62,6 +69,13 @@ class AppCoordinator @Inject constructor(
                 } else {
                     mqtt.setTarget(target)
                 }
+            }
+        }
+        scope.launch {
+            // 配对/解绑推送（contract "MQTT" §events）：刷新 token + 配对状态；解绑申请交给 UI 弹确认框。
+            mqtt.pairEvents.collect { payload ->
+                val e = PairEvent.parse(payload) ?: return@collect
+                runCatching { couple.onPairEvent(e) }
             }
         }
         scope.launch {

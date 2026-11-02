@@ -8,27 +8,39 @@ import com.qimingnan.couple.backend.db.Db
 import java.util.concurrent.ConcurrentHashMap
 
 object MqttTopics {
+    /** Topics a client may publish to under couple/{cid}/: presence (retained) and typing (QoS 0, not retained). */
+    val CLIENT_WRITABLE = setOf("presence", "typing")
+
     /**
-     * Subscribe side: a client may read any topic under couple/{its own coupleId}/... .
-     * Rejects shared/queue subscriptions, wildcards in the couple segment, and anything outside the root.
+     * Subscribe side: a client may read any topic under couple/{its own coupleId}/... , plus exactly its own
+     * user/{userId}/events (pairing events, which arrive before there is a coupleId).
+     * Rejects shared/queue subscriptions, wildcards in the couple/user segment, and anything outside the roots.
      */
-    fun allowedRead(topic: String, coupleId: String?): Boolean {
-        if (coupleId == null) return false
+    fun allowedRead(topic: String, coupleId: String?, userId: String? = null): Boolean {
         if (topic.startsWith("\$")) return false // $share/..., $queue/..., $SYS/...
         val levels = topic.split('/')
+        if (levels[0] == "user") return isOwnUserTopic(levels, userId)
+        if (coupleId == null) return false
         if (levels.size < 3) return false
         if (levels[0] != "couple" || levels[1] != coupleId) return false
         return true
     }
 
+    fun isUserTopic(topic: String): Boolean = topic.startsWith("user/")
+
+    private fun isOwnUserTopic(levels: List<String>, userId: String?): Boolean =
+        !userId.isNullOrEmpty() && levels.size == 3 && levels[1] == userId && levels[2] == "events"
+
     /**
-     * Publish side: clients only write their own presence. Feed/chat/plugin events are server-pushed
-     * (contract "Feed"/"Chat": client publishes to those topics are denied by ACL).
+     * Publish side: clients only write their own presence and typing. Feed/chat/events/plugin topics are
+     * server-pushed (contract "Feed"/"Chat"/"MQTT"): client publishes to those topics are denied by ACL.
+     * user/... topics are never client-writable.
      */
     fun allowedWrite(topic: String, coupleId: String?): Boolean {
+        if (isUserTopic(topic)) return false
         if (!allowedRead(topic, coupleId)) return false
         val levels = topic.split('/')
-        return levels.size == 3 && levels[2] == "presence"
+        return levels.size == 3 && levels[2] in CLIENT_WRITABLE
     }
 }
 
@@ -75,8 +87,8 @@ class MqttAccessService(
         audit.log(null, AuditActions.MQTT_AUTH_DENIED, user.take(64), mapOf("clientid" to clientId?.take(64), "reason" to reason))
     }
 
-    suspend fun coupleIdOf(username: String): String? {
-        if (coupleCacheTtlMs > 0) {
+    suspend fun coupleIdOf(username: String, useCache: Boolean = true): String? {
+        if (coupleCacheTtlMs > 0 && useCache) {
             val hit = cache[username]
             if (hit != null && clock() - hit.at < coupleCacheTtlMs) return hit.coupleId
         }
@@ -88,15 +100,25 @@ class MqttAccessService(
     /** Subscribe ACL (see [MqttTopics.allowedRead]). */
     suspend fun canRead(username: String?, topic: String?): Boolean {
         if (username.isNullOrEmpty() || topic == null) return false
-        return MqttTopics.allowedRead(topic, coupleIdOf(username))
+        if (MqttTopics.isUserTopic(topic)) return MqttTopics.allowedRead(topic, null, username)
+        return checkCached(username) { MqttTopics.allowedRead(topic, it, username) }
+    }
+
+    /**
+     * Checks against the cached coupleId first; a denial is re-checked against the DB so a fresh pairing
+     * (client subscribes right after the `paired` event) is never refused because of a stale cached null.
+     */
+    private suspend fun checkCached(username: String, rule: (String?) -> Boolean): Boolean {
+        if (rule(coupleIdOf(username))) return true
+        return coupleCacheTtlMs > 0 && rule(coupleIdOf(username, useCache = false))
     }
 
     /** Publish ACL (see [MqttTopics.allowedWrite]). Server pushes use internalPublish, not this check. */
     suspend fun canWrite(username: String?, topic: String?): Boolean {
         if (username.isNullOrEmpty() || topic == null) return false
-        return MqttTopics.allowedWrite(topic, coupleIdOf(username))
+        return checkCached(username) { MqttTopics.allowedWrite(topic, it) }
     }
 
-    /** True when either direction is allowed (used by the Last Will guard, which only writes presence). */
+    /** True when either direction is allowed (used by the Last Will guard). */
     suspend fun canAccess(username: String?, topic: String?): Boolean = canWrite(username, topic)
 }

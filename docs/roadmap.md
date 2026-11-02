@@ -38,10 +38,10 @@ P3 编号保留不使用（历史上曾被 admin 侧边栏预留），避免与�
 
 1. **媒体存储层【已完成】**：`StorageService` 三提供方（local/MinIO/R2，全私有桶），上传端点（类型/大小白名单、EXIF/GPS 剥离、Bearer 代理下载仅同 couple 可读）、头像上传。
 2. **动态 Feed【已完成】**：帖子（文字+图片）、点赞、评论、`before&limit` 分页、`couple/{cid}/feed` MQTT 推送；App 时间线/发布页/压缩上传 worker；feedHeader 纪念日倒数卡；空状态引导。
-3. **server→client MQTT 推送基建【已完成】**：embedded 走 `internalPublish`，external 模式 EMQX HTTP publish 客户端（`EMQX_API_URL/KEY/SECRET`，缺失仅禁用推送）——聊天/插件/通话共用。ACL 已收紧：客户端只可发布 `presence`，`feed`/`chat` 仅可订阅。
+3. **server→client MQTT 推送基建【已完成】**：embedded 走 `internalPublish`，external 模式 EMQX HTTP publish 客户端（`EMQX_API_URL/KEY/SECRET`，缺失仅禁用推送）——聊天/插件/通话共用。ACL 已收紧：客户端只可发布 `presence`/`typing`，`feed`/`chat`/`events` 仅可订阅；`user/{uid}/events` 仅本人可订阅。
 4. **App 通知子系统【已完成】**：通知渠道、优先级、免打扰时段——聊天/插件/来电复用。未读角标随 P2 聊天媒体/桌面小部件一起做。
 5. **TA 页【已完成】**：资料卡、重要日子、`privacy_toggle` 字段可见性控制（taCards 网格）。
-6. **聊天 P1a【进行中】**：文本消息、引用回复、120 秒撤回、已读回执、离线 outbox（WorkManager）、`couple/{cid}/chat` MQTT 推送、App Room 缓存与上滑分页、DemoBackend 自动回复已完成（后端 V7）。待做：`couple/{cid}/typing` 话题（正在输入）、配对成功/解绑申请改 MQTT 推送（替代轮询与口头告知）、聊天记录导出、双机 e2e 脚本。
+6. **聊天 P1a【进行中】**：文本消息、引用回复、120 秒撤回、已读回执、离线 outbox（WorkManager）、`couple/{cid}/chat` MQTT 推送、App Room 缓存与上滑分页、DemoBackend 自动回复已完成（后端 V7）。已完成：`couple/{cid}/typing` 话题（正在输入，客户端可发布/订阅、QoS 0）、配对成功/解绑申请改 MQTT 推送（`user/{uid}/events` + `couple/{cid}/events`，配对码页轮询降为 15 秒兜底，解绑申请弹确认框）。待做：聊天记录导出、双机 e2e 脚本。
 7. **WxPusher 候补推送【待做】**：App 被杀时微信提醒（仅「你有新消息」级别、不带正文、去抖聚合）；用户绑定 UID；同一通道兼作服务器运维告警。
 
 ## P2 媒体消息 + 插件系统【待做】
