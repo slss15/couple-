@@ -16,6 +16,12 @@ val nettyVersion = "4.1.119.Final"
 
 repositories {
     mavenCentral()
+    // Moquette 0.18.x is only tagged on GitHub (Maven Central stops at 0.17); JitPack builds the v0.18.1 tag.
+    // Restricted to that one group so nothing else can resolve from JitPack.
+    exclusiveContent {
+        forRepository { maven("https://jitpack.io") }
+        filter { includeGroup("com.github.moquette-io.moquette") }
+    }
 }
 
 kotlin {
@@ -50,7 +56,8 @@ dependencies {
 
     // Embedded MQTT broker (MQTT_BROKER_MODE=embedded, the Windows-native default).
     implementation(platform("io.netty:netty-bom:$nettyVersion"))
-    implementation("io.moquette:moquette-broker:0.17") {
+    // 0.18.1: fixes the 0.17 pattern-ACL bypass and the unauthorized Last Will publish (see EmbeddedMqttBroker).
+    implementation("com.github.moquette-io.moquette:moquette-broker:v0.18.1") {
         // Logging goes through logback; metrics/error-reporting integrations are never enabled.
         exclude(group = "org.slf4j", module = "slf4j-reload4j")
         exclude(group = "ch.qos.reload4j")
