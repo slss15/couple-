@@ -170,6 +170,14 @@ Scope: text, images, stickers (表情包), reply/quote, recall, read receipts, o
 - Images / stickers: the outbox uploads a picked image (compressed like Feed: longest side 2048, JPEG 85, kept under filesDir/outbox until sent) before POSTing the message; stickers are sent by URL. Bubbles show the media (thumb for images, original for stickers so GIFs animate); tap opens a full-screen viewer.
 - Debug demo account: DemoBackend implements these endpoints in memory (image messages via its in-memory /media; sticker search returns built-in sample URLs, or proxies oiapi directly when online) and the partner "TA（演示）" auto-replies ~1.5 s later, showing "正在输入" for ~1 s first; events (chat and typing) reach the app through an in-process flow instead of MQTT.
 
+### Export (聊天记录导出)
+- `GET /chat/export?format=json|txt[&tz=<IANA>]` (Bearer, paired users only, 403 NOT_PAIRED). Either member may export; the result is the whole couple conversation, **oldest first** (createdAt, ties by id), streamed in pages (never buffered whole). `format` defaults to `json`; anything else → 400 VALIDATION_ERROR. `tz` (default `Asia/Shanghai`; unknown → 400 VALIDATION_ERROR) only affects txt timestamps and the file name.
+- Response headers: `Content-Disposition: attachment; filename=couple-chat-<yyyyMMdd>.<json|txt>`, `Cache-Control: no-store`; `application/json` or `text/plain`, UTF-8.
+- txt: one line per message, `yyyy-MM-dd HH:mm 我|TA: text` from the caller's point of view (我 = caller). Placeholders: `[图片]` (image), `[表情]` (sticker), `[已撤回]` (recalled). Continuation lines of a multi-line text start with a tab, so every line that starts with a timestamp is a new message.
+- json: `{format:"couple-chat-export", version:1, coupleId, userId (the caller), exportedAt, messages:[ExportItem...]}`; ExportItem = Message fields (without coupleId) + `mine:Boolean` + `mediaUrl` (`/api/v1/media/{mediaId}`, relative like avatarUrl, Bearer + couple ACL) and `thumbUrl` (`/api/v1/media/{mediaId}/thumb`, images only), both null when there is no media.
+- Rate limit: 1 export per user per minute (rejected requests — bad format/tz, NOT_PAIRED — don't count). Exceeding it → 429 `RATE_LIMITED` with `Retry-After: <seconds>`.
+- App: 我的 → 设置 → 聊天记录 → 导出聊天记录 → pick JSON / TXT → the app downloads into cacheDir/export first (so a 429 or network error never creates an empty file), then opens SAF `CreateDocument` with the suggested file name and copies the file there; cancelling deletes the cache copy. 429 shows "导出太频繁，请 N 秒后再试". The demo backend implements the same endpoint in memory (same formats, same 1/min limit).
+
 ### Scheduled messages (定时消息)
 - Rules live on the server; it sends each due rule as a normal chat message from the creator (same MQTT `message` push), so delivery does not depend on the phone being on. Max 50 active rules per user (409 SCHEDULE_LIMIT).
 - `GET /chat/scheduled` → `{items:[ScheduledMessage]}`, newest first (own rules only).

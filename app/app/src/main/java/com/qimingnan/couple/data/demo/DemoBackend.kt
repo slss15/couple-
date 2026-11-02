@@ -268,8 +268,45 @@ object DemoBackend {
         chatMessages += DemoChat(Ulid.next(at), partner.id, "在呢～今天过得怎么样？", null, at, at, null)
     }
 
+    // ---- 聊天记录导出（contract "Chat → Export"）----
+    private var lastExportAt: Long? = null
+
+    /** 导出结果：状态码、body、Content-Type、Retry-After（秒，仅 429）。 */
+    data class ExportResult(val code: Int, val body: String, val contentType: String, val retryAfter: Long? = null)
+
+    /** GET chat/export：与后端一致——最早的在前、我/TA、占位符、JSON 带 mediaUrl、每分钟 1 次。 */
+    fun export(format: String?, now: Long, tz: String?): ExportResult = synchronized(stateLock) {
+        val f = (format ?: "json").lowercase()
+        if (f != "json" && f != "txt") return ExportResult(400, err("VALIDATION_ERROR", "format must be json or txt"), JSON_TYPE)
+        if (!paired) return ExportResult(403, err("NOT_PAIRED", "You are not paired"), JSON_TYPE)
+        val zone = runCatching { java.time.ZoneId.of(tz?.trim()?.ifEmpty { null } ?: "Asia/Shanghai") }
+            .getOrElse { return ExportResult(400, err("VALIDATION_ERROR", "unknown tz $tz"), JSON_TYPE) }
+        lastExportAt?.let { last ->
+            if (now - last < 60_000L) {
+                val wait = (60_000L - (now - last) + 999) / 1000
+                return ExportResult(429, err("RATE_LIMITED", "One export per minute; retry in ${wait}s"), JSON_TYPE, wait)
+            }
+        }
+        lastExportAt = now
+        val me = self().id
+        val ordered = chatMessages.sortedWith(compareBy({ it.createdAt }, { it.id })).map { it.toModel() }
+        if (f == "txt") {
+            val text = ordered.joinToString("") { com.qimingnan.couple.data.chat.ChatExportText.txtLine(it, me, zone) + "\n" }
+            return ExportResult(200, text, "text/plain; charset=utf-8")
+        }
+        val items = ordered.joinToString(",") { "\n" + com.qimingnan.couple.data.chat.ChatExportText.jsonItem(it, me).toString() }
+        return ExportResult(
+            200,
+            """{"format":"couple-chat-export","version":1,"coupleId":"$COUPLE_ID","userId":"$me","exportedAt":$now,"messages":[$items${if (items.isEmpty()) "" else "\n"}]}""" + "\n",
+            "application/json; charset=utf-8",
+        )
+    }
+
+    private const val JSON_TYPE = "application/json"
+
     /** JVM 测试用：把聊天恢复到初始状态。 */
     fun resetChat() {
+        lastExportAt = null
         scheduled.clear()
         chatMessages.clear()
         demoMyReadUpTo = null
@@ -731,6 +768,14 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
             }.getOrDefault(emptyList())
             val list = online.ifEmpty { DemoBackend.SAMPLE_STICKERS }
             return json(req, 200, CoupleJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(StickerResult.serializer()), list))
+        }
+        if (req.method == "GET" && path == "chat/export") {
+            val r = DemoBackend.export(req.url.queryParameter("format"), now(), req.url.queryParameter("tz"))
+            return Response.Builder()
+                .request(req).protocol(Protocol.HTTP_1_1).code(r.code).message(if (r.code in 200..299) "OK" else "Demo")
+                .apply { r.retryAfter?.let { header("Retry-After", it.toString()) } }
+                .body(r.body.toResponseBody(r.contentType.toMediaType()))
+                .build()
         }
         val mediaMatch = Regex("^media/([^/]+)(/thumb)?$").find(path)
         if (req.method == "GET" && mediaMatch != null) {

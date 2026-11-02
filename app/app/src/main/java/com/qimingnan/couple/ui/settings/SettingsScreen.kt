@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -62,7 +63,12 @@ private val TAB_LABELS = mapOf("tab_chat" to "聊天", "tab_feed" to "动态", "
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SettingsScreen(vm: SettingsViewModel, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun SettingsScreen(
+    vm: SettingsViewModel,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    exportVm: ChatExportViewModel = hiltViewModel(),
+) {
     val t = LocalCoupleTokens.current
     val s by vm.settings.collectAsStateWithLifecycle()
     Column(modifier) {
@@ -109,6 +115,7 @@ fun SettingsScreen(vm: SettingsViewModel, onBack: () -> Unit, modifier: Modifier
                 ChipRow(FontSize.entries, s.fontSize, { it.label }) { vm.setFontSize(it) }
                 Text("预览：今天也想你 ❤", style = t.typography.body, color = t.colors.onSurface)
             }
+            ChatExportSection(exportVm)
         }
     }
 }

@@ -12,6 +12,7 @@ import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 import com.qimingnan.couple.data.update.HealthReport
 import com.qimingnan.couple.data.update.UpdateResponse
 
@@ -111,6 +112,11 @@ interface CoupleApi {
 
     @GET("chat/state")
     suspend fun chatState(): ChatReadState
+
+    /** 聊天记录导出（contract "Chat → Export"）：流式下载，format = json | txt；每人每分钟 1 次。 */
+    @Streaming
+    @GET("chat/export")
+    suspend fun exportChat(@Query("format") format: String, @Query("tz") tz: String): Response<okhttp3.ResponseBody>
 
     // ---- 定时消息（contract "Chat → Scheduled messages"）----
     @GET("chat/scheduled")

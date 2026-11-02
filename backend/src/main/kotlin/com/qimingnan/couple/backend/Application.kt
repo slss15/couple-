@@ -13,6 +13,8 @@ import com.qimingnan.couple.backend.auth.clientIp
 import com.qimingnan.couple.backend.bootstrap.BootstrapService
 import com.qimingnan.couple.backend.bootstrap.bootstrapPublicRoutes
 import com.qimingnan.couple.backend.chat.ChatService
+import com.qimingnan.couple.backend.chat.ChatExportService
+import com.qimingnan.couple.backend.chat.chatExportRoutes
 import com.qimingnan.couple.backend.chat.chatRoutes
 import com.qimingnan.couple.backend.chat.scheduledRoutes
 import com.qimingnan.couple.backend.common.ApiException
@@ -233,6 +235,7 @@ fun Application.module(config: AppConfig) {
                 adminMediaRoutes(db, audit, mediaService)
                 taRoutes(TaService(db, config))
                 chatRoutes(chatService)
+                chatExportRoutes(ChatExportService(db, config), config)
                 scheduledRoutes(scheduledService)
             }
         }
