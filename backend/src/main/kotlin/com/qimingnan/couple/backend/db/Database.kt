@@ -25,6 +25,9 @@ object Users : Table("users") {
     val birthday = varchar("birthday", 5).nullable() // "MM-DD"
     val birthYear = short("birth_year").nullable()
     val showBirthday = bool("show_birthday").default(true)
+    // V10 (WxPusher 消息提醒)
+    val wxpusherUid = varchar("wxpusher_uid", 64).nullable()
+    val notifyPreview = bool("notify_preview").default(false)
     override val primaryKey = PrimaryKey(id)
 }
 

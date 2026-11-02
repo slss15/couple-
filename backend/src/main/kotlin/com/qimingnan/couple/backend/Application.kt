@@ -26,6 +26,7 @@ import com.qimingnan.couple.backend.health.healthRoutes
 import com.qimingnan.couple.backend.mqtt.EmbeddedMqttBroker
 import com.qimingnan.couple.backend.mqtt.MqttAccessService
 import com.qimingnan.couple.backend.mqtt.mqttHookRoutes
+import com.qimingnan.couple.backend.notify.notifyRoutes
 import com.qimingnan.couple.backend.admin.adminStaticRoutes
 import com.qimingnan.couple.backend.config.MqttBrokerMode
 import com.qimingnan.couple.backend.db.Couples
@@ -103,11 +104,14 @@ fun Application.module(config: AppConfig) {
     val jwtService = JwtService(config.jwtSecret, config.accessTokenTtlMs, config.clock)
     val mqttAccess = MqttAccessService(db, jwtService, audit)
     var embeddedBroker: EmbeddedMqttBroker? = null
+    // 聊天提醒只信任内嵌 broker 的连接事件；外部 EMQX 没有连接事件 → 不提醒（contract "Chat → WxPusher reminders"）。
+    val presence = if (config.mqttBrokerMode == MqttBrokerMode.EMBEDDED) com.qimingnan.couple.backend.notify.PresenceTracker(config.clock) else null
     if (config.mqttBrokerMode == MqttBrokerMode.EMBEDDED) {
         val broker = EmbeddedMqttBroker(
             config,
             MqttAccessService(db, jwtService, audit, coupleCacheTtlMs = 10_000),
             activeCoupleIds = { db.tx { Couples.selectAll().where { Couples.deletedAt.isNull() }.map { it[Couples.id] } } },
+            presence = presence,
         )
         broker.start()
         embeddedBroker = broker
@@ -155,7 +159,14 @@ fun Application.module(config: AppConfig) {
         val key = (apihz?.get("apiKey") as? kotlinx.serialization.json.JsonPrimitive)?.content?.trim().orEmpty()
         if (id.isEmpty() || key.isEmpty()) null else com.qimingnan.couple.backend.chat.ApihzCreds(id, key)
     }
-    val chatService = ChatService(db, config, serverPush, mediaService, stickerService)
+    val chatReminder = com.qimingnan.couple.backend.notify.ChatReminderService(
+        db, config, presence,
+        settingsProvider = {
+            com.qimingnan.couple.backend.notify.ChatReminderSettings.fromConfig(adminConfigService.snapshot().stored.notify)
+        },
+        scope = this,
+    )
+    val chatService = ChatService(db, config, serverPush, mediaService, stickerService, onDelivered = chatReminder::onMessage)
     // 定时消息（contract "Chat → Scheduled messages"）：服务端每 30 s 处理到期规则；认领是条件 UPDATE，多实例安全。
     val scheduledService = com.qimingnan.couple.backend.chat.ScheduledService(db, config, chatService, mediaService, stickerService)
     attributes.put(ScheduledServiceKey, scheduledService)
@@ -235,6 +246,7 @@ fun Application.module(config: AppConfig) {
                 adminMediaRoutes(db, audit, mediaService)
                 taRoutes(TaService(db, config))
                 chatRoutes(chatService)
+                notifyRoutes(chatReminder)
                 chatExportRoutes(ChatExportService(db, config), config)
                 scheduledRoutes(scheduledService)
             }

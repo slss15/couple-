@@ -122,6 +122,8 @@ data class AppConfig(
     val stickerHttp: com.qimingnan.couple.backend.chat.StickerHttp = com.qimingnan.couple.backend.chat.StickerHttp.Default,
     /** DNS lookup for the sticker downloader's private-address check (tests inject a fake). */
     val hostResolver: (String) -> List<java.net.InetAddress> = { java.net.InetAddress.getAllByName(it).toList() },
+    /** WxPusher POST (url, json body) -> HTTP 2xx; null = the real HTTP client. Tests inject a fake. */
+    val wxPusherSend: (suspend (String, String) -> Boolean)? = null,
 ) {
     init {
         require(jwtSecret.length >= 32) { "JWT_SECRET must be at least 32 characters" }

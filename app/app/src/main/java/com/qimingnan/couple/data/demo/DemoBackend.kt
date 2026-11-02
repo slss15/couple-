@@ -602,6 +602,17 @@ object DemoBackend {
             val removed = posts.removeAll { it.id == id }
             return if (removed) 204 to "" else 404 to err("POST_NOT_FOUND", "no post")
         }
+        if (p == "me/notify" && method == "GET") return 200 to notifyJson()
+        if (p == "me/notify" && method == "PUT") {
+            val body = json.parseToJsonElement(currentBody).jsonObject
+            val uid = (body["wxpusherUid"] as? JsonPrimitive)?.contentOrNull?.trim()?.ifEmpty { null }
+            if (uid != null && !uid.matches(Regex("^UID_[A-Za-z0-9_-]{1,60}$"))) {
+                return 400 to err("VALIDATION_ERROR", "wxpusherUid must look like UID_xxx")
+            }
+            demoNotifyUid = uid
+            demoNotifyPreview = (body["preview"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() ?: false
+            return 200 to notifyJson()
+        }
         if (p == "ta/me" && method == "PUT") {
             val body = json.parseToJsonElement(currentBody).jsonObject
             (body["bio"] as? JsonPrimitive)?.contentOrNull?.let { demoBio = it.take(200) }
@@ -628,6 +639,19 @@ object DemoBackend {
             return 204 to ""
         }
         return 404 to err("NOT_FOUND", "演示后端未实现：$method /$p")
+    }
+
+    // ---- 消息提醒演示数据（演示后端不会真的发 WxPusher） ----
+    @Volatile private var demoNotifyUid: String? = null
+    @Volatile private var demoNotifyPreview: Boolean = false
+
+    private fun notifyJson(): String =
+        """{"wxpusherUid":${demoNotifyUid?.let { JsonPrimitive(it).toString() } ?: "null"},"preview":$demoNotifyPreview}"""
+
+    /** JVM 测试用：清掉消息提醒设置。 */
+    fun resetNotify() {
+        demoNotifyUid = null
+        demoNotifyPreview = false
     }
 
     // ---- TA 演示数据（me = 我的档案可编辑；partner = TA 固定档案） ----

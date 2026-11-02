@@ -72,6 +72,13 @@ interface CoupleApi {
     @DELETE("feed/comments/{id}")
     suspend fun deleteComment(@Path("id") id: String): Response<Unit>
 
+    // ---- 消息提醒（contract "Chat → WxPusher reminders"） ----
+    @GET("me/notify")
+    suspend fun notifySettings(): NotifySettings
+
+    @PUT("me/notify")
+    suspend fun updateNotify(@Body body: NotifySettings): NotifySettings
+
     // ---- TA 页（contract "TA"） ----
 
     @GET("ta/summary")

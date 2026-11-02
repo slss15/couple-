@@ -33,7 +33,7 @@ Placeholder app name: "Couple" (to be renamed). Android package: com.qimingnan.c
 ## Admin
 - Preferred: the first admin is created through first-run setup (below). Legacy, still supported: the first registered user (or env ADMIN_USERNAME) gets role=admin.
 - GET /admin/config, PUT /admin/config {baseUrl, mqttUrl, turn:{provider:"cloudflare"|"coturn", ...}, storage:{...}} — secrets are write-only and come back masked.
-- Admin config also carries `notify`: `{"wxpusher": {"appToken": "<secret>", "uids": ["UID_..."]}}` (appToken is write-only/masked like other secrets; uids are plain). When configured, the backend sends best-effort operator alerts via WxPusher (`POST https://wxpusher.zjiecode.com/api/send/message`): deploy failure/rollback reported by the server-updater, a release auto-paused by a failed health report, and a canary release with no OK health report within 2 h (auto-paused by the periodic sweep / POST /admin/releases/sweep). Sends are debounced per alert key (10 min); unconfigured = disabled; failures never affect the API path. Content is operator-level only — never message bodies.
+- Admin config also carries `notify`: `{"wxpusher": {"appToken": "<secret>", "uids": ["UID_..."]}}` (appToken is write-only/masked like other secrets; uids are plain). When configured, the backend sends best-effort operator alerts via WxPusher (`POST https://wxpusher.zjiecode.com/api/send/message`): deploy failure/rollback reported by the server-updater, a release auto-paused by a failed health report, and a canary release with no OK health report within 2 h (auto-paused by the periodic sweep / POST /admin/releases/sweep). Sends are debounced per alert key (10 min); unconfigured = disabled; failures never affect the API path. Operator alerts are operator-level only — never message bodies. The same `appToken` also drives per-user chat reminders (see "Chat → WxPusher reminders"), tuned by the optional plain `notify.wxpusher.chatOfflineMinutes` (int, default 5, clamped 1..1440).
 - GET /admin/audit?limit&before -> [{id, actorId, action, target, meta, ts}]
 
 ## First-run setup
@@ -188,6 +188,15 @@ Scope: text, images, stickers (表情包), reply/quote, recall, read receipts, o
 - ScheduledMessage: `{id, senderId, type, text, mediaId?, width?, height?, rule, tz, nextFireAt (null = finished), paused, lastFiredAt?, createdAt}`.
 - Media: an image rule owns its media; each fire copies it into a new media object for that message, so deleting the rule never breaks sent messages. A sticker is downloaded once at creation (same checks as sending a sticker) and then treated like an image.
 - App: long-press the send button → 定时发送 dialog (date, time, 单次/每天/每周/每年), text only; the header's calendar icon opens the list (describe + next time or 已发送, pause switch, delete). Errors are shown as a toast. The demo backend implements all four endpoints in memory and fires due rules every 5 s.
+
+### WxPusher reminders (消息提醒)
+- GET /me/notify -> {wxpusherUid: string|null, preview: bool} (any signed-in user; default {null, false}).
+- PUT /me/notify {wxpusherUid: string|null, preview: bool} -> the stored value. `wxpusherUid` is trimmed; null or "" clears it (= no reminders); otherwise it must match `^UID_[A-Za-z0-9_-]{1,60}$` (400 VALIDATION_ERROR). Stored on the user (V10: users.wxpusher_uid, users.notify_preview).
+- When a new chat message is committed (POST /chat/messages or a scheduled send; never an idempotent replay), the backend sends one WxPusher message (`POST https://wxpusher.zjiecode.com/api/send/message`, contentType 1, uids = [recipient's UID]) when all hold: admin `notify.wxpusher.appToken` is set; the recipient set a UID; the recipient has had no MQTT connection for at least `notify.wxpusher.chatOfflineMinutes` (default 5) — measured from the last disconnect, or from backend start if never seen; and no reminder went to that recipient in the last 10 minutes (the window starts at the attempt, so a failed send also waits 10 min).
+- Content/summary: "TA 发来一条消息"; with preview=true, "TA：" + the text (whitespace collapsed, cut to 100 chars + "…"), images as "[图片]", stickers as "[表情]".
+- Presence comes from the embedded broker's connect / disconnect / connection-lost events (any client id of the user online = online). With an external EMQX broker the backend sees no disconnects, so reminders are disabled there.
+- Best effort, off the request path: failures are logged and never affect the chat API. Demo backend: GET/PUT /me/notify are stored in memory; it never sends.
+- App: 我的 → 设置 → 消息提醒 — UID field (client-side same regex; empty = off), "提醒里显示消息内容" switch, 保存.
 
 ## Feed (P1: 动态) — authoritative for backend + app
 Scope of P1 feed: posts with text + images, likes, comments, deletion. Video/voice posts come later. Uses the shared media storage below.

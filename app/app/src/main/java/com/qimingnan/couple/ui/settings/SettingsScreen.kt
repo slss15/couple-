@@ -68,6 +68,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     exportVm: ChatExportViewModel = hiltViewModel(),
+    notifyVm: NotifyViewModel = hiltViewModel(),
 ) {
     val t = LocalCoupleTokens.current
     val s by vm.settings.collectAsStateWithLifecycle()
@@ -115,6 +116,7 @@ fun SettingsScreen(
                 ChipRow(FontSize.entries, s.fontSize, { it.label }) { vm.setFontSize(it) }
                 Text("预览：今天也想你 ❤", style = t.typography.body, color = t.colors.onSurface)
             }
+            NotifySection(notifyVm)
             ChatExportSection(exportVm)
         }
     }

@@ -154,6 +154,8 @@ class ChatService(
     private val push: ServerPush,
     private val media: com.qimingnan.couple.backend.media.MediaService? = null,
     val stickers: StickerService? = null,
+    /** After a new message is committed and pushed (WxPusher chat reminders); never called for idempotent replays. */
+    private val onDelivered: ((ChatMessageView) -> Unit)? = null,
 ) {
 
     suspend fun send(caller: AuthUser, req: SendMessageRequest): ChatMessageView {
@@ -220,6 +222,7 @@ class ChatService(
             return replay(winner, coupleId, caller)
         }
         push.publish(coupleId, "chat", messageEvent(view))
+        onDelivered?.invoke(view)
         return view
     }
 
@@ -238,6 +241,7 @@ class ChatService(
     /** 与 send() 相同的 MQTT 推送（couple/{cid}/chat, kind=message）。 */
     suspend fun publishMessage(coupleId: String, view: ChatMessageView) {
         push.publish(coupleId, "chat", messageEvent(view))
+        onDelivered?.invoke(view)
     }
 
     private fun replay(existing: ResultRow, coupleId: String, caller: AuthUser): ChatMessageView {

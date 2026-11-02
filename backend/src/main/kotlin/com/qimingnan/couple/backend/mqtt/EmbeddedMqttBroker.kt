@@ -43,6 +43,8 @@ class EmbeddedMqttBroker(
     private val access: MqttAccessService,
     /** Active couple ids, used to clear stale retained presence after a restart with a persistent store. */
     private val activeCoupleIds: suspend () -> List<String>,
+    /** Connection presence for chat reminders (contract "Chat → WxPusher reminders"); null = not tracked. */
+    private val presence: com.qimingnan.couple.backend.notify.PresenceTracker? = null,
 ) {
     private val log = LoggerFactory.getLogger(EmbeddedMqttBroker::class.java)
     private val server = Server()
@@ -155,6 +157,7 @@ class EmbeddedMqttBroker(
         override fun onConnect(msg: InterceptConnectMessage) {
             val clientId = msg.clientID
             wills.remove(clientId)
+            msg.username?.takeIf { clientId != INTERNAL_CLIENT_ID }?.let { presence?.connected(it, clientId) }
             if (!msg.isWillFlag) return
             val topic = msg.willTopic
             val allowed = runCatching { runBlocking { access.canWrite(msg.username, topic) } }.getOrDefault(false)
@@ -174,9 +177,19 @@ class EmbeddedMqttBroker(
 
         override fun onDisconnect(msg: InterceptDisconnectMessage) {
             wills.remove(msg.clientID) // clean DISCONNECT: no will
+            markGone(msg.clientID, msg.username)
+        }
+
+        /** A quick reconnect with the same client id may already be live (callbacks are asynchronous). */
+        private fun markGone(clientId: String, username: String?) {
+            val p = presence ?: return
+            if (username == null || clientId == INTERNAL_CLIENT_ID) return
+            if (runCatching { server.listConnectedClients().any { it.clientID == clientId } }.getOrDefault(false)) return
+            p.disconnected(username, clientId)
         }
 
         override fun onConnectionLost(msg: InterceptConnectionLostMessage) {
+            markGone(msg.clientID, msg.username)
             val will = wills.remove(msg.clientID) ?: return
             // A quick reconnect may already be live (interceptor callbacks are asynchronous): never overwrite it.
             if (server.listConnectedClients().any { it.clientID == msg.clientID }) return
