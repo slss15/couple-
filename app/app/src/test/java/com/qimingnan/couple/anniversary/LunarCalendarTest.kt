@@ -29,11 +29,18 @@ class LunarCalendarTest {
         val solar = LocalDate.of(2024, 9, 17)
         val lunar = LunarCalendar.solarToLunar(solar)!!
         assertEquals(solar, LunarCalendar.lunarToSolar(lunar))
-        // 2024 八月 has 29 days, so day 30 does not exist.
-        assertNull(LunarCalendar.lunarToSolar(LunarDate(2024, 8, 30)))
+        // 2024 八月 is a 30-day month (2024-10-02 is 八月三十), so use 九月
+        // instead: 2024-10-31 is 九月廿九, and 九月 has 29 days.
+        assertNull(LunarCalendar.lunarToSolar(LunarDate(2024, 9, 30)))
         // Outside the table range: no guessed conversion.
         assertNull(LunarCalendar.solarToLunar(LocalDate.of(2050, 1, 1)))
-        assertNull(LunarCalendar.lunarToSolar(LunarDate(2050, 1, 1)))
+        // Out-of-range lunar years are rejected at construction, not guessed.
+        try {
+            LunarCalendar.lunarToSolar(LunarDate(2050, 1, 1))
+            throw AssertionError("expected IllegalArgumentException for year 2050")
+        } catch (e: IllegalArgumentException) {
+            // expected
+        }
     }
 
     @Test fun ganZhiAndDisplay() {

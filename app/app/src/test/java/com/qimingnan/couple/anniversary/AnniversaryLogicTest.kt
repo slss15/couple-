@@ -33,9 +33,9 @@ class AnniversaryLogicTest {
     }
 
     @Test fun lunarDay30ClampsToLastDayAndFlagsIt() {
-        // 2024 八月 has 29 days; 08-29 is 2024-10-01.
-        val occ = AnniversaryLogic.nextOccurrence(lunarEvent(8, 30), LocalDate.of(2024, 9, 1))!!
-        assertEquals(LocalDate.of(2024, 10, 1), occ.date)
+        // 2024 九月 has 29 days: 09-29 is 2024-10-31, so 09-30 clamps there.
+        val occ = AnniversaryLogic.nextOccurrence(lunarEvent(9, 30), LocalDate.of(2024, 10, 1))!!
+        assertEquals(LocalDate.of(2024, 10, 31), occ.date)
         assertTrue(occ.clampedDay)
     }
 
