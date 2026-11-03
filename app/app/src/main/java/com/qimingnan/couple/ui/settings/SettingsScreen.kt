@@ -57,6 +57,7 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun setDynamic(on: Boolean) = viewModelScope.launch { repo.setDynamicColor(on) }
     fun setDarkMode(m: DarkMode) = viewModelScope.launch { repo.setDarkMode(m) }
     fun setFontSize(f: FontSize) = viewModelScope.launch { repo.setFontSize(f) }
+    fun setPluginEnabled(id: String, enabled: Boolean) = viewModelScope.launch { repo.setPluginEnabled(id, enabled) }
 }
 
 private val TAB_LABELS = mapOf("tab_chat" to "聊天", "tab_feed" to "动态", "tab_ta" to "TA")
@@ -115,6 +116,29 @@ fun SettingsScreen(
             SectionCard("字号") {
                 ChipRow(FontSize.entries, s.fontSize, { it.label }) { vm.setFontSize(it) }
                 Text("预览：今天也想你 ❤", style = t.typography.body, color = t.colors.onSurface)
+            }
+            SectionCard("插件") {
+                com.qimingnan.couple.data.plugin.PluginRegistry.all.forEach { plugin ->
+                    val enabled = plugin.available && plugin.id !in s.disabledPlugins
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(plugin.title, style = t.typography.body, color = t.colors.onSurface)
+                            Text(
+                                if (plugin.available) plugin.description else plugin.description + "（即将推出）",
+                                style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                            )
+                            Text(
+                                if (plugin.scope == com.qimingnan.couple.data.plugin.PluginScope.PERSONAL) "个人私密" else "情侣共享",
+                                style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = enabled, enabled = plugin.available, onCheckedChange = { vm.setPluginEnabled(plugin.id, it) })
+                    }
+                }
+                Text(
+                    "关闭插件只隐藏入口，不删除数据；插件内容由后续单独的 PR 提供。",
+                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                )
             }
             NotifySection(notifyVm)
             ChatExportSection(exportVm)
