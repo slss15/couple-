@@ -72,6 +72,11 @@ docker compose logs -f updater
 
 仓库**变量**（Variables，不是 Secret，公开信息）`OTA_PUBLIC_KEY`：上面私钥对应的公钥，构建时写进 App（`BuildConfig.OTA_PUBLIC_KEY`）。缺它 release 构建直接失败。后端可选同名环境变量，设置后镜像时也会验签。
 
+可选仓库变量（国内下载加速，写进签名的 `release.json.mirrors`，App 只会从这些主机 + 本服务器下载，并对各源测速竞速）：
+- `OTA_MIRROR_BASES`：空格分隔的 https 基础地址，例如 `https://couple-ota.oss-cn-hangzhou.aliyuncs.com/apk`。发版后需自行把 `couple-X.Y.Z.apk` 上传到该地址下（文件名不变）。
+- `OTA_GH_ACCELERATORS`：空格分隔的 GitHub 加速前缀，默认 `https://ghfast.top/ https://gh-proxy.com/ https://ghproxy.net/`，填 `-` 关闭。第三方非官方服务，可能失效；完整性由签名清单里的 sha256 保证。
+管理端「发布设置」里的「国内下载镜像 / GitHub 加速前缀」是服务器下发的补充列表；正式包只采用其中主机已出现在签名清单里的地址。
+
 仓库**变量** `DEPLOY_TARGET`：`windows`（默认，未设置即是）= webhook 部署 Windows 包；`docker` = webhook 部署镜像。两种产物每次推 main 都会构建（Windows zip 发到滚动预发布 `edge`，镜像推到 GHCR），只是 webhook 只通知其中一种。
 
 推镜像用的是自带的 `GITHUB_TOKEN`（`packages: write`），不需要额外配置。

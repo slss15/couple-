@@ -18,9 +18,19 @@ data class ReleaseSettings(
     val expectedSigningCertSha256: String = "",
     /** OTA v2 staged rollout: devices (token did) that get CANARY-stage releases first ("me first"). */
     val canaryDeviceIds: List<String> = emptyList(),
+    /**
+     * Domestic download mirrors (https base URLs, e.g. an OSS/COS bucket the operator uploads APKs to). Offered to the
+     * app as `<base>/couple-<versionName>.apk` in GET /app/update `latest.mirrors` (contract "Auto-update → mirrors").
+     */
+    val mirrors: List<String> = emptyList(),
+    /** Public GitHub accelerator prefixes; `<prefix><GitHub asset URL>` is offered as a mirror. Third-party, unofficial. */
+    val ghAccelerators: List<String> = DEFAULT_GH_ACCELERATORS,
 ) {
     companion object {
         const val DEFAULT_REPO = "slss15/couple-"
+        /** Verified with curl (HTTP 206 on a Range request for a release asset) in 2026-11. */
+        val DEFAULT_GH_ACCELERATORS = listOf("https://ghfast.top/", "https://gh-proxy.com/", "https://ghproxy.net/")
+        const val MAX_MIRRORS = 5
     }
 }
 
@@ -34,6 +44,8 @@ data class ReleaseSettingsView(
     val expectedSigningCertSha256: String?,
     val updatedAt: Long?,
     val canaryDeviceIds: List<String> = emptyList(),
+    val mirrors: List<String> = emptyList(),
+    val ghAccelerators: List<String> = emptyList(),
 )
 
 /**
@@ -49,6 +61,10 @@ data class ReleaseSettingsUpdate(
     val pollMinutes: Int? = null,
     val expectedSigningCertSha256: String? = null,
     val canaryDeviceIds: List<String>? = null,
+    /** https base URLs (≤ 5); [] clears. */
+    val mirrors: List<String>? = null,
+    /** https prefixes (≤ 5); [] = no accelerators. */
+    val ghAccelerators: List<String>? = null,
 )
 
 class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) {
@@ -65,6 +81,8 @@ class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) 
         val canary = req.canaryDeviceIds?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct()?.also { ids ->
             if (ids.size > 10 || ids.any { it.length > 128 }) throw badRequest("VALIDATION_ERROR", "canaryDeviceIds: at most 10 ids of 1..128 chars")
         }
+        val mirrors = req.mirrors?.let { httpsList("mirrors", it, trailingSlash = false) }
+        val accel = req.ghAccelerators?.let { httpsList("ghAccelerators", it, trailingSlash = true) }
         val changed = mutableListOf<String>()
         val now = clock()
         val (next, at) = db.tx {
@@ -77,6 +95,8 @@ class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) 
             }
             if (token != cur.githubToken) changed += "githubToken"
             if (pin != null && pin != cur.expectedSigningCertSha256) changed += "expectedSigningCertSha256"
+            if (mirrors != null && mirrors != cur.mirrors) changed += "mirrors"
+            if (accel != null && accel != cur.ghAccelerators) changed += "ghAccelerators"
             val n = cur.copy(
                 repo = req.repo?.trim() ?: cur.repo,
                 githubToken = token,
@@ -84,6 +104,8 @@ class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) 
                 pollMinutes = req.pollMinutes ?: cur.pollMinutes,
                 expectedSigningCertSha256 = pin ?: cur.expectedSigningCertSha256,
                 canaryDeviceIds = canary ?: cur.canaryDeviceIds,
+                mirrors = mirrors ?: cur.mirrors,
+                ghAccelerators = accel ?: cur.ghAccelerators,
             )
             SettingsRepo.put(KEY, AppJson.encodeToString(ReleaseSettings.serializer(), n), now)
             n to now
@@ -113,12 +135,30 @@ class ReleaseSettingsService(private val db: Db, private val clock: () -> Long) 
         expectedSigningCertSha256 = expectedSigningCertSha256.ifEmpty { null },
         updatedAt = at,
         canaryDeviceIds = canaryDeviceIds,
+        mirrors = mirrors,
+        ghAccelerators = ghAccelerators,
     )
 
     companion object {
         const val KEY = "release.settings"
         private val REPO = Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
         private val HEX64 = Regex("^[0-9a-f]{64}$")
+
+        /**
+         * Validates a list of mirror bases / accelerator prefixes: absolute https, a host, no query/fragment/userinfo,
+         * ≤ 256 chars, ≤ [ReleaseSettings.MAX_MIRRORS]. Bases lose their trailing '/', prefixes always get one.
+         */
+        fun httpsList(field: String, raw: List<String>, trailingSlash: Boolean): List<String> {
+            val list = raw.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            if (list.size > ReleaseSettings.MAX_MIRRORS) throw badRequest("VALIDATION_ERROR", "$field: at most ${ReleaseSettings.MAX_MIRRORS} URLs")
+            return list.map { s ->
+                val u = runCatching { java.net.URI(s) }.getOrNull()
+                val ok = u != null && u.scheme == "https" && !u.host.isNullOrEmpty() && u.rawQuery == null &&
+                    u.rawFragment == null && u.rawUserInfo == null && s.length <= 256
+                if (!ok) throw badRequest("VALIDATION_ERROR", "$field: '$s' must be an absolute https URL without query/fragment")
+                if (trailingSlash) (if (s.endsWith("/")) s else "$s/") else s.trimEnd('/')
+            }
+        }
 
         /** Lowercases and strips ':' / spaces; returns null unless the result is 64 hex chars. */
         fun normalizeHex(s: String): String? = s.lowercase().replace(":", "").replace(" ", "").trim().takeIf { HEX64.matches(it) }

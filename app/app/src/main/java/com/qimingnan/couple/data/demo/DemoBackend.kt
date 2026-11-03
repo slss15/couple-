@@ -27,6 +27,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -58,7 +59,7 @@ object DemoBackend {
     const val PASSWORD = "demo123"
 
     /** 调试入口只在 debug 构建出现；release 包里这个假后端永远不会被走到。 */
-    val available: Boolean get() = BuildConfig.DEBUG
+    val available: Boolean get() = BuildConfig.DEMO_ENABLED // debug + edge（瘦身的调试 OTA 包，非 debuggable）
 
     fun isDemo(baseUrl: String?): Boolean = baseUrl != null && runCatching { java.net.URI(baseUrl).host == HOST }.getOrDefault(false)
     fun isDemoUrl(url: String?): Boolean = url != null && runCatching { java.net.URI(url).host == HOST }.getOrDefault(false)
@@ -741,15 +742,35 @@ object DemoBackend {
      * 调试 OTA 通道：CI 每次推 main 都把 debug APK 和 update.json 发到 `app-debug-edge` 预发布。这里把
      * update.json 的 downloadUrl 改写成演示后端同源的代理地址（App 只允许同源下载），返回给 UpdateRepository。
      */
-    fun rewriteUpdate(updateJson: String): String {
+    fun rewriteUpdate(updateJson: String, accelerators: List<String> = ghAccelerators): String {
         val root = CoupleJson.parseToJsonElement(updateJson).jsonObject
         val latest = root["latest"] as? JsonObject ?: return NO_UPDATE
         val url = latest["downloadUrl"]?.jsonPrimitive?.contentOrNull ?: return NO_UPDATE
         if (!url.startsWith(APK_PREFIX)) return NO_UPDATE
         val proxied = "/api/v1/$APK_PROXY_PATH?u=" + java.net.URLEncoder.encode(url, "UTF-8")
-        val newLatest = JsonObject(latest + ("downloadUrl" to JsonPrimitive(proxied)))
+        // 多镜像竞速：GitHub 直连 + 各加速前缀，App 并行测速后选最快的，卡住再换下一个（见 MirrorRace）。
+        // 调试通道没有签名清单，完整性靠 update.json 里的 sha256/size（与原来一样）。
+        val mirrors = demoMirrors(url, accelerators)
+        val newLatest = JsonObject(latest + ("downloadUrl" to JsonPrimitive(proxied)) + ("mirrors" to JsonArray(mirrors.map(::JsonPrimitive))))
         return JsonObject(root + ("latest" to newLatest)).toString()
     }
+
+    /**
+     * 第三方 GitHub 加速前缀（非官方服务，随时可能失效或限速；只影响下载速度，不影响安全：
+     * APK 最终必须通过 sha256 + 大小 + 签名证书校验）。默认值是 2026-11 用 curl 验证过支持 Range 的几个。
+     * 设置 → 关于/更新 可改；空 = 只走 GitHub 直连。
+     */
+    val DEFAULT_GH_ACCELERATORS = listOf("https://ghfast.top/", "https://gh-proxy.com/", "https://ghproxy.net/")
+    @Volatile var ghAccelerators: List<String> = DEFAULT_GH_ACCELERATORS
+
+    /** 解析设置里的加速前缀：逗号/空白/换行分隔，只收 https，统一以 / 结尾，去重，最多 5 个。 */
+    fun parseAccelerators(text: String): List<String> = text.split(',', ' ', '\n', '\t', '，')
+        .map { it.trim() }.filter { it.startsWith("https://") && it.length > 8 && !it.contains(' ') }
+        .map { if (it.endsWith("/")) it else "$it/" }.distinct().take(5)
+
+    /** GitHub 直连在前，然后是 前缀+完整 GitHub 地址（ghfast.top 等的用法）。 */
+    fun demoMirrors(githubUrl: String, accelerators: List<String>): List<String> =
+        listOf(githubUrl) + accelerators.map { it + githubUrl }
 
     private fun err(code: String, message: String) = buildJsonObject { put("code", code); put("message", message) }.toString()
 }
@@ -760,7 +781,7 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
     private val upstream by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS) // 卡住 15 秒算失速，App 换下一个镜像
             .build()
     }
 

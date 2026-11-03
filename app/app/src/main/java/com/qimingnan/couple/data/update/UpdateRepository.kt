@@ -133,7 +133,7 @@ class UpdateRepository @Inject constructor(
     }
 
     private sealed interface Vetted {
-        data class Ok(val verifiedVersionCode: Int?) : Vetted
+        data class Ok(val verifiedVersionCode: Int?, val manifest: SignedManifest? = null) : Vetted
         data class Rejected(val message: String) : Vetted
     }
 
@@ -144,8 +144,9 @@ class UpdateRepository @Inject constructor(
     private fun vet(info: UpdateInfo, installed: Int): Vetted {
         if (!UpdateLogic.isNewer(info, installed)) return Vetted.Rejected("已是最新版本")
         val pkg = ManifestVerifier.releasePackageOf(context.packageName)
+        var signed: SignedManifest? = null
         val verified = when (val r = ManifestVerifier.verify(info, BuildConfig.OTA_PUBLIC_KEY, pkg)) {
-            is ManifestVerifier.Result.Verified -> r.manifest.versionCode
+            is ManifestVerifier.Result.Verified -> r.manifest.also { signed = it }.versionCode
             ManifestVerifier.Result.Skipped -> {
                 Log.w(TAG, "OTA manifest verification skipped: no OTA_PUBLIC_KEY pinned in this build")
                 null
@@ -160,7 +161,7 @@ class UpdateRepository @Inject constructor(
             Log.w(TAG, "Rejected update ${info.versionCode}: below highest seen $highest (anti-downgrade)")
             return Vetted.Rejected("服务器提供的版本低于已知的最新版本，已拒绝")
         }
-        return Vetted.Ok(verified)
+        return Vetted.Ok(verified, signed)
     }
 
     private fun currentVersion(): Pair<String, Int> {
@@ -206,7 +207,8 @@ class UpdateRepository @Inject constructor(
                     prefs.edit().putInt(KEY_HIGHEST_SEEN, next).apply()
                 }
                 val trusted = latest?.takeIf { vetted is Vetted.Ok }
-                val valid = trusted?.takeIf { UpdateLogic.resolveDownloadUrl(base, it.downloadUrl) != null }
+                val signed = (vetted as? Vetted.Ok)?.manifest
+                val valid = trusted?.takeIf { UpdateLogic.downloadMirrors(base, it, signed).isNotEmpty() }
                 _state.update {
                     it.copy(
                         checking = false, lastCheckAt = now, available = valid, force = valid != null && r.force,
@@ -286,15 +288,19 @@ class UpdateRepository @Inject constructor(
 
     private fun enqueueDownload(info: UpdateInfo, running: Boolean) {
         val base = bootstrapStore.currentConfigBlocking()?.baseUrl
-        val url = base?.let { UpdateLogic.resolveDownloadUrl(it, info.downloadUrl) }
-        if (url == null) {
+        // Re-verify to get the signed mirror list (cheap; `available` only ever holds an offer that passed vet()).
+        val signed = (ManifestVerifier.verify(info, BuildConfig.OTA_PUBLIC_KEY, ManifestVerifier.releasePackageOf(context.packageName))
+            as? ManifestVerifier.Result.Verified)?.manifest
+        val mirrors = base?.let { UpdateLogic.downloadMirrors(it, info, signed) }.orEmpty()
+        if (mirrors.isEmpty()) {
             _state.update { it.copy(phase = UpdatePhase.Failed("下载地址无效")) }
             return
         }
         val req = OneTimeWorkRequestBuilder<UpdateDownloadWorker>()
             .setInputData(
                 workDataOf(
-                    UpdateDownloadWorker.KEY_URL to url.toString(),
+                    UpdateDownloadWorker.KEY_URLS to mirrors.map { it.url }.toTypedArray(),
+                    UpdateDownloadWorker.KEY_AUTH to mirrors.map { it.authenticated }.toBooleanArray(),
                     UpdateDownloadWorker.KEY_VERSION_CODE to info.versionCode,
                     UpdateDownloadWorker.KEY_VERSION_NAME to info.versionName,
                     UpdateDownloadWorker.KEY_SIZE to info.size,

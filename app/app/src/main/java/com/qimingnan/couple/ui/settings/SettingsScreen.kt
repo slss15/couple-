@@ -118,6 +118,7 @@ fun SettingsScreen(
             }
             NotifySection(notifyVm)
             ChatExportSection(exportVm)
+            UpdateMirrorSection()
         }
     }
 }

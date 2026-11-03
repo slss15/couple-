@@ -71,6 +71,10 @@ android {
         buildConfigField("int", "MIN_PEER_PROTOCOL", coupleMinPeerProtocol.toString())
         buildConfigField("String", "OTA_PUBLIC_KEY", "\"$otaPublicKey\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // OTA 包瘦身：两台手机都是现代 arm64 设备，只打 arm64-v8a（ML Kit barhopper 等 .so 每个 ABI ~3–6 MB）。
+        ndk { abiFilters += "arm64-v8a" }
+        // 只保留中文/英文资源（AndroidX/Material/Play services 自带几十种语言）。
+        resourceConfigurations += listOf("zh", "en")
     }
 
     signingConfigs {
@@ -101,6 +105,20 @@ android {
             signingConfig = signingConfigs.getByName("debugShared")
             buildConfigField("String", "DEMO_UPDATE_URL", "\"https://github.com/slss15/couple-/releases/download/app-debug-edge/update.json\"")
             buildConfigField("boolean", "ALLOW_CLEARTEXT_DEBUG", "true")
+            buildConfigField("boolean", "DEMO_ENABLED", "true")
+        }
+        // Debug OTA channel (app.yml debug-edge job → GitHub prerelease app-debug-edge): same applicationId (.debug),
+        // same shared debug key and same debug source set as `debug`, but R8-minified + resource-shrunk so the
+        // download from mainland China is small. Local `assembleDebug` stays non-minified for fast iteration.
+        create("edge") {
+            initWith(getByName("debug"))
+            // Not debuggable: R8 disables all optimisation/obfuscation for debuggable variants. The offline demo
+            // account is gated on BuildConfig.DEMO_ENABLED (not BuildConfig.DEBUG), so it still works here.
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            matchingFallbacks += listOf("debug")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         release {
             isMinifyEnabled = true
@@ -108,7 +126,16 @@ android {
             signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release") else null
             buildConfigField("boolean", "ALLOW_CLEARTEXT_DEBUG", "false")
             buildConfigField("String", "DEMO_UPDATE_URL", "\"\"")
+            buildConfigField("boolean", "DEMO_ENABLED", "false")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+    sourceSets {
+        // edge is a minified debug: reuse src/debug (debug manifest, cleartext network config, MQTT probe receiver)
+        getByName("edge") {
+            java.srcDirs("src/debug/java")
+            res.srcDirs("src/debug/res")
+            manifest.srcFile("src/debug/AndroidManifest.xml")
         }
     }
     compileOptions {
@@ -127,6 +154,11 @@ android {
             excludes += setOf(
                 "/META-INF/{AL2.0,LGPL2.1}",
                 "META-INF/versions/9/OSGI-INF/MANIFEST.MF",
+                // BouncyCastle is only used for Ed25519 (data/bootstrap/Ed25519Verifier.kt): drop its PQC tables
+                // (~1.2 MB picnic lowmc*.properties) and X.509 reviewer message bundles, never loaded by our code.
+                "org/bouncycastle/pqc/**",
+                "org/bouncycastle/x509/**",
+                "DebugProbesKt.bin",
             )
         }
     }

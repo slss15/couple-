@@ -203,6 +203,10 @@ export interface ReleaseSettingsView {
   expectedSigningCertSha256: string | null
   /** canary 设备 ID（最多 10 个，每个 1–128 字符）；CANARY 阶段的版本仅对这些设备可见 */
   canaryDeviceIds: string[]
+  /** 国内下载镜像（https 基础地址，最多 5 个）；App 从 <base>/couple-<versionName>.apk 下载并与其他源竞速 */
+  mirrors: string[]
+  /** GitHub 加速前缀（https，最多 5 个，空 = 不经加速）；第三方非官方服务 */
+  ghAccelerators: string[]
   updatedAt: number | null
 }
 
@@ -214,6 +218,8 @@ export interface ReleaseSettingsUpdate {
   pollMinutes?: number
   expectedSigningCertSha256?: string
   canaryDeviceIds?: string[]
+  mirrors?: string[]
+  ghAccelerators?: string[]
 }
 
 /** server-updater 上报的状态（原样转发，字段可能缺失） */

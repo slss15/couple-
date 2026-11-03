@@ -10,6 +10,7 @@ import {
   isValidPollMinutes,
   normalizeCertSha256,
   releaseSettingsForm,
+  isValidHttpsBaseList,
   releaseSettingsPayload,
   type ReleaseSettingsForm,
 } from '@/utils/releases'
@@ -37,6 +38,12 @@ const rules: Record<string, FormItemRule[]> = {
       validator: (_r, v: string, cb) =>
         !v || normalizeCertSha256(v) ? cb() : cb(new Error('需为 64 位十六进制 SHA-256（可带冒号）')),
     },
+  ],
+  mirrors: [
+    { validator: (_r, v: string[], cb) => (isValidHttpsBaseList(v) ? cb() : cb(new Error('最多 5 个 https 地址（不带 ? 和 #）'))) },
+  ],
+  ghAccelerators: [
+    { validator: (_r, v: string[], cb) => (isValidHttpsBaseList(v) ? cb() : cb(new Error('最多 5 个 https 前缀（不带 ? 和 #）'))) },
   ],
   canaryIds: [
     {
@@ -123,6 +130,20 @@ onMounted(load)
           CANARY 阶段的版本仅对这些设备可见，健康上报 OK 后自动扩大到全部。设备 ID 在「设备」页复制；带
           <code>rollout: staged</code> 注释的 tag 发布时默认只发 canary。
         </div>
+      </el-form-item>
+      <el-form-item label="国内下载镜像" prop="mirrors">
+        <el-select v-model="form.mirrors" multiple filterable allow-create default-first-option :reserve-keyword="false"
+          placeholder="https://xxx.oss-cn-hangzhou.aliyuncs.com/couple（回车添加）" class="wide" />
+        <div class="muted">
+          App 从 <code>&lt;地址&gt;/couple-&lt;版本号&gt;.apk</code> 下载，与本服务器、GitHub 直连/加速一起测速竞速。需自行把 APK
+          上传到该对象存储。正式包只接受签名清单里出现过的主机（CI 仓库变量 <code>OTA_MIRROR_BASES</code>），完整性始终由签名清单中的
+          sha256 保证。
+        </div>
+      </el-form-item>
+      <el-form-item label="GitHub 加速前缀" prop="ghAccelerators">
+        <el-select v-model="form.ghAccelerators" multiple filterable allow-create default-first-option :reserve-keyword="false"
+          placeholder="https://ghfast.top/（回车添加）" class="wide" />
+        <div class="muted">前缀 + GitHub Release 资源完整地址。第三方非官方代理，可能随时失效；清空 = 不经加速。</div>
       </el-form-item>
       <div class="actions">
         <el-button @click="load">重新加载</el-button>

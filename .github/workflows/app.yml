@@ -45,14 +45,16 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
-      - name: Build debug APK + unit tests
+      - name: Build debug + edge APKs + unit tests
         env:
           ON_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           # Debug OTA channel: on main every build gets a strictly higher versionCode (1000 + run number).
           if [ "$ON_MAIN" = "true" ]; then export COUPLE_VERSION_CODE=$((1000 + RUN_NUMBER)); fi
-          ./gradlew assembleDebug testDebugUnitTest --stacktrace
+          # edge = the debug OTA channel's APK: debug applicationId/key/sources, but R8 + resource shrinking (small
+          # download from mainland China). Building it on PRs too catches missing keep rules before main.
+          ./gradlew assembleDebug assembleEdge testDebugUnitTest --stacktrace
 
       - name: Upload test reports
         if: always()
@@ -68,8 +70,16 @@ jobs:
           name: app-debug-apk
           path: app/app/build/outputs/apk/debug/*.apk
 
+      - name: Upload edge APK + R8 mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-edge-apk
+          path: |
+            app/app/build/outputs/apk/edge/*.apk
+            app/app/build/outputs/mapping/edge/mapping.txt
+
   debug-edge:
-    # Rolling prerelease `app-debug-edge`: the debug APK (shared debug key) + update.json, read by the debug build's
+    # Rolling prerelease `app-debug-edge`: the minified edge APK (shared debug key) + update.json, read by the debug build's
     # offline demo account (我的 → 检查更新) so the OTA flow can be tried without a server.
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -83,7 +93,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: app-debug-apk
+          name: app-edge-apk
           path: apk
       - uses: android-actions/setup-android@v3
         with:
@@ -98,7 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           CODE=$((1000 + RUN_NUMBER))
-          src=$(ls apk/*.apk | head -n1)
+          src=$(find apk -name '*.apk' | head -n1)
           name="couple-debug-$CODE.apk"
           cp "$src" "$name"
           sha=$(sha256sum "$name" | cut -d' ' -f1)

@@ -14,7 +14,9 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import android.util.Log
 import com.qimingnan.couple.di.ApiClient
+import com.qimingnan.couple.di.PlainClient
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -34,14 +36,31 @@ class UpdateDownloadWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted params: WorkerParameters,
     @ApiClient apiClient: OkHttpClient,
+    @PlainClient plainClient: OkHttpClient,
 ) : CoroutineWorker(appContext, params) {
 
-    private val downloader = ApkDownloader(
-        apiClient.newBuilder().readTimeout(60, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build(),
+    // Read timeout = the "no bytes for 15 s" stall rule (a stalled socket must not block forever): it surfaces as an
+    // IOException, the downloader switches to the next mirror and resumes from the current offset; when every mirror
+    // failed the worker returns retry() and WorkManager backs off exponentially (15 s, 30 s, ...; see enqueue).
+    private fun tuned(c: OkHttpClient, readSec: Long) = c.newBuilder()
+        .connectTimeout(10, TimeUnit.SECONDS).readTimeout(readSec, TimeUnit.SECONDS).callTimeout(0, TimeUnit.SECONDS).build()
+
+    private val transport = OkHttpRangeTransport(
+        authenticated = tuned(apiClient, MirrorRace.STALL_NO_BYTES_MS / 1000),
+        public = tuned(plainClient, MirrorRace.STALL_NO_BYTES_MS / 1000),
     )
+    /** Probes give up quickly: a mirror that cannot start within the probe window is not worth racing. */
+    private val probeTransport = OkHttpRangeTransport(
+        authenticated = tuned(apiClient, MirrorRace.PROBE_WINDOW_MS / 1000 + 1),
+        public = tuned(plainClient, MirrorRace.PROBE_WINDOW_MS / 1000 + 1),
+    )
+    private val downloader = ApkDownloader(transport)
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val url = inputData.getString(KEY_URL)?.toHttpUrlOrNull() ?: return@withContext fail("下载地址无效")
+        val urls = inputData.getStringArray(KEY_URLS).orEmpty()
+        val auth = inputData.getBooleanArray(KEY_AUTH) ?: BooleanArray(urls.size)
+        val mirrors = urls.mapIndexedNotNull { i, u -> u.takeIf { it.toHttpUrlOrNull() != null }?.let { Mirror(it, auth.getOrElse(i) { false }) } }
+        if (mirrors.isEmpty()) return@withContext fail("下载地址无效")
         val versionCode = inputData.getInt(KEY_VERSION_CODE, -1)
         val versionName = inputData.getString(KEY_VERSION_NAME) ?: versionCode.toString()
         val size = inputData.getLong(KEY_SIZE, -1)
@@ -54,8 +73,13 @@ class UpdateDownloadWorker @AssistedInject constructor(
         cleanupOthers(dest)
         val file = try {
             var lastPct = -1
-            downloader.download(
-                url, dest, size, sha,
+            // Race the mirrors (probe bytes=0-262143 in parallel), then download from the fastest with failover.
+            val ranked = if (mirrors.size == 1) listOf(Probe(mirrors[0], 0.0, true))
+                else MirrorRace.rank(MirrorRace.probeAll(mirrors, probeTransport)).also { r ->
+                    Log.i(TAG, "mirror race: " + r.joinToString { "${it.mirror.url} ${(it.bytesPerSec / 1024).toInt()}KB/s ${it.error ?: ""}" })
+                }
+            downloader.downloadFrom(
+                ranked, dest, size, sha,
                 onProgress = { done, total ->
                     setProgressAsync(workDataOf(KEY_DONE to done, KEY_TOTAL to total))
                     val pct = (done * 100 / total).toInt()
@@ -65,6 +89,7 @@ class UpdateDownloadWorker @AssistedInject constructor(
                     }
                 },
                 isStopped = { isStopped },
+                onSwitch = { m, why -> Log.w(TAG, "mirror ${m.url} failed ($why), switching") },
             )
         } catch (e: ApkDownloader.DownloadException) {
             return@withContext if (e.retryable && runAttemptCount < MAX_ATTEMPTS && !isStopped) Result.retry() else fail(e.message ?: "下载失败")
@@ -152,7 +177,9 @@ class UpdateDownloadWorker @AssistedInject constructor(
 
     companion object {
         const val UNIQUE_NAME = "app-update-download"
-        const val KEY_URL = "url"
+        const val KEY_URLS = "urls"
+        const val KEY_AUTH = "auth"
+        private const val TAG = "UpdateDownload"
         const val KEY_VERSION_CODE = "versionCode"
         const val KEY_VERSION_NAME = "versionName"
         const val KEY_SIZE = "size"
