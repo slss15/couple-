@@ -10,6 +10,11 @@ import com.qimingnan.couple.data.net.ChatPage
 import com.qimingnan.couple.data.net.ChatReadState
 import com.qimingnan.couple.data.net.Couple
 import com.qimingnan.couple.data.net.PairCode
+import com.qimingnan.couple.data.net.CreateScheduledRequest
+import com.qimingnan.couple.data.net.PatchScheduledRequest
+import com.qimingnan.couple.data.net.ScheduleCalc
+import com.qimingnan.couple.data.net.ScheduledList
+import com.qimingnan.couple.data.net.ScheduledMessage
 import com.qimingnan.couple.data.net.TokenPair
 import com.qimingnan.couple.data.net.User
 import kotlinx.coroutines.CoroutineScope
@@ -137,9 +142,125 @@ object DemoBackend {
         demoScope.launch { typingEvents.emit("""{"userId":"${partner.id}","typing":$typing,"ts":$now}""") }
     }
 
+    // ---- 定时消息（contract "Chat → Scheduled messages"，演示版只做文本 + 已有媒体） ----
+
+    private val scheduled = mutableListOf<ScheduledMessage>()
+
+    /** 演示时钟每 5 秒扫一次到期规则（真实后端由服务器调度）。 */
+    const val SCHEDULE_TICK_MS = 5_000L
+
     init {
         seed()
         seedChat()
+        demoScope.launch {
+            while (true) {
+                delay(SCHEDULE_TICK_MS)
+                runCatching { tickScheduled(System.currentTimeMillis()) }
+            }
+        }
+    }
+
+    /** 发出所有到期（nextFireAt ≤ now、未暂停）的定时消息并推进到下一次；返回发出的条数。JVM 测试直接调用。 */
+    fun tickScheduled(now: Long): Int = synchronized(stateLock) {
+        var fired = 0
+        scheduled.replaceAll { s ->
+            val due = s.nextFireAt
+            if (s.paused || due == null || due > now) return@replaceAll s
+            val msg = DemoChat(Ulid.next(now), self().id, s.text, null, now, now, null, s.type, s.mediaId, s.width, s.height)
+            chatMessages += msg
+            emitChatMessage(msg)
+            fired++
+            val next = if (s.rule.kind == com.qimingnan.couple.data.net.ScheduleRule.ONCE) null
+            else ScheduleCalc.next(s.rule, zoneOf(s.tz), now)
+            s.copy(nextFireAt = next, lastFiredAt = now)
+        }
+        fired
+    }
+
+    private fun zoneOf(tz: String?): java.time.ZoneId =
+        runCatching { java.time.ZoneId.of(tz ?: ScheduleCalc.DEFAULT_TZ) }.getOrDefault(java.time.ZoneId.of(ScheduleCalc.DEFAULT_TZ))
+
+    private fun scheduledJson(m: ScheduledMessage) = CoupleJson.encodeToString(ScheduledMessage.serializer(), m)
+
+    private fun scheduledEndpoints(method: String, p: String, now: Long): Pair<Int, String>? {
+        if (p == "chat/scheduled") {
+            if (!paired) return 403 to err("NOT_PAIRED", "You are not paired")
+            when (method) {
+                "GET" -> return 200 to CoupleJson.encodeToString(
+                    ScheduledList.serializer(), ScheduledList(scheduled.sortedByDescending { it.createdAt }),
+                )
+                "POST" -> {
+                    val req = runCatching { json.decodeFromString(CreateScheduledRequest.serializer(), currentBody) }.getOrNull()
+                        ?: return 400 to err("VALIDATION_ERROR", "invalid body")
+                    ScheduleCalc.problem(req.rule)?.let { return 400 to err("VALIDATION_ERROR", it) }
+                    val tz = req.tz ?: ScheduleCalc.DEFAULT_TZ
+                    if (runCatching { java.time.ZoneId.of(tz) }.isFailure) return 400 to err("VALIDATION_ERROR", "unknown tz")
+                    val text = req.text.trim()
+                    val media: DemoMedia? = when (req.type) {
+                        "text" -> {
+                            if (text.isEmpty() || text.length > 4000) return 400 to err("VALIDATION_ERROR", "text must be 1..4000 chars")
+                            null
+                        }
+                        "image", "sticker" -> {
+                            val key = req.mediaId ?: return 400 to err("VALIDATION_ERROR", "mediaId required")
+                            synchronized(mediaStore) { mediaStore[key] } ?: return 400 to err("VALIDATION_ERROR", "unknown media $key")
+                        }
+                        else -> return 400 to err("VALIDATION_ERROR", "type must be text, image or sticker")
+                    }
+                    val next = ScheduleCalc.next(req.rule, zoneOf(tz), now)
+                        ?: return 400 to err("SCHEDULE_IN_PAST", "rule.at is in the past")
+                    val m = ScheduledMessage(
+                        id = Ulid.next(now), senderId = self().id, type = req.type,
+                        text = if (req.type == "text") text else "", mediaId = media?.key, width = media?.w, height = media?.h,
+                        rule = req.rule, tz = tz, nextFireAt = next, createdAt = now,
+                    )
+                    scheduled += m
+                    return 200 to scheduledJson(m)
+                }
+            }
+            return null
+        }
+        val one = Regex("^chat/scheduled/([^/]+)$").find(p) ?: return null
+        val id = one.groupValues[1]
+        val index = scheduled.indexOfFirst { it.id == id }
+        when (method) {
+            "DELETE" -> {
+                if (index < 0) return 404 to err("SCHEDULE_NOT_FOUND", "no scheduled message")
+                scheduled.removeAt(index)
+                return 204 to ""
+            }
+            "PATCH" -> {
+                if (index < 0) return 404 to err("SCHEDULE_NOT_FOUND", "no scheduled message")
+                val cur = scheduled[index]
+                val req = runCatching { json.decodeFromString(PatchScheduledRequest.serializer(), currentBody) }.getOrNull()
+                    ?: return 400 to err("VALIDATION_ERROR", "invalid body")
+                // 与后端 ScheduledService.patch 同一套规则
+                val finished = cur.nextFireAt == null
+                val rule = req.rule ?: cur.rule
+                ScheduleCalc.problem(rule)?.let { return 400 to err("VALIDATION_ERROR", it) }
+                val tz = req.tz ?: cur.tz
+                if (runCatching { java.time.ZoneId.of(tz) }.isFailure) return 400 to err("VALIDATION_ERROR", "unknown tz")
+                val newText = req.text?.trim()
+                if (newText != null) {
+                    if (cur.type != "text") return 400 to err("VALIDATION_ERROR", "only text rules have editable text")
+                    if (newText.isEmpty() || newText.length > 4000) return 400 to err("VALIDATION_ERROR", "text must be 1..4000 chars")
+                }
+                val ruleChanged = req.rule != null || req.tz != null
+                if (finished && ruleChanged && cur.type != "text") return 409 to err("SCHEDULE_FINISHED", "this one-time message was already sent")
+                val paused = req.paused ?: cur.paused
+                val resumed = cur.paused && !paused
+                if (finished && !ruleChanged && (resumed || req.paused == false)) {
+                    return 409 to err("SCHEDULE_FINISHED", "this one-time message was already sent; edit its time to reuse it")
+                }
+                val next = if (ruleChanged || resumed) {
+                    ScheduleCalc.next(rule, zoneOf(tz), now) ?: return 400 to err("SCHEDULE_IN_PAST", "rule.at must be in the future")
+                } else cur.nextFireAt
+                val upd = cur.copy(text = newText ?: cur.text, rule = rule, tz = tz, paused = paused, nextFireAt = next)
+                scheduled[index] = upd
+                return 200 to scheduledJson(upd)
+            }
+        }
+        return null
     }
 
     private fun seedChat() {
@@ -147,8 +268,46 @@ object DemoBackend {
         chatMessages += DemoChat(Ulid.next(at), partner.id, "在呢～今天过得怎么样？", null, at, at, null)
     }
 
+    // ---- 聊天记录导出（contract "Chat → Export"）----
+    private var lastExportAt: Long? = null
+
+    /** 导出结果：状态码、body、Content-Type、Retry-After（秒，仅 429）。 */
+    data class ExportResult(val code: Int, val body: String, val contentType: String, val retryAfter: Long? = null)
+
+    /** GET chat/export：与后端一致——最早的在前、我/TA、占位符、JSON 带 mediaUrl、每分钟 1 次。 */
+    fun export(format: String?, now: Long, tz: String?): ExportResult = synchronized(stateLock) {
+        val f = (format ?: "json").lowercase()
+        if (f != "json" && f != "txt") return ExportResult(400, err("VALIDATION_ERROR", "format must be json or txt"), JSON_TYPE)
+        if (!paired) return ExportResult(403, err("NOT_PAIRED", "You are not paired"), JSON_TYPE)
+        val zone = runCatching { java.time.ZoneId.of(tz?.trim()?.ifEmpty { null } ?: "Asia/Shanghai") }
+            .getOrElse { return ExportResult(400, err("VALIDATION_ERROR", "unknown tz $tz"), JSON_TYPE) }
+        lastExportAt?.let { last ->
+            if (now - last < 60_000L) {
+                val wait = (60_000L - (now - last) + 999) / 1000
+                return ExportResult(429, err("RATE_LIMITED", "One export per minute; retry in ${wait}s"), JSON_TYPE, wait)
+            }
+        }
+        lastExportAt = now
+        val me = self().id
+        val ordered = chatMessages.sortedWith(compareBy({ it.createdAt }, { it.id })).map { it.toModel() }
+        if (f == "txt") {
+            val text = ordered.joinToString("") { com.qimingnan.couple.data.chat.ChatExportText.txtLine(it, me, zone) + "\n" }
+            return ExportResult(200, text, "text/plain; charset=utf-8")
+        }
+        val items = ordered.joinToString(",") { "\n" + com.qimingnan.couple.data.chat.ChatExportText.jsonItem(it, me).toString() }
+        return ExportResult(
+            200,
+            """{"format":"couple-chat-export","version":1,"coupleId":"$COUPLE_ID","userId":"$me","exportedAt":$now,"messages":[$items${if (items.isEmpty()) "" else "\n"}]}""" + "\n",
+            "application/json; charset=utf-8",
+        )
+    }
+
+    private const val JSON_TYPE = "application/json"
+
     /** JVM 测试用：把聊天恢复到初始状态。 */
     fun resetChat() {
+        lastExportAt = null
+        scheduled.clear()
         chatMessages.clear()
         demoMyReadUpTo = null
         demoPartnerReadUpTo = null
@@ -376,6 +535,7 @@ object DemoBackend {
 
     /** 需要可变状态的 feed 子路径（like/comment/delete）与 chat 子路径（recall/read）。 */
     private fun feedMutableEndpoints(method: String, p: String, now: Long): Pair<Int, String> {
+        scheduledEndpoints(method, p, now)?.let { return it }
         val recallMatch = Regex("^chat/messages/([^/]+)/recall$").find(p)
         if (recallMatch != null && method == "POST") {
             val msg = chatMessages.firstOrNull { it.id == recallMatch.groupValues[1] }
@@ -442,6 +602,17 @@ object DemoBackend {
             val removed = posts.removeAll { it.id == id }
             return if (removed) 204 to "" else 404 to err("POST_NOT_FOUND", "no post")
         }
+        if (p == "me/notify" && method == "GET") return 200 to notifyJson()
+        if (p == "me/notify" && method == "PUT") {
+            val body = json.parseToJsonElement(currentBody).jsonObject
+            val uid = (body["wxpusherUid"] as? JsonPrimitive)?.contentOrNull?.trim()?.ifEmpty { null }
+            if (uid != null && !uid.matches(Regex("^UID_[A-Za-z0-9_-]{1,60}$"))) {
+                return 400 to err("VALIDATION_ERROR", "wxpusherUid must look like UID_xxx")
+            }
+            demoNotifyUid = uid
+            demoNotifyPreview = (body["preview"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull() ?: false
+            return 200 to notifyJson()
+        }
         if (p == "ta/me" && method == "PUT") {
             val body = json.parseToJsonElement(currentBody).jsonObject
             (body["bio"] as? JsonPrimitive)?.contentOrNull?.let { demoBio = it.take(200) }
@@ -468,6 +639,19 @@ object DemoBackend {
             return 204 to ""
         }
         return 404 to err("NOT_FOUND", "演示后端未实现：$method /$p")
+    }
+
+    // ---- 消息提醒演示数据（演示后端不会真的发 WxPusher） ----
+    @Volatile private var demoNotifyUid: String? = null
+    @Volatile private var demoNotifyPreview: Boolean = false
+
+    private fun notifyJson(): String =
+        """{"wxpusherUid":${demoNotifyUid?.let { JsonPrimitive(it).toString() } ?: "null"},"preview":$demoNotifyPreview}"""
+
+    /** JVM 测试用：清掉消息提醒设置。 */
+    fun resetNotify() {
+        demoNotifyUid = null
+        demoNotifyPreview = false
     }
 
     // ---- TA 演示数据（me = 我的档案可编辑；partner = TA 固定档案） ----
@@ -609,6 +793,14 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
             val list = online.ifEmpty { DemoBackend.SAMPLE_STICKERS }
             return json(req, 200, CoupleJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(StickerResult.serializer()), list))
         }
+        if (req.method == "GET" && path == "chat/export") {
+            val r = DemoBackend.export(req.url.queryParameter("format"), now(), req.url.queryParameter("tz"))
+            return Response.Builder()
+                .request(req).protocol(Protocol.HTTP_1_1).code(r.code).message(if (r.code in 200..299) "OK" else "Demo")
+                .apply { r.retryAfter?.let { header("Retry-After", it.toString()) } }
+                .body(r.body.toResponseBody(r.contentType.toMediaType()))
+                .build()
+        }
         val mediaMatch = Regex("^media/([^/]+)(/thumb)?$").find(path)
         if (req.method == "GET" && mediaMatch != null) {
             val m = DemoBackend.media(mediaMatch.groupValues[1]) ?: return json(req, 404, """{"code":"MEDIA_NOT_FOUND","message":"no such media"}""")
@@ -618,7 +810,7 @@ class DemoInterceptor(private val now: () -> Long = System::currentTimeMillis) :
                 .build()
         }
         // POST/PUT body 显式交给 respond()（不再写全局变量，避免并发请求串 body）
-        val reqBody = if (req.method == "POST" || req.method == "PUT") {
+        val reqBody = if (req.method == "POST" || req.method == "PUT" || req.method == "PATCH") {
             runCatching {
                 val buf = okio.Buffer()
                 req.body?.writeTo(buf)

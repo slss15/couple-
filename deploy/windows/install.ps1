@@ -22,7 +22,9 @@
     5. registers the WinSW services couple-backend and couple-updater (and couple-cloudflared when tunnel
        parameters are given: downloads the pinned cloudflared, sha256-verified, and installs config\cloudflared\config.yml)
     6. installs <InstallDir>\watchdog\ and registers the scheduled task \Couple\couple-watchdog (every 2 min as
-       SYSTEM; skipped with -NoWatchdog, and with -NoStart unless the task already exists)
+       SYSTEM; skipped with -NoWatchdog, and with -NoStart unless the task already exists), plus the WinSW service
+       couple-tunnelwatch (tunnel-watchdog.ps1: public health every 60 s, restarts couple-cloudflared after 3
+       failures) whenever couple-cloudflared exists (not with -NoWatchdog)
     7. starts the services (unless -NoStart) and waits for GET http://127.0.0.1:<PORT>/api/v1/health
 #>
 [CmdletBinding()]
@@ -40,6 +42,8 @@ param(
     [switch]$CloudflaredOnly,
     # Do not register the watchdog scheduled task (\Couple\couple-watchdog). Implied by -NoStart for a fresh install.
     [switch]$NoWatchdog,
+    # Do not register / run the couple-tunnelwatch service (cloudflared auto-restart). Implied by -NoWatchdog.
+    [switch]$NoTunnelWatch,
     # Do not register the daily backup scheduled task (\Couple\couple-backup). Implied by -NoStart for a fresh install.
     [switch]$NoBackup,
     # Install this package even when it is older than the release in releases\CURRENT (manual rollback).
@@ -87,6 +91,7 @@ function Install-Watchdog([string]$Pkg, [string]$Dir, [bool]$Register) {
     $wd = Join-Path $Dir 'watchdog'
     New-Item -ItemType Directory -Force -Path (Join-Path $wd 'lib') | Out-Null
     Copy-Item -LiteralPath (Join-Path $Pkg 'watchdog.ps1') -Destination (Join-Path $wd 'watchdog.ps1') -Force
+    Copy-Item -LiteralPath (Join-Path $Pkg 'tunnel-watchdog.ps1') -Destination (Join-Path $wd 'tunnel-watchdog.ps1') -Force
     Copy-Item -LiteralPath (Join-Path $Pkg 'lib\common.ps1') -Destination (Join-Path $wd 'lib\common.ps1') -Force
     # The task runs these files as SYSTEM: only Administrators / SYSTEM may change them.
     Protect-Directory $wd
@@ -101,6 +106,16 @@ function Install-Watchdog([string]$Pkg, [string]$Dir, [bool]$Register) {
     Remove-Item -LiteralPath $xmlFile -Force -ErrorAction SilentlyContinue
     if ($r.ExitCode -ne 0) { throw "schtasks /Create $script:WatchdogTask failed: $($r.Output)" }
     Write-Host "    scheduled task $script:WatchdogTask (every 2 min as SYSTEM, log logs\watchdog.log)"
+}
+
+# Registers the WinSW service couple-tunnelwatch (watchdog\tunnel-watchdog.ps1 in a 60 s loop) when the tunnel
+# service exists. Install-Watchdog must have copied the script first. Returns $true when the service is registered.
+function Install-TunnelWatch([string]$Pkg, [string]$Dir, [string]$WinswExe) {
+    if ((Get-ServiceState 'couple-cloudflared') -eq 'Missing') { Write-Host '    couple-tunnelwatch skipped (no couple-cloudflared service)'; return $false }
+    Expand-Template (Join-Path $Pkg 'service\couple-tunnelwatch.xml.in') (Join-Path $servicesDir 'couple-tunnelwatch.xml') @{ INSTALL_DIR = $Dir }
+    Install-WinswService 'couple-tunnelwatch' $WinswExe
+    Write-Host '    service couple-tunnelwatch (public health every 60 s, log logs\tunnel-watchdog.log)'
+    return $true
 }
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -172,7 +187,7 @@ try {
         $staging = "$releaseDir.installing"
         if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
         New-Item -ItemType Directory -Path $staging | Out-Null
-        foreach ($item in @('jre', 'app', 'admin', 'updater', 'service', 'cloudflared', 'config', 'lib', 'winsw', 'VERSION', 'BUILD_INFO', 'versions.env', 'install.ps1', 'setup.ps1', 'uninstall.ps1', 'doctor.ps1', 'watchdog.ps1')) {
+        foreach ($item in @('jre', 'app', 'admin', 'updater', 'service', 'cloudflared', 'config', 'lib', 'winsw', 'VERSION', 'BUILD_INFO', 'versions.env', 'install.ps1', 'setup.ps1', 'uninstall.ps1', 'doctor.ps1', 'watchdog.ps1', 'tunnel-watchdog.ps1')) {
             $src = Join-Path $pkg $item
             if (-not (Test-Path -LiteralPath $src)) {
                 if ($item -eq 'BUILD_INFO') { continue }   # packages built before BUILD_INFO existed
@@ -266,6 +281,8 @@ try {
 
     Write-Step 'Watchdog (scheduled task)'
     Install-Watchdog $pkg $InstallDir (-not $NoStart -and -not $NoWatchdog)
+    $tunnelWatch = $false
+    if ($NoWatchdog -or $NoTunnelWatch) { Stop-CoupleService 'couple-tunnelwatch' } else { $tunnelWatch = Install-TunnelWatch $pkg $InstallDir $winsw }
 
     Write-Step 'Backup (scheduled task)'
     Install-Backup $pkg $InstallDir (-not $NoStart -and -not $NoBackup)
@@ -281,6 +298,7 @@ try {
     Start-Service -Name 'couple-updater'
     if ((Get-ServiceState 'couple-cloudflared') -ne 'Missing') {
         if ((Get-ServiceState 'couple-cloudflared') -eq 'Running') { Restart-Service -Name 'couple-cloudflared' } else { Start-Service -Name 'couple-cloudflared' }
+        if ($tunnelWatch) { Start-Service -Name 'couple-tunnelwatch' }
     }
 
     $healthUrl = "http://127.0.0.1:$port/api/v1/health"

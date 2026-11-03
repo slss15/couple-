@@ -140,4 +140,18 @@
     <string name="ta_month">月</string>
     <string name="ta_day">日</string>
     <string name="ta_year_optional">年份（可空）</string>
+    <string name="sched_title">定时消息</string>
+    <string name="sched_empty">还没有定时消息，长按发送键即可定时发送</string>
+    <string name="sched_next">下次：%1$s</string>
+    <string name="sched_sent">已发送</string>
+    <string name="sched_delete">删除</string>
+    <string name="sched_once">单次</string>
+    <string name="sched_daily">每天</string>
+    <string name="sched_weekly">每周</string>
+    <string name="sched_yearly">每年</string>
+    <string name="sched_send_title">定时发送</string>
+    <string name="sched_confirm">定时</string>
+    <string name="sched_cancel">取消</string>
+    <string name="sched_created">已设置定时消息</string>
+    <string name="sched_open">定时消息</string>
 </resources>

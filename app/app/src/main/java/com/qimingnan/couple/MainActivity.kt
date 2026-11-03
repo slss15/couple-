@@ -10,10 +10,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.qimingnan.couple.theme.CoupleTheme
 import com.qimingnan.couple.ui.CoupleRoot
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.qimingnan.couple.data.settings.SettingsRepository
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject lateinit var settingsRepo: SettingsRepository
     private var deepLink by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -21,7 +25,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         deepLink = extractBootstrap(intent)
         setContent {
-            CoupleTheme {
+            val settings by settingsRepo.settings.collectAsStateWithLifecycle()
+            CoupleTheme(settings) {
                 CoupleRoot(deepLinkUri = deepLink, onDeepLinkConsumed = { deepLink = null })
             }
         }

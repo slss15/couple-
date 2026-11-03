@@ -110,6 +110,7 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 
 - **安装前体检 `doctor.ps1`**：`setup.ps1` 会先运行它，逐项列出 PASS / WARN / FAIL 和修复提示（管理员权限、PowerShell/系统版本、内存与 C 盘空间、端口占用、代理、到 GitHub / MySQL / Cloudflare 的连通性、时钟偏差、控制台代码页、Defender/AppLocker）。有 FAIL 时停止；确认无碍可加 `-IgnoreDoctor`。单独运行：`powershell -ExecutionPolicy Bypass -File .\doctor.ps1`。
 - **看门狗**：计划任务 `\Couple\couple-watchdog`（SYSTEM，每 2 分钟 + 开机）。服务停了就拉起；后端健康检查连续 2 次失败就重启后端；隧道连接数为 0 或经 Cloudflare 的公网健康检查连续 2 次失败就重启 `couple-cloudflared`；C 盘剩余 < 2 GB 告警。日志 `C:\couple\logs\watchdog.log`（1 MB 轮转，留 5 份）。暂停：新建空文件 `C:\couple\config\watchdog.pause`，或在 `couple.env` 写 `WATCHDOG_ENABLED=false`。
+- **cloudflared 掉线自动重启**：服务 `couple-tunnelwatch`（WinSW 托管 `C:\couple\watchdog\tunnel-watchdog.ps1`，开机自启）。每 60 秒经 Cloudflare 请求 `https://<域名>/api/v1/health`；本机 `http://127.0.0.1:<PORT>/api/v1/health` 正常时，公网**连续 3 次**失败就重启 `couple-cloudflared`（本机后端挂了不算隧道的错，不计数）。重启退避：5 分钟内最多 1 次，和上面的看门狗共用 `C:\couple\data\watchdog\cloudflared-restart.txt`，两者加起来也不会超过；它在运行时，看门狗不再自己做公网检查（只看隧道连接数），并负责在它停掉时把它拉起。日志 `C:\couple\logs\tunnel-watchdog.log`（1 MB 轮转，留 5 份；失败和动作逐条记录，正常时每小时一行 `ok`）。`couple.env` 可调：`TUNNELWATCH_INTERVAL_SECONDS`（默认 60，最小 15）、`TUNNELWATCH_FAILURES`（默认 3）、`TUNNELWATCH_COOLDOWN_MINUTES`（默认 5，最小 5），改后 `Restart-Service couple-tunnelwatch`。暂停方式同看门狗（`watchdog.pause` / `WATCHDOG_ENABLED=false`）。`setup.ps1` / `install.ps1` 在有隧道时自动安装；不想要加 `-NoTunnelWatch`（`-NoWatchdog` 也会跳过）。手动跑一轮：`powershell -ExecutionPolicy Bypass -File C:\couple\watchdog\tunnel-watchdog.ps1 -Once`。
 - **防降级**：自动更新不会装比当前旧的版本；`install.ps1` 遇到更旧的安装包会拒绝，确需回退加 `-AllowDowngrade`（`setup.ps1` 也支持透传）。固定频道 `UPDATE_CHANNEL=<版本号>` 或签名 webhook 里的 `allowDowngrade:true` 视为有意回退。
 - **只监听本机**：后端默认 `BIND_HOST=127.0.0.1`，外部只能经 Cloudflare Tunnel 访问。
 - **权限**：`C:\couple` 只允许 Administrators 和 SYSTEM 修改。
@@ -429,7 +430,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 `
 
 ```powershell
 Get-Service couple-*, MySQL84 | Format-Table Name, Status, StartType
-# 期望：couple-backend / couple-updater / couple-cloudflared / MySQL84 都是 Running
+# 期望：couple-backend / couple-updater / couple-cloudflared / couple-tunnelwatch / MySQL84 都是 Running
 
 Invoke-RestMethod http://127.0.0.1:8080/api/v1/health          # {status: ok, version: <版本>, protocolVersion: 1}
 Invoke-RestMethod http://127.0.0.1:9000/_deploy/status         # updater 状态：target windows、channel、current.server

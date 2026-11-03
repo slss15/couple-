@@ -105,7 +105,7 @@ class EmbeddedBrokerTest {
             bob.paho.subscribe("couple/$cid/#", 1)
             val retained = assertNotNull(bob.next(), "retained presence not delivered")
             assertEquals(presence, retained.topic)
-            // Note: Moquette 0.17 delivers stored retained messages at QoS1 without the RETAIN flag, so the flag is
+            // Note: Moquette (0.17 and 0.18.1) delivers stored retained messages at QoS1 without the RETAIN flag, so the flag is
             // not asserted; receiving it on a fresh subscription is what proves it was retained.
             assertTrue(retained.payload.contains("\"online\":true"))
 
@@ -163,6 +163,44 @@ class EmbeddedBrokerTest {
             }
             assertNull(dave.next(2_000), "forged will reached a foreign couple")
             dave.close()
+        }
+    }
+
+    /** ACL applies to wills: a client may only set a will on a topic it may publish (own couple's presence/typing). */
+    @Test
+    fun willOnOwnReadOnlyTopicIsRejectedAndAllowedWillFiresOnce() {
+        val port = freePort()
+        appTest(embedded(port)) { http ->
+            startApplication()
+            val a = http.register("alice"); val b = http.register("bob")
+            val cid = http.pair(a, b)
+            val bob = connect(port, b.user.id, b.accessToken)
+            bob.paho.subscribe("couple/$cid/#", 1)
+
+            // couple/{cid}/chat is server-push only: a will there is stripped, the client is cut off, nothing fires.
+            val evil = MqttAsyncClient("ws://127.0.0.1:$port/mqtt", "a-${a.user.id}-evil", MemoryPersistence())
+            runCatching {
+                evil.connect(options(a.user.id, a.accessToken, will = "couple/$cid/chat" to "forged")).waitForCompletion(10_000)
+            }
+            var cut = false
+            repeat(30) { if (!evil.isConnected) { cut = true; return@repeat }; Thread.sleep(100) }
+            assertTrue(cut, "client with a forbidden will was not disconnected")
+            runCatching { evil.disconnectForcibly(0, 1_000, false) }
+            assertNull(bob.next(2_000), "forged will on a read-only topic was delivered")
+
+            // An allowed (non-retained) will still fires on an abrupt loss, exactly once: Moquette's own
+            // identity-less will publish is denied, WillGuard publishes the approved one.
+            val ok = MqttAsyncClient("ws://127.0.0.1:$port/mqtt", "a-${a.user.id}-phone", MemoryPersistence())
+            ok.connect(options(a.user.id, a.accessToken).apply {
+                setWill("couple/$cid/typing", "bye".toByteArray(), 1, false)
+            }).waitForCompletion(10_000)
+            Thread.sleep(300) // let the will guard record the approved will
+            ok.disconnectForcibly(0, 1_000, false)
+            val will = assertNotNull(bob.next(), "allowed will not delivered")
+            assertEquals("couple/$cid/typing", will.topic)
+            assertEquals("bye", will.payload)
+            assertNull(bob.next(1_500), "will delivered twice")
+            bob.close()
         }
     }
 

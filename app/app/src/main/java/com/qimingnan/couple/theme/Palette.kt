@@ -115,3 +115,47 @@ object Palettes {
         onSharingIndicator = 0xFF690005,
     )
 }
+
+/** 主题色强调组（primary / secondary 两组），套在中性底色上。 */
+data class Accent(
+    val primary: Long, val onPrimary: Long, val primaryContainer: Long, val onPrimaryContainer: Long,
+    val secondary: Long, val onSecondary: Long, val secondaryContainer: Long, val onSecondaryContainer: Long,
+)
+
+data class ThemeSeed(val id: String, val label: String, val light: Accent, val dark: Accent)
+
+fun CouplePalette.withAccent(a: Accent) = copy(
+    primary = a.primary, onPrimary = a.onPrimary, primaryContainer = a.primaryContainer, onPrimaryContainer = a.onPrimaryContainer,
+    secondary = a.secondary, onSecondary = a.onSecondary, secondaryContainer = a.secondaryContainer, onSecondaryContainer = a.onSecondaryContainer,
+)
+
+/** 6 个预设种子色；rose 即原默认配色。 */
+object ThemeSeeds {
+    private fun accentOf(p: CouplePalette) = Accent(p.primary, p.onPrimary, p.primaryContainer, p.onPrimaryContainer, p.secondary, p.onSecondary, p.secondaryContainer, p.onSecondaryContainer)
+
+    val all = listOf(
+        ThemeSeed("rose", "玫红", accentOf(Palettes.Light), accentOf(Palettes.Dark)),
+        ThemeSeed("blue", "天蓝",
+            Accent(0xFF0061A4, 0xFFFFFFFF, 0xFFD1E4FF, 0xFF001D36, 0xFF535F70, 0xFFFFFFFF, 0xFFD7E3F7, 0xFF101C2B),
+            Accent(0xFF9ECAFF, 0xFF003258, 0xFF00497D, 0xFFD1E4FF, 0xFFBBC7DB, 0xFF253140, 0xFF3B4858, 0xFFD7E3F7)),
+        ThemeSeed("green", "薄荷绿",
+            Accent(0xFF006C4C, 0xFFFFFFFF, 0xFF89F8C7, 0xFF002114, 0xFF4D6357, 0xFFFFFFFF, 0xFFCFE9D9, 0xFF092016),
+            Accent(0xFF6CDBAC, 0xFF003826, 0xFF005138, 0xFF89F8C7, 0xFFB3CCBE, 0xFF1F352A, 0xFF354B40, 0xFFCFE9D9)),
+        ThemeSeed("purple", "薰衣草",
+            Accent(0xFF6750A4, 0xFFFFFFFF, 0xFFEADDFF, 0xFF21005D, 0xFF625B71, 0xFFFFFFFF, 0xFFE8DEF8, 0xFF1D192B),
+            Accent(0xFFD0BCFF, 0xFF381E72, 0xFF4F378B, 0xFFEADDFF, 0xFFCCC2DC, 0xFF332D41, 0xFF4A4458, 0xFFE8DEF8)),
+        ThemeSeed("orange", "暖橙",
+            Accent(0xFF8B5000, 0xFFFFFFFF, 0xFFFFDCBE, 0xFF2C1600, 0xFF725A42, 0xFFFFFFFF, 0xFFFFDCBE, 0xFF291806),
+            Accent(0xFFFFB870, 0xFF4A2800, 0xFF693C00, 0xFFFFDCBE, 0xFFE1C1A4, 0xFF402C18, 0xFF59422C, 0xFFFFDCBE)),
+        ThemeSeed("teal", "青碧",
+            Accent(0xFF006A6A, 0xFFFFFFFF, 0xFF6FF7F6, 0xFF002020, 0xFF4A6363, 0xFFFFFFFF, 0xFFCCE8E7, 0xFF051F1F),
+            Accent(0xFF4CDADA, 0xFF003737, 0xFF004F4F, 0xFF6FF7F6, 0xFFB0CCCB, 0xFF1B3534, 0xFF324B4B, 0xFFCCE8E7)),
+    )
+
+    fun byId(id: String) = all.firstOrNull { it.id == id } ?: all.first()
+
+    fun palette(id: String, dark: Boolean): CouplePalette {
+        val s = byId(id)
+        return if (dark) Palettes.Dark.withAccent(s.dark) else Palettes.Light.withAccent(s.light)
+    }
+}

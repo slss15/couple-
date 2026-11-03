@@ -6,11 +6,13 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Multipart
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 import com.qimingnan.couple.data.update.HealthReport
 import com.qimingnan.couple.data.update.UpdateResponse
 
@@ -70,6 +72,13 @@ interface CoupleApi {
     @DELETE("feed/comments/{id}")
     suspend fun deleteComment(@Path("id") id: String): Response<Unit>
 
+    // ---- 消息提醒（contract "Chat → WxPusher reminders"） ----
+    @GET("me/notify")
+    suspend fun notifySettings(): NotifySettings
+
+    @PUT("me/notify")
+    suspend fun updateNotify(@Body body: NotifySettings): NotifySettings
+
     // ---- TA 页（contract "TA"） ----
 
     @GET("ta/summary")
@@ -110,6 +119,24 @@ interface CoupleApi {
 
     @GET("chat/state")
     suspend fun chatState(): ChatReadState
+
+    /** 聊天记录导出（contract "Chat → Export"）：流式下载，format = json | txt；每人每分钟 1 次。 */
+    @Streaming
+    @GET("chat/export")
+    suspend fun exportChat(@Query("format") format: String, @Query("tz") tz: String): Response<okhttp3.ResponseBody>
+
+    // ---- 定时消息（contract "Chat → Scheduled messages"）----
+    @GET("chat/scheduled")
+    suspend fun scheduledList(): ScheduledList
+
+    @POST("chat/scheduled")
+    suspend fun createScheduled(@Body body: CreateScheduledRequest): ScheduledMessage
+
+    @PATCH("chat/scheduled/{id}")
+    suspend fun patchScheduled(@Path("id") id: String, @Body body: PatchScheduledRequest): ScheduledMessage
+
+    @DELETE("chat/scheduled/{id}")
+    suspend fun deleteScheduled(@Path("id") id: String): Response<Unit>
 
     /** Also reports this device's app/partner-protocol versions to the server (OTA v2 partner gate). */
     @GET("app/update")

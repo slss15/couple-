@@ -29,6 +29,8 @@ import com.qimingnan.couple.data.net.TokenAuthenticator
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
+import com.qimingnan.couple.data.settings.SettingsRepository
+import com.qimingnan.couple.data.settings.settingsDataStore
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
@@ -59,6 +61,12 @@ abstract class BindingsModule {
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+
+    @Provides @Singleton
+    fun settingsRepository(
+        @ApplicationContext ctx: Context,
+        @ApplicationScope scope: CoroutineScope,
+    ): SettingsRepository = SettingsRepository(ctx.settingsDataStore, scope)
 
     @Provides @Singleton @ApplicationScope
     fun appScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

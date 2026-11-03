@@ -1,6 +1,7 @@
 package com.qimingnan.couple.backend.mqtt
 
 import com.qimingnan.couple.backend.config.AppConfig
+import io.moquette.broker.ISessionsRepository
 import io.moquette.broker.Server
 import io.moquette.broker.config.MemoryConfig
 import io.moquette.broker.security.IAuthenticator
@@ -28,17 +29,22 @@ import java.util.concurrent.ConcurrentHashMap
  *   (clients publish only their own presence/typing; feed/chat/events are server-pushed), same rules as the EMQX ACL hook.
  * - Persistent sessions (cleanSession=false) keep subscriptions and queue QoS1/2 messages while the client is away;
  *   with [AppConfig.mqttDataDir] set they survive restarts. Sessions idle longer than
- *   [AppConfig.mqttSessionExpiry] are purged (Moquette 0.17 has no per-session queue length cap; expiry is the bound).
- * - Last Will: Moquette 0.17 delivers wills but (a) does not authorize the will topic and (b) does not store a
- *   retained will as the retained message. [WillGuard] closes both gaps: wills on foreign topics are stripped and the
- *   client is disconnected, and a retained will is re-published as a retained QoS1 message so a partner that connects
- *   later sees "offline" instead of a stale "online".
+ *   [AppConfig.mqttSessionExpiry] are purged.
+ * - Last Will (Moquette 0.18.1): Moquette checks the will topic only when it fires, and then as the anonymous
+ *   "will_publisher" (no user, no client), so it cannot apply our per-user ACL. [Authorizer] therefore denies every
+ *   broker-fired will, and [WillGuard] is the only will path: at CONNECT it checks the will topic with
+ *   [MqttAccessService.canWrite] for the connecting user (a forbidden will is stripped and the client disconnected),
+ *   and on an abrupt connection loss it publishes the approved will itself (keeping its retain flag, so a retained
+ *   "offline" presence is stored for partners that connect later). A will Moquette might still hold for a rejected
+ *   client can never be published, even if stripping it fails.
  */
 class EmbeddedMqttBroker(
     private val config: AppConfig,
     private val access: MqttAccessService,
     /** Active couple ids, used to clear stale retained presence after a restart with a persistent store. */
     private val activeCoupleIds: suspend () -> List<String>,
+    /** Connection presence for chat reminders (contract "Chat → WxPusher reminders"); null = not tracked. */
+    private val presence: com.qimingnan.couple.backend.notify.PresenceTracker? = null,
 ) {
     private val log = LoggerFactory.getLogger(EmbeddedMqttBroker::class.java)
     private val server = Server()
@@ -124,16 +130,17 @@ class EmbeddedMqttBroker(
 
     private inner class Authorizer : IAuthorizatorPolicy {
         override fun canWrite(topic: Topic, user: String?, client: String?): Boolean =
-            runCatching { runBlocking { access.canWrite(user, topic.toString()) } }.getOrDefault(false)
+            // Broker-fired wills carry no identity; WillGuard publishes the approved ones (see class doc).
+            if (client == MOQUETTE_WILL_PUBLISHER) false else runCatching { runBlocking { access.canWrite(user, topic.toString()) } }.getOrDefault(false)
 
         override fun canRead(topic: Topic, user: String?, client: String?): Boolean =
             runCatching { runBlocking { access.canRead(user, topic.toString()) } }.getOrDefault(false)
     }
 
-    private data class RetainedWill(val topic: String, val payload: ByteArray, val qos: MqttQoS)
+    private data class ApprovedWill(val topic: String, val payload: ByteArray, val qos: MqttQoS, val retain: Boolean)
 
     private inner class WillGuard : AbstractInterceptHandler() {
-        private val wills = ConcurrentHashMap<String, RetainedWill>()
+        private val wills = ConcurrentHashMap<String, ApprovedWill>()
 
         override fun getID(): String = "couple-will-guard"
 
@@ -150,6 +157,7 @@ class EmbeddedMqttBroker(
         override fun onConnect(msg: InterceptConnectMessage) {
             val clientId = msg.clientID
             wills.remove(clientId)
+            msg.username?.takeIf { clientId != INTERNAL_CLIENT_ID }?.let { presence?.connected(it, clientId) }
             if (!msg.isWillFlag) return
             val topic = msg.willTopic
             val allowed = runCatching { runBlocking { access.canWrite(msg.username, topic) } }.getOrDefault(false)
@@ -160,31 +168,49 @@ class EmbeddedMqttBroker(
                 server.disconnectClient(clientId)
                 return
             }
-            if (msg.isWillRetain) {
-                val qos = MqttQoS.valueOf(msg.willQos.toInt()).let { if (it == MqttQoS.AT_MOST_ONCE) MqttQoS.AT_LEAST_ONCE else it }
-                wills[clientId] = RetainedWill(topic, msg.willMessage.copyOf(), qos)
+            val qos = MqttQoS.valueOf(msg.willQos.toInt()).let {
+                // A retained presence must be stored reliably; QoS 0 is only kept for non-retained wills.
+                if (msg.isWillRetain && it == MqttQoS.AT_MOST_ONCE) MqttQoS.AT_LEAST_ONCE else it
             }
+            wills[clientId] = ApprovedWill(topic, msg.willMessage.copyOf(), qos, msg.isWillRetain)
         }
 
         override fun onDisconnect(msg: InterceptDisconnectMessage) {
             wills.remove(msg.clientID) // clean DISCONNECT: no will
+            markGone(msg.clientID, msg.username)
+        }
+
+        /** A quick reconnect with the same client id may already be live (callbacks are asynchronous). */
+        private fun markGone(clientId: String, username: String?) {
+            val p = presence ?: return
+            if (username == null || clientId == INTERNAL_CLIENT_ID) return
+            if (runCatching { server.listConnectedClients().any { it.clientID == clientId } }.getOrDefault(false)) return
+            p.disconnected(username, clientId)
         }
 
         override fun onConnectionLost(msg: InterceptConnectionLostMessage) {
+            markGone(msg.clientID, msg.username)
             val will = wills.remove(msg.clientID) ?: return
             // A quick reconnect may already be live (interceptor callbacks are asynchronous): never overwrite it.
             if (server.listConnectedClients().any { it.clientID == msg.clientID }) return
-            runCatching { publish(will.topic, will.payload, will.qos, retain = true) }
-                .onFailure { log.warn("Could not store retained will for {}", msg.clientID, it) }
+            runCatching { publish(will.topic, will.payload, will.qos, retain = will.retain) }
+                .onFailure { log.warn("Could not publish will for {}", msg.clientID, it) }
         }
 
-        /** Best effort: Moquette exposes no API to drop a will, so clear Session.will before the connection closes. */
+        /**
+         * Hygiene only (the Authorizer already blocks broker-fired wills): Moquette exposes no API to drop a will,
+         * so replace the session's SessionData with withoutWill() before the connection closes.
+         */
         private fun stripWill(clientId: String) {
             try {
                 val registry = Server::class.java.getDeclaredField("sessions").apply { isAccessible = true }.get(server)
                 val pool = registry.javaClass.getDeclaredField("pool").apply { isAccessible = true }.get(registry) as Map<*, *>
-                val session = pool[clientId] ?: return
-                session.javaClass.getDeclaredField("will").apply { isAccessible = true }.set(session, null)
+                val session = pool[clientId] ?: return // io.moquette.broker.Session is package-private
+                val data = session.javaClass.getDeclaredField("data").apply { isAccessible = true }.get(session)
+                    as ISessionsRepository.SessionData
+                if (!data.hasWill()) return
+                session.javaClass.getDeclaredMethod("updateSessionData", ISessionsRepository.SessionData::class.java)
+                    .apply { isAccessible = true }.invoke(session, data.withoutWill())
             } catch (e: Exception) {
                 log.warn("Could not strip forbidden will of {} ({}); Moquette internals changed?", clientId, e.toString())
             }
@@ -193,5 +219,7 @@ class EmbeddedMqttBroker(
 
     companion object {
         const val INTERNAL_CLIENT_ID = "couple-backend-internal"
+        /** Client id Moquette 0.18 passes to the authorizer when it fires a Last Will (PostOffice.WILL_PUBLISHER). */
+        const val MOQUETTE_WILL_PUBLISHER = "will_publisher"
     }
 }

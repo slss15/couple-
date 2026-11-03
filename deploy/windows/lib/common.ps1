@@ -516,6 +516,35 @@ function Test-RestartAllowed([string]$LastUtc, [DateTime]$NowUtc, [int]$Cooldown
     return (($NowUtc.ToUniversalTime() - $t).TotalMinutes -ge $CooldownMinutes)
 }
 
+# One probe round of the tunnel watchdog (tunnel-watchdog.ps1). Pure: the caller does the probes and the restart.
+#   - local /health down: the public failure is not the tunnel's fault -> counter unchanged, Action 'skip'
+#   - public OK: counter reset, Action 'none'
+#   - public failed: counter + 1; at >= $FailLimit Action 'restart', or 'backoff' while the last cloudflared restart
+#     ($LastRestartUtc, ISO-8601 or empty) is less than $CooldownMinutes ago; below the limit Action 'none'
+# Returns @{ Failures = <int>; Action = 'none'|'skip'|'restart'|'backoff' }.
+function Get-TunnelWatchDecision([bool]$PublicOk, [bool]$LocalOk, [int]$Failures, [string]$LastRestartUtc, [DateTime]$NowUtc, [int]$FailLimit = 3, [int]$CooldownMinutes = 5) {
+    if (-not $LocalOk) { return @{ Failures = $Failures; Action = 'skip' } }
+    if ($PublicOk) { return @{ Failures = 0; Action = 'none' } }
+    $n = $Failures + 1
+    if ($n -lt $FailLimit) { return @{ Failures = $n; Action = 'none' } }
+    if (Test-RestartAllowed $LastRestartUtc $NowUtc $CooldownMinutes) { return @{ Failures = $n; Action = 'restart' } }
+    return @{ Failures = $n; Action = 'backoff' }
+}
+
+# Shared "last couple-cloudflared restart" marker (ISO-8601 UTC) of watchdog.ps1 and tunnel-watchdog.ps1, so the two
+# never restart the tunnel more than once per cooldown between them. Empty when missing/unreadable.
+function Get-CloudflaredRestartMarker([string]$InstallDir) {
+    $p = Join-Path $InstallDir 'data\watchdog\cloudflared-restart.txt'
+    if (-not (Test-Path -LiteralPath $p)) { return '' }
+    try { return ([IO.File]::ReadAllText($p)).Trim() } catch { return '' }
+}
+
+function Set-CloudflaredRestartMarker([string]$InstallDir, [DateTime]$NowUtc) {
+    $p = Join-Path $InstallDir 'data\watchdog\cloudflared-restart.txt'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $p) | Out-Null
+    Write-Utf8NoBom $p ($NowUtc.ToUniversalTime().ToString('o') + "`r`n")
+}
+
 # Rotates $Path when it is at least $MaxBytes: path.(Keep-1) -> path.Keep (dropped), ..., path -> path.1.
 function Invoke-LogRotation([string]$Path, [long]$MaxBytes, [int]$Keep) {
     if (-not (Test-Path -LiteralPath $Path)) { return $false }

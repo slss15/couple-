@@ -86,7 +86,7 @@ class WxPusherService(
         private val log = LoggerFactory.getLogger(WxPusherService::class.java)
 
         /** Blocking POST on the IO dispatcher; the WxPusher API answers in well under a second. */
-        private suspend fun defaultSend(url: String, body: String): Boolean = withContext(Dispatchers.IO) {
+        suspend fun defaultSend(url: String, body: String): Boolean = withContext(Dispatchers.IO) {
             val req = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")

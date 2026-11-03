@@ -3,6 +3,8 @@ package com.qimingnan.couple.ui.me
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +42,7 @@ fun MeScreen(
     onRescan: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenKeepAlive: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     vm: MeViewModel = hiltViewModel(),
     updateVm: UpdateViewModel = hiltViewModel(),
 ) {
@@ -54,6 +57,15 @@ fun MeScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(t.spacing.lg),
         verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
     ) {
+        SectionCard("设置") {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onOpenSettings).padding(vertical = t.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("底部 Tab、主题色、深浅色、字号", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                Text("›", style = t.typography.title, color = t.colors.onSurfaceVariant)
+            }
+        }
         SectionCard(stringResource(R.string.me_profile)) {
             val me = s.me
             if (me != null) {

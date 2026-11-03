@@ -14,7 +14,9 @@
          - https://<hostname>/api/v1/health through Cloudflare (hostname from config.yml), counted only while the
            local backend is healthy (a dead backend is not the tunnel's fault)
        Either probe failing 2 runs in a row restarts couple-cloudflared. With protocol http2 its edge connections can
-       die silently while /ready still answers OK; this is the backstop.
+       die silently while /ready still answers OK; this is the backstop. While the couple-tunnelwatch service
+       (tunnel-watchdog.ps1, 60 s public probe) is running, the public probe is left to it; both share the cloudflared
+       restart cooldown through data\watchdog\cloudflared-restart.txt.
     5. warns when free space on C: or the install drive is under 2 GB.
   Restarts have a cooldown (WATCHDOG_COOLDOWN_MINUTES, default 5) so a persistent outage does not cause a restart
   loop. Log: <InstallDir>\logs\watchdog.log (rotated at 1 MB, 5 files). State: <InstallDir>\data\watchdog\state.txt.
@@ -197,7 +199,11 @@ try {
         }
         $np = 0
         $publicState = 'skip'
-        if ($tunnel.Hostname) {
+        $tunnelWatchRunning = ((Get-ServiceState 'couple-tunnelwatch') -ne 'Missing') -and (Confirm-ServiceRunning 'couple-tunnelwatch')
+        if ($tunnel.Hostname -and $tunnelWatchRunning) {
+            $publicState = 'tunnelwatch'
+            $state['fail.tunnelPublic'] = 0
+        } elseif ($tunnel.Hostname) {
             if ($backendOk) {
                 $url = "https://$($tunnel.Hostname)/api/v1/health"
                 $p = if ($proxy) { Invoke-HttpProbe $url 15 $proxy } else { Invoke-HttpProbe $url 15 -Direct }
@@ -214,7 +220,11 @@ try {
         }
         if ($running -and ($nm -ge $failLimit -or $np -ge $failLimit)) {
             $reason = "metrics fails=$nm, public fails=$np"
-            if (Restart-Guarded $state 'couple-cloudflared' $reason $cooldown) {
+            $shared = Get-CloudflaredRestartMarker $InstallDir
+            if ($shared -and -not (Test-RestartAllowed $shared ([DateTime]::UtcNow) $cooldown)) {
+                Write-WatchdogLog 'WARN' "couple-cloudflared unhealthy ($reason) but restarted less than $cooldown min ago ($shared); waiting"
+            } elseif (Restart-Guarded $state 'couple-cloudflared' $reason $cooldown) {
+                Set-CloudflaredRestartMarker $InstallDir ([DateTime]::UtcNow)
                 $state['fail.tunnelMetrics'] = 0
                 $state['fail.tunnelPublic'] = 0
             }
