@@ -24,6 +24,8 @@ data class ReleaseManifest(
     val minSdk: Int = 0,
     /** "staged" (canary devices first) | "all"; null for schema-1 manifests (= all). */
     val rollout: String? = null,
+    /** Public download URLs vouched for by CI's signature (GitHub asset direct / via accelerators, OTA_MIRROR_BASES). */
+    val mirrors: List<String> = emptyList(),
 )
 
 enum class ReleaseStatus { MIRRORED, PUBLISHED, WITHDRAWN }
@@ -132,6 +134,12 @@ data class UpdateInfo(
     val manifestSig: String? = null,
     val protocolVersion: Int = 1,
     val minPeerProtocol: Int = 1,
+    /**
+     * Extra public https download URLs to race against [downloadUrl] (admin mirrors, GitHub direct and via accelerator
+     * prefixes). Not covered by the manifest signature; integrity comes from the signed sha256/size, and release apps
+     * only use hosts listed in the signed manifest's own `mirrors` (see contract "Auto-update → mirrors").
+     */
+    val mirrors: List<String> = emptyList(),
 )
 
 @Serializable

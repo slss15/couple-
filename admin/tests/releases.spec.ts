@@ -3,6 +3,7 @@ import {
   formatSize,
   isForced,
   isRepo,
+  isValidHttpsBaseList,
   isValidPollMinutes,
   normalizeCertSha256,
   releaseSettingsForm,
@@ -21,6 +22,8 @@ const view: ReleaseSettingsView = {
   pollMinutes: 30,
   expectedSigningCertSha256: HEX,
   canaryDeviceIds: ['dev-a', 'dev-b'],
+  mirrors: ['https://oss.example.cn/couple'],
+  ghAccelerators: ['https://ghfast.top/'],
   updatedAt: 1,
 }
 
@@ -35,6 +38,8 @@ describe('版本发布设置表单 → 请求体', () => {
       pollMinutes: 30,
       expectedSigningCertSha256: HEX,
       canaryDeviceIds: ['dev-a', 'dev-b'],
+      mirrors: ['https://oss.example.cn/couple'],
+      ghAccelerators: ['https://ghfast.top/'],
     })
   })
 
@@ -54,6 +59,23 @@ describe('版本发布设置表单 → 请求体', () => {
     const f = releaseSettingsForm(view)
     f.canaryIds = [' dev-a ', '', 'dev-c']
     expect(releaseSettingsPayload(f).canaryDeviceIds).toEqual(['dev-a', 'dev-c'])
+  })
+
+  it('镜像与加速前缀逐项 trim、过滤空串', () => {
+    const f = releaseSettingsForm(view)
+    f.mirrors = [' https://a.cn/x ', '']
+    const p = releaseSettingsPayload(f)
+    expect(p.mirrors).toEqual(['https://a.cn/x'])
+    expect(p.ghAccelerators).toEqual(['https://ghfast.top/'])
+  })
+
+  it('镜像地址只接受 https、最多 5 个', () => {
+    expect(isValidHttpsBaseList(['https://ghfast.top/', 'https://oss.example.cn/a'])).toBe(true)
+    expect(isValidHttpsBaseList([])).toBe(true)
+    expect(isValidHttpsBaseList(['http://a.cn/'])).toBe(false)
+    expect(isValidHttpsBaseList(['https://a.cn/?x=1'])).toBe(false)
+    expect(isValidHttpsBaseList(['not a url'])).toBe(false)
+    expect(isValidHttpsBaseList(Array(6).fill('https://a.cn/'))).toBe(false)
   })
 
   it('空视图给出默认值', () => {

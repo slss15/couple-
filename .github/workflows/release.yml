@@ -285,9 +285,28 @@ jobs:
           VERSION_CODE: ${{ needs.meta.outputs.version_code }}
           MIN_SUPPORTED: ${{ needs.meta.outputs.min_supported }}
           ROLLOUT: ${{ needs.meta.outputs.rollout }}
+          # Signed download mirrors (contract "Auto-update → mirrors"). Release apps only download from hosts listed
+          # here (plus the server's own origin), so the list is covered by the OTA signature. Repo variables:
+          #   OTA_MIRROR_BASES   space-separated https bases of domestic object storage you upload couple-X.Y.Z.apk to
+          #   OTA_GH_ACCELERATORS space-separated GitHub accelerator prefixes (default below; "-" = none)
+          OTA_MIRROR_BASES: ${{ vars.OTA_MIRROR_BASES }}
+          OTA_GH_ACCELERATORS: ${{ vars.OTA_GH_ACCELERATORS }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           cd out
+          gh_url="https://github.com/$GH_REPO/releases/download/v$VERSION/couple-$VERSION.apk"
+          accel="${OTA_GH_ACCELERATORS:-https://ghfast.top/ https://gh-proxy.com/ https://ghproxy.net/}"
+          [ "$accel" = "-" ] && accel=""
+          mirrors=()
+          for b in $OTA_MIRROR_BASES; do
+            case "$b" in https://*) mirrors+=("${b%/}/couple-$VERSION.apk") ;; *) echo "::error::OTA_MIRROR_BASES: $b is not https"; exit 1 ;; esac
+          done
+          for p in $accel; do
+            case "$p" in https://*) mirrors+=("${p%/}/$gh_url") ;; *) echo "::error::OTA_GH_ACCELERATORS: $p is not https"; exit 1 ;; esac
+          done
+          mirrors+=("$gh_url")
+          printf '%s\n' "${mirrors[@]}" | jq -R . | jq -s . > mirrors.json
           jq -n \
             --arg versionName "$VERSION" \
             --argjson versionCode "$VERSION_CODE" \
@@ -296,11 +315,12 @@ jobs:
             --rawfile notes release-notes.md \
             --argjson publishedAt "$(date +%s%3N)" \
             --slurpfile apk apk-meta.json \
+            --slurpfile mirrors mirrors.json \
             '{schema:2, packageName:$apk[0].packageName, versionName:$versionName, versionCode:$versionCode,
               sha256:$apk[0].sha256, size:$apk[0].size, signingCertSha256:$apk[0].signingCertSha256,
               minSupportedVersionCode:$minSupported, protocolVersion:$apk[0].protocolVersion,
               minPeerProtocol:$apk[0].minPeerProtocol, minSdk:$apk[0].minSdk, rollout:$rollout,
-              notes:($notes|sub("\\s+$";"")), publishedAt:$publishedAt}' > release.json
+              notes:($notes|sub("\\s+$";"")), publishedAt:$publishedAt, mirrors:$mirrors[0]}' > release.json
           cat release.json
       # The only step that sees OTA_SIGNING_KEY. The key is written to $RUNNER_TEMP by the script, removed by its
       # EXIT trap and again by the always() step below. The signature covers the exact bytes of release.json.

@@ -1,5 +1,7 @@
 package com.qimingnan.couple.update
 
+import com.qimingnan.couple.data.update.SignedManifest
+import com.qimingnan.couple.data.update.UpdateInfo
 import com.qimingnan.couple.data.update.UpdateLogic
 import com.qimingnan.couple.data.update.UpdateLogic.CertCheck
 import org.junit.Assert.assertEquals
@@ -66,6 +68,42 @@ class UpdateLogicTest {
         assertNull(UpdateLogic.resolveDownloadUrl("https://c.example.com", "https://evil.example.net/x.apk"))
         assertNull(UpdateLogic.resolveDownloadUrl("https://c.example.com", "http://c.example.com/x.apk"))
         assertNull(UpdateLogic.resolveDownloadUrl("not a url", "/x"))
+    }
+
+    private fun info(vararg mirrors: String) = UpdateInfo(
+        versionName = "1.0.1", versionCode = 10001, sha256 = a, size = 1, signingCertSha256 = a,
+        downloadUrl = "/api/v1/app/releases/10001/apk", mirrors = mirrors.toList(),
+    )
+    private fun signed(vararg mirrors: String) = SignedManifest(
+        versionName = "1.0.1", versionCode = 10001, sha256 = a, size = 1, signingCertSha256 = a, mirrors = mirrors.toList(),
+    )
+
+    @Test
+    fun downloadMirrorsWithoutSignatureAcceptHttpsServerMirrors() {
+        val ms = UpdateLogic.downloadMirrors("https://c.example.com", info("https://oss.cn/couple-1.0.1.apk", "http://plain.cn/x.apk", "https://c.example.com/other"), null)
+        assertEquals(
+            listOf("https://c.example.com/api/v1/app/releases/10001/apk" to true, "https://oss.cn/couple-1.0.1.apk" to false, "https://c.example.com/other" to true),
+            ms.map { it.url to it.authenticated },
+        )
+    }
+
+    @Test
+    fun downloadMirrorsWithSignatureOnlyAllowSignedHosts() {
+        val gh = "https://github.com/o/r/releases/download/v1.0.1/couple-1.0.1.apk"
+        val ms = UpdateLogic.downloadMirrors(
+            "https://c.example.com",
+            info("https://oss.cn/new-path/couple-1.0.1.apk", "https://evil.example/couple.apk"),
+            signed("https://ghfast.top/$gh", gh, "https://oss.cn/couple/couple-1.0.1.apk"),
+        )
+        val urls = ms.map { it.url }
+        assertEquals("https://c.example.com/api/v1/app/releases/10001/apk", urls.first())
+        assertTrue("https://ghfast.top/$gh" in urls && gh in urls)
+        assertTrue("signed host, other path", "https://oss.cn/new-path/couple-1.0.1.apk" in urls)
+        assertFalse("unsigned host dropped", urls.any { it.contains("evil.example") })
+        assertTrue(ms.drop(1).none { it.authenticated })
+        // An off-origin downloadUrl alone is never enough without a signed mirror on that host.
+        val off = info().copy(downloadUrl = "https://evil.example/x.apk")
+        assertTrue(UpdateLogic.downloadMirrors("https://c.example.com", off, signed()).isEmpty())
     }
 
     @Test

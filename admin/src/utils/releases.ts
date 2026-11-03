@@ -60,6 +60,8 @@ export interface ReleaseSettingsForm {
   pollMinutes: number
   certPin: string
   canaryIds: string[]
+  mirrors: string[]
+  ghAccelerators: string[]
 }
 
 export function releaseSettingsForm(v: ReleaseSettingsView | null): ReleaseSettingsForm {
@@ -70,6 +72,8 @@ export function releaseSettingsForm(v: ReleaseSettingsView | null): ReleaseSetti
     pollMinutes: v?.pollMinutes ?? 30,
     certPin: v?.expectedSigningCertSha256 ?? '',
     canaryIds: v?.canaryDeviceIds ?? [],
+    mirrors: v?.mirrors ?? [],
+    ghAccelerators: v?.ghAccelerators ?? [],
   }
 }
 
@@ -84,10 +88,25 @@ export function releaseSettingsPayload(f: ReleaseSettingsForm): ReleaseSettingsU
     pollMinutes: f.pollMinutes,
     expectedSigningCertSha256: f.certPin.trim() ? (normalizeCertSha256(f.certPin) ?? f.certPin.trim()) : '',
     canaryDeviceIds: f.canaryIds.map((s) => s.trim()).filter(Boolean),
+    mirrors: f.mirrors.map((s) => s.trim()).filter(Boolean),
+    ghAccelerators: f.ghAccelerators.map((s) => s.trim()).filter(Boolean),
   }
   if (f.token.clear) out.githubToken = ''
   else if (f.token.value.trim()) out.githubToken = f.token.value.trim()
   return out
+}
+
+/** 镜像 / 加速前缀：必须是 https 绝对地址，不带查询串和片段，最多 5 个（与后端校验一致） */
+export function isValidHttpsBaseList(v: string[]): boolean {
+  if (v.length > 5) return false
+  return v.every((s) => {
+    try {
+      const u = new URL(s.trim())
+      return u.protocol === 'https:' && !!u.hostname && !u.search && !u.hash && !u.username && s.trim().length <= 256
+    } catch {
+      return false
+    }
+  })
 }
 
 /** 健康上报状态 → 标签颜色 */

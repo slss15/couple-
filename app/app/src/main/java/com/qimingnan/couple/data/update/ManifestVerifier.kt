@@ -22,6 +22,8 @@ data class SignedManifest(
     val rollout: String? = null,
     val notes: String? = null,
     val publishedAt: Long = 0,
+    /** Public download URLs CI vouches for (GitHub asset direct / via accelerators, domestic object storage). */
+    val mirrors: List<String> = emptyList(),
 )
 
 /**

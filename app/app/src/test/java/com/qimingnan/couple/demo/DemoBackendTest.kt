@@ -71,6 +71,29 @@ class DemoBackendTest {
         assertTrue(info.downloadUrl.startsWith("/api/v1/app/demo-apk?u=https%3A%2F%2Fgithub.com%2Fslss15%2Fcouple-%2F"))
     }
 
+    @Test fun `debug OTA update races GitHub direct plus accelerator prefixes`() {
+        val gh = "https://github.com/slss15/couple-/releases/download/app-debug-edge/couple-debug-1007.apk"
+        val src = """{"latest":{"versionName":"0.1.0-debug.7","versionCode":1007,"sha256":"${"a".repeat(64)}","size":10,""" +
+            """"signingCertSha256":"${"b".repeat(64)}","downloadUrl":"$gh"},"force":false}"""
+        val info = UpdateLogic.parseResponse(DemoBackend.rewriteUpdate(src, listOf("https://ghfast.top/", "https://gh-proxy.com/"))).latest!!
+        assertEquals(listOf(gh, "https://ghfast.top/$gh", "https://gh-proxy.com/$gh"), info.mirrors)
+        // No pinned key in debug builds: server-suggested https mirrors are accepted, demo proxy (same origin) first.
+        val mirrors = UpdateLogic.downloadMirrors(DemoBackend.BASE_URL, info, signed = null)
+        assertTrue(mirrors.first().authenticated)
+        assertEquals(listOf(gh, "https://ghfast.top/$gh", "https://gh-proxy.com/$gh"), mirrors.drop(1).map { it.url })
+        assertTrue(mirrors.drop(1).none { it.authenticated })
+        // Empty prefix list = GitHub direct only.
+        assertEquals(listOf(gh), UpdateLogic.parseResponse(DemoBackend.rewriteUpdate(src, emptyList())).latest!!.mirrors)
+    }
+
+    @Test fun `accelerator prefix parsing keeps https only`() {
+        assertEquals(
+            listOf("https://ghfast.top/", "https://gh-proxy.com/"),
+            DemoBackend.parseAccelerators("https://ghfast.top\nhttp://insecure.example/, https://gh-proxy.com/ https://ghfast.top/ junk"),
+        )
+        assertEquals(emptyList<String>(), DemoBackend.parseAccelerators("  "))
+    }
+
     @Test fun `foreign download urls are dropped`() {
         val src = """{"latest":{"versionName":"x","versionCode":2,"sha256":"","size":1,"signingCertSha256":"","downloadUrl":"https://evil.example/a.apk"}}"""
         assertNull(UpdateLogic.parseResponse(DemoBackend.rewriteUpdate(src)).latest)

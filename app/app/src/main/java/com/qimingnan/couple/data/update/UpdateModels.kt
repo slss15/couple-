@@ -24,6 +24,11 @@ data class UpdateInfo(
     val manifestSig: String? = null,
     val protocolVersion: Int = 1,
     val minPeerProtocol: Int = 1,
+    /**
+     * Extra public download URLs (admin mirrors, GitHub direct / via accelerators) the server suggests. NOT covered by
+     * the manifest signature: see [UpdateLogic.downloadMirrors] for when they are accepted.
+     */
+    val mirrors: List<String> = emptyList(),
 )
 
 /** The partner's last report as seen by the server (OTA v2 partner gate). */
@@ -112,6 +117,42 @@ object UpdateLogic {
         val resolved = base.resolve(downloadUrl) ?: return null
         val sameOrigin = resolved.scheme == base.scheme && resolved.host == base.host && resolved.port == base.port
         return resolved.takeIf { sameOrigin }
+    }
+
+    /**
+     * Every place the APK of [info] may be downloaded from, same-origin first (contract "Auto-update → mirrors").
+     *
+     * Security reasoning — why a download from a third-party host is acceptable:
+     *  - Integrity never depends on the host: size + sha256 (+ signing cert, package, versionCode) are checked against
+     *    the Ed25519-signed manifest after the download, whichever mirror(s) served the bytes ([ApkDownloader]).
+     *  - The access token never leaves our origin: only same-origin URLs are [Mirror.authenticated]; everything else is
+     *    fetched with a token-free client.
+     *  - Which hosts a release build talks to is itself signed: with a verified manifest ([signed] != null) an
+     *    off-origin URL is accepted only if it is listed in `signed.mirrors`, or shares its origin (scheme+host+port)
+     *    with a URL listed there ("allowed mirror host"; lets the admin change paths on a host CI vouched for).
+     *    Server-suggested URLs on any other host are dropped, so a compromised server cannot point phones elsewhere.
+     *  - Without a pinned key (debug/local builds, verification Skipped) server-suggested https mirrors are accepted;
+     *    the sha256 then is exactly as trustworthy as the update offer itself, as before.
+     *  - Only https is accepted off-origin.
+     */
+    fun downloadMirrors(baseUrl: String, info: UpdateInfo, signed: SignedManifest?): List<Mirror> {
+        val base = baseUrl.trimEnd('/').toHttpUrlOrNull() ?: return emptyList()
+        fun origin(u: HttpUrl) = Triple(u.scheme, u.host, u.port)
+        val out = LinkedHashMap<String, Mirror>()
+        resolveDownloadUrl(baseUrl, info.downloadUrl)?.let { out[it.toString()] = Mirror(it.toString(), authenticated = true) }
+        val signedUrls = signed?.mirrors.orEmpty().mapNotNull { it.toHttpUrlOrNull() }.filter { it.isHttps }
+        val signedOrigins = signedUrls.map(::origin).toSet()
+        val suggested = (listOf(info.downloadUrl) + info.mirrors).mapNotNull { base.resolve(it) }
+        for (u in signedUrls + suggested) {
+            if (origin(u) == origin(base)) {
+                out.putIfAbsent(u.toString(), Mirror(u.toString(), authenticated = true))
+                continue
+            }
+            if (!u.isHttps) continue
+            val allowed = signed == null || u in signedUrls || origin(u) in signedOrigins
+            if (allowed) out.putIfAbsent(u.toString(), Mirror(u.toString(), authenticated = false))
+        }
+        return out.values.toList()
     }
 
     fun sha256Hex(file: File): String = file.inputStream().use(::sha256Hex)

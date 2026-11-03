@@ -92,6 +92,9 @@ class ReleaseService(
 
     fun downloadPath(versionCode: Int) = "/api/v1/app/releases/$versionCode/apk"
 
+    /** GET /app/update `latest.mirrors` for [r] (empty when no release settings service is wired, e.g. bare tests). */
+    suspend fun mirrorsFor(r: AppRelease): List<String> = settings?.get()?.let { DownloadMirrors.forRelease(it, r.versionName) }.orEmpty()
+
     /**
      * GET /app/update. [bucketDeviceId] only selects the rollout bucket; the device report and canary membership use
      * the authenticated [caller]'s token did (a client cannot report for, or impersonate, another device).
@@ -137,6 +140,7 @@ class ReleaseService(
                 manifestSig = r.manifestSig,
                 protocolVersion = r.protocolVersion,
                 minPeerProtocol = r.minPeerProtocol,
+                mirrors = mirrorsFor(r),
             ),
             force = d.force,
             reason = d.reason,

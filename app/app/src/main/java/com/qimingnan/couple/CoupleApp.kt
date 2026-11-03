@@ -25,6 +25,7 @@ class CoupleApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        com.qimingnan.couple.ui.settings.DemoOtaPrefs.load(this)
         coordinator.start()
         keepAlive.startIfEnabled()
     }
