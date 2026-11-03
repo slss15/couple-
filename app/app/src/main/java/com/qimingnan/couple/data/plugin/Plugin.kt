@@ -44,7 +44,7 @@ object PluginRegistry {
             title = "记账",
             description = "普通个人记账：账户、支出、收入、转账与月预算",
             scope = PluginScope.PERSONAL,
-            available = false,
+            available = true, // PR4 enables the ledger plugin.
         ),
     )
 

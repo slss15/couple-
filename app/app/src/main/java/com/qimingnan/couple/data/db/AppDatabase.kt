@@ -100,9 +100,9 @@ interface ProfileDao {
 @Database(
     entities = [
         UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class,
-        ChatMessageEntity::class, AnniversaryEventEntity::class,
+        ChatMessageEntity::class, AnniversaryEventEntity::class, LedgerAccountEntity::class, LedgerEntryEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -110,6 +110,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun feedDao(): FeedDao
     abstract fun chatDao(): ChatDao
     abstract fun anniversaryDao(): AnniversaryDao
+    abstract fun ledgerDao(): LedgerDao
 
     companion object {
         /** v1 → v2：feed 缓存表（纯新增，旧表不动）。 */
@@ -154,6 +155,24 @@ abstract class AppDatabase : RoomDatabase() {
                         "`type` TEXT NOT NULL, `calendar` TEXT NOT NULL, `month` INTEGER NOT NULL, `day` INTEGER NOT NULL, " +
                         "`isLeap` INTEGER NOT NULL, `year` INTEGER, `recurring` INTEGER NOT NULL, `onlyLeapMonth` INTEGER NOT NULL, " +
                         "`reminderDaysAhead` INTEGER NOT NULL, `note` TEXT NOT NULL, `coupleId` TEXT, `createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+            }
+        }
+
+        /** v5 → v6：记账插件表（纯新增，旧表不动）。 */
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `ledger_accounts` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                        "`type` TEXT NOT NULL, `initialBalanceCents` INTEGER NOT NULL, `ownerId` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, " +
+                        "`pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `ledger_entries` (`id` TEXT NOT NULL, `ownerId` TEXT NOT NULL, " +
+                        "`accountId` TEXT, `type` TEXT NOT NULL, `categoryId` TEXT, `amountCents` INTEGER NOT NULL, " +
+                        "`fromAccountId` TEXT, `toAccountId` TEXT, `occurredOn` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
                         "`updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
                 )
             }
