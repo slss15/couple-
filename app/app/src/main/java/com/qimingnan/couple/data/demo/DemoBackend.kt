@@ -58,7 +58,7 @@ object DemoBackend {
     const val PASSWORD = "demo123"
 
     /** 调试入口只在 debug 构建出现；release 包里这个假后端永远不会被走到。 */
-    val available: Boolean get() = BuildConfig.DEBUG
+    val available: Boolean get() = BuildConfig.DEMO_ENABLED // debug + edge（瘦身的调试 OTA 包，非 debuggable）
 
     fun isDemo(baseUrl: String?): Boolean = baseUrl != null && runCatching { java.net.URI(baseUrl).host == HOST }.getOrDefault(false)
     fun isDemoUrl(url: String?): Boolean = url != null && runCatching { java.net.URI(url).host == HOST }.getOrDefault(false)
