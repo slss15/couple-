@@ -37,7 +37,7 @@ object PluginRegistry {
             title = "纪念日",
             description = "在一起天数、生日与纪念日倒数，支持阳历和阴历",
             scope = PluginScope.COUPLE,
-            available = false,
+            available = true, // PR3 enables the anniversary plugin; ledger stays false until PR4.
         ),
         PluginDescriptor(
             id = LEDGER,

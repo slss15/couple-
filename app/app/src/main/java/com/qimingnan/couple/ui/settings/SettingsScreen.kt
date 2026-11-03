@@ -67,6 +67,7 @@ private val TAB_LABELS = mapOf("tab_chat" to "聊天", "tab_feed" to "动态", "
 fun SettingsScreen(
     vm: SettingsViewModel,
     onBack: () -> Unit,
+    onOpenAnniversary: () -> Unit = {},
     modifier: Modifier = Modifier,
     exportVm: ChatExportViewModel = hiltViewModel(),
     notifyVm: NotifyViewModel = hiltViewModel(),
@@ -120,7 +121,10 @@ fun SettingsScreen(
             SectionCard("插件") {
                 com.qimingnan.couple.data.plugin.PluginRegistry.all.forEach { plugin ->
                     val enabled = plugin.available && plugin.id !in s.disabledPlugins
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable(enabled = plugin.available && plugin.id == com.qimingnan.couple.data.plugin.PluginRegistry.ANNIVERSARY) { onOpenAnniversary() },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Column(Modifier.weight(1f)) {
                             Text(plugin.title, style = t.typography.body, color = t.colors.onSurface)
                             Text(
