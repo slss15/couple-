@@ -2,6 +2,7 @@ package com.qimingnan.couple.data.update
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.os.Build
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -22,6 +23,7 @@ import com.qimingnan.couple.data.net.CoupleApi
 import com.qimingnan.couple.data.net.apiCall
 import com.qimingnan.couple.data.net.humanMessage
 import com.qimingnan.couple.di.ApplicationScope
+import com.qimingnan.couple.di.PlainClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +38,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
+import java.net.Inet6Address
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -84,6 +90,7 @@ class UpdateRepository @Inject constructor(
     private val installer: ApkInstaller,
     private val clock: Clock,
     @ApplicationScope private val scope: CoroutineScope,
+    @PlainClient private val plainClient: OkHttpClient,
 ) {
     private val prefs = context.getSharedPreferences("app_update", Context.MODE_PRIVATE)
     private val checkMutex = Mutex()
@@ -186,6 +193,23 @@ class UpdateRepository @Inject constructor(
 
     /** Returns a short Chinese message describing the result (used by 「检查更新」). */
     suspend fun check(manual: Boolean): String = checkMutex.withLock {
+        val current0 = _state.value.currentVersionCode
+        val base0 = bootstrapStore.currentConfigBlocking()?.baseUrl
+        val isDemo = base0?.let { com.qimingnan.couple.data.demo.DemoBackend.isDemo(it) } ?: false
+        if (!isDemo) {
+            when (val g = checkGithub(current0, manual)) {
+                is GithubResult.Available -> {
+                    if (!manual) prefetchIfCheap()
+                    return "发现新版本 ${g.info.versionName}"
+                }
+                GithubResult.UpToDate -> return "已是最新版本"
+                is GithubResult.Failed -> {
+                    // Signature failures are authoritative: never offer that release.
+                    // Network failures fall through to the server path below, if one is configured.
+                    if (g.signatureBad || base0 == null) return g.message
+                }
+            }
+        }
         val base = bootstrapStore.currentConfigBlocking()?.baseUrl ?: return "尚未配置服务器"
         _state.update { it.copy(checking = true, shizuku = installer.shizukuState()) }
         val current = _state.value.currentVersionCode
@@ -232,6 +256,166 @@ class UpdateRepository @Inject constructor(
         // OTA §9-4：自动检查（非手动）发现可选更新时，Wi-Fi + 电量充足就顺手预下载，用户点更新时已就绪。
         if (!manual) prefetchIfCheap()
         msg
+    }
+
+    private sealed interface GithubResult {
+        data class Available(val info: UpdateInfo, val force: Boolean, val reason: String?) : GithubResult
+        data object UpToDate : GithubResult
+        data class Failed(val message: String, val signatureBad: Boolean = false) : GithubResult
+    }
+
+    private fun hasIpv6(): Boolean = runCatching {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        val props = cm.getLinkProperties(cm.activeNetwork) ?: return false
+        props.linkAddresses.any { addr ->
+            val ip = addr.address
+            ip is Inet6Address && !ip.isLinkLocalAddress && !ip.isLoopbackAddress
+        }
+    }.getOrDefault(false)
+
+    private fun githubClient(): OkHttpClient = plainClient.newBuilder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    private suspend fun fetchFirstOk(client: OkHttpClient, urls: List<String>, maxBytes: Int): Pair<String, String>? =
+        withContext(Dispatchers.IO) {
+            for (url in urls) {
+                val body: String? = runCatching {
+                    val req = Request.Builder().url(url)
+                        .header("Accept", "application/vnd.github+json")
+                        .header("User-Agent", "couple-app-update")
+                        .build()
+                    client.newCall(req).execute().use { r ->
+                        if (!r.isSuccessful) null else r.body?.string()?.takeIf { it.length <= maxBytes }
+                    }
+                }.getOrNull()
+                if (body != null) return@withContext url to body
+            }
+            null
+        }
+
+    /**
+     * Direct GitHub update check (no server, no login, no token), rebased on
+     * PR #8: PR #8 already races mirrors and downloads with a token-free
+     * client, but its check still requires a server. This path is the
+     * server-independent decision step: GitHub Releases list (direct API
+     * only) -> release.json + release.json.sig through gh-proxy candidates
+     * -> signed-manifest verification via the existing [vet] path.
+     */
+    private suspend fun checkGithub(current: Int, manual: Boolean): GithubResult {
+        _state.update { it.copy(checking = true, shizuku = installer.shizukuState()) }
+        val now = clock.nowMillis()
+        val client = githubClient()
+        val ipv6 = hasIpv6()
+        val lastHost = prefs.getString(KEY_LAST_MIRROR_HOST, null)
+        val listResult: Pair<Int, String?>? = withContext(Dispatchers.IO) {
+            runCatching {
+                val req = Request.Builder().url(MirrorNodes.API_URL)
+                    .header("Accept", "application/vnd.github+json")
+                    .header("User-Agent", "couple-app-update")
+                    .build()
+                client.newCall(req).execute().use { r -> r.code to r.body?.string() }
+            }.getOrNull()
+        }
+        if (listResult == null) {
+            _state.update { it.copy(checking = false) }
+            return GithubResult.Failed("GitHub 检查失败：网络错误")
+        }
+        if (listResult.first == 403 || listResult.first == 429) {
+            _state.update { it.copy(checking = false) }
+            return GithubResult.Failed("GitHub 检查限流，稍后再试")
+        }
+        if (listResult.first !in 200..299 || listResult.second == null) {
+            _state.update { it.copy(checking = false) }
+            return GithubResult.Failed("GitHub 检查失败：HTTP ${listResult.first}")
+        }
+        val listBody: String = listResult.second!!
+        val release = GithubUpdate.pickLatest(GithubUpdate.parseReleases(listBody))
+            ?: run {
+                _state.update { it.copy(checking = false) }
+                return GithubResult.Failed("GitHub 上暂无正式版本")
+            }
+        val manifestAsset = GithubUpdate.manifestAsset(release)
+            ?: run {
+                _state.update { it.copy(checking = false) }
+                return GithubResult.Failed("GitHub 版本缺少更新清单")
+            }
+        val sigAsset = GithubUpdate.sigAsset(release)
+            ?: run {
+                _state.update { it.copy(checking = false) }
+                return GithubResult.Failed("GitHub 版本缺少更新签名")
+            }
+        val manifestGot = fetchFirstOk(client, MirrorNodes.candidates(manifestAsset.browser_download_url, ipv6, lastHost), 96 * 1024)
+            ?: run {
+                _state.update { it.copy(checking = false) }
+                return GithubResult.Failed("更新清单下载失败，已尝试镜像和直连")
+            }
+        val sigGot = fetchFirstOk(client, MirrorNodes.candidates(sigAsset.browser_download_url, ipv6, lastHost), 16 * 1024)
+            ?: run {
+                _state.update { it.copy(checking = false) }
+                return GithubResult.Failed("更新签名下载失败，已尝试镜像和直连")
+            }
+        MirrorNodes.lastSuccessOf(manifestGot.first)?.let { prefs.edit().putString(KEY_LAST_MIRROR_HOST, it).apply() }
+            ?: prefs.edit().remove(KEY_LAST_MIRROR_HOST).apply()
+        val manifest = runCatching {
+            CoupleJson.decodeFromString(SignedManifest.serializer(), manifestGot.second)
+        }.getOrNull()
+            ?: run {
+                _state.update { it.copy(checking = false) }
+                return GithubResult.Failed("更新清单无法解析", signatureBad = true)
+            }
+        val apkAsset = GithubUpdate.apkAsset(release, manifest.versionName)
+            ?: run {
+                _state.update { it.copy(checking = false) }
+                return GithubResult.Failed("GitHub 版本缺少安装包")
+            }
+        val info = UpdateInfo(
+            versionName = manifest.versionName,
+            versionCode = manifest.versionCode,
+            sha256 = manifest.sha256,
+            size = manifest.size,
+            signingCertSha256 = manifest.signingCertSha256,
+            notes = manifest.notes,
+            downloadUrl = apkAsset.browser_download_url,
+            mirrors = MirrorNodes.candidates(apkAsset.browser_download_url, ipv6, prefs.getString(KEY_LAST_MIRROR_HOST, null)),
+            publishedAt = manifest.publishedAt,
+            manifest = java.util.Base64.getEncoder().encodeToString(manifestGot.second.toByteArray(Charsets.UTF_8)),
+            manifestSig = sigGot.second.trim(),
+            protocolVersion = manifest.protocolVersion,
+            minPeerProtocol = manifest.minPeerProtocol,
+        )
+        if (!UpdateLogic.isNewer(info, current)) {
+            prefs.edit().putLong(KEY_LAST_CHECK, now).apply()
+            _state.update { it.copy(checking = false, lastCheckAt = now, available = null, force = false, reason = null, peer = null, lastCheckMessage = "已是最新版本") }
+            return GithubResult.UpToDate
+        }
+        val vetted = vet(info, current)
+        if (vetted !is Vetted.Ok) {
+            _state.update { it.copy(checking = false) }
+            val msg = (vetted as? Vetted.Rejected)?.message ?: "更新被拒绝"
+            return GithubResult.Failed(msg, signatureBad = true)
+        }
+        if (vetted.verifiedVersionCode != null) {
+            val next = UpdateLogic.nextHighestSeen(prefs.getInt(KEY_HIGHEST_SEEN, 0), current, vetted.verifiedVersionCode)
+            prefs.edit().putInt(KEY_HIGHEST_SEEN, next).apply()
+        }
+        val force = current < manifest.minSupportedVersionCode
+        val reason = if (force) "MIN_SUPPORTED" else null
+        val response = UpdateResponse(latest = info, force = force, reason = reason, peer = null)
+        prefs.edit()
+            .putLong(KEY_LAST_CHECK, now)
+            .putString(KEY_RESPONSE, CoupleJson.encodeToString(UpdateResponse.serializer(), response))
+            .apply()
+        _state.update {
+            it.copy(
+                checking = false, lastCheckAt = now, available = info, force = force,
+                reason = reason, peer = null,
+                dismissedVersionCode = if (manual) null else it.dismissedVersionCode,
+            )
+        }
+        _state.update { it.copy(lastCheckMessage = "发现新版本 ${info.versionName}") }
+        return GithubResult.Available(info, force, reason)
     }
 
     /** Show the prompt again (「查看更新」 in 我的). */
@@ -292,6 +476,15 @@ class UpdateRepository @Inject constructor(
         val signed = (ManifestVerifier.verify(info, BuildConfig.OTA_PUBLIC_KEY, ManifestVerifier.releasePackageOf(context.packageName))
             as? ManifestVerifier.Result.Verified)?.manifest
         val mirrors = base?.let { UpdateLogic.downloadMirrors(it, info, signed) }.orEmpty()
+            .ifEmpty {
+                // GitHub-direct check (PR1, rebased on PR #8): no server base, but
+                // info.mirrors holds the gh-proxy candidate list for the same
+                // signed APK asset. These are https and token-free, and the
+                // downloaded bytes are still verified by size + sha256 + cert.
+                info.mirrors.mapNotNull { it.toHttpUrlOrNull() }
+                    .filter { it.isHttps }
+                    .map { Mirror(it.toString(), authenticated = false) }
+            }
         if (mirrors.isEmpty()) {
             _state.update { it.copy(phase = UpdatePhase.Failed("下载地址无效")) }
             return
@@ -463,6 +656,7 @@ class UpdateRepository @Inject constructor(
         private const val KEY_PENDING_AT = "health_pending_at"
         private const val KEY_CRASH_VC = "health_crash_version_code"
         private const val KEY_CRASH_DETAIL = "health_crash_detail"
+        private const val KEY_LAST_MIRROR_HOST = "last_mirror_host"
         private const val TAG = "UpdateRepository"
 
         fun hasNotificationPermission(context: Context): Boolean =

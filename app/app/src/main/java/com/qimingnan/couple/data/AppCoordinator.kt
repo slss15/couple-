@@ -102,12 +102,19 @@ class AppCoordinator @Inject constructor(
             }
         }
         scope.launch {
-            // App update check (/app/update needs a session): on start / login, at most once per 6 h.
+            // App update check is server-independent (GitHub + mirror, PR1):
+            // it runs on start regardless of login/server config, at most once per 6 h.
+            // The health watch below still needs a session and stays login-gated.
+            bootstrapStore.state.map { b -> b?.pendingSince == null }
+                .distinctUntilChanged().collect { ready ->
+                    if (ready == true) updates.checkIfDue()
+                }
+        }
+        scope.launch {
             combine(bootstrapStore.state, session.state) { b, s ->
                 b?.pendingSince == null && b?.current != null && s is SessionState.LoggedIn
             }.distinctUntilChanged().collect { ready ->
                 if (ready) {
-                    updates.checkIfDue()
                     // OTA v2: first run of a self-installed version reports OK on the first MQTT connect.
                     updates.startHealthWatch(mqtt.state.map { it is MqttState.Connected })
                 }
