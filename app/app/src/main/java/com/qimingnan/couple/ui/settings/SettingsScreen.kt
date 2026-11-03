@@ -68,6 +68,7 @@ fun SettingsScreen(
     vm: SettingsViewModel,
     onBack: () -> Unit,
     onOpenAnniversary: () -> Unit = {},
+    onOpenLedger: () -> Unit = {},
     modifier: Modifier = Modifier,
     exportVm: ChatExportViewModel = hiltViewModel(),
     notifyVm: NotifyViewModel = hiltViewModel(),
@@ -122,7 +123,10 @@ fun SettingsScreen(
                 com.qimingnan.couple.data.plugin.PluginRegistry.all.forEach { plugin ->
                     val enabled = plugin.available && plugin.id !in s.disabledPlugins
                     Row(
-                        Modifier.fillMaxWidth().clickable(enabled = plugin.available && plugin.id == com.qimingnan.couple.data.plugin.PluginRegistry.ANNIVERSARY) { onOpenAnniversary() },
+                        Modifier.fillMaxWidth().clickable(enabled = plugin.available) {
+                            if (plugin.id == com.qimingnan.couple.data.plugin.PluginRegistry.ANNIVERSARY) onOpenAnniversary()
+                            if (plugin.id == com.qimingnan.couple.data.plugin.PluginRegistry.LEDGER) onOpenLedger()
+                        },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {

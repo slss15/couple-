@@ -56,6 +56,7 @@ fun MainShell(
     var showScheduled by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAnniversary by rememberSaveable { mutableStateOf(false) }
+    var showLedger by rememberSaveable { mutableStateOf(false) }
     val allIds = MainTab.entries.map { it.layoutId }
     val visibleIds = TabVisibility.visible(allIds, settings.hiddenTabs)
     val visibleTabs = MainTab.entries.filter { it.layoutId in visibleIds }
@@ -66,6 +67,15 @@ fun MainShell(
     androidx.activity.compose.BackHandler(enabled = showScheduled) { showScheduled = false }
     androidx.activity.compose.BackHandler(enabled = showSettings) { showSettings = false }
     androidx.activity.compose.BackHandler(enabled = showAnniversary) { showAnniversary = false }
+    androidx.activity.compose.BackHandler(enabled = showLedger) { showLedger = false }
+    if (showLedger) {
+        com.qimingnan.couple.ui.ledger.LedgerScreen(
+            vm = hiltViewModel(),
+            onBack = { showLedger = false },
+            modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
+        )
+        return
+    }
     if (showAnniversary) {
         val anniversaryVm: com.qimingnan.couple.ui.anniversary.AnniversaryViewModel = hiltViewModel()
         val anniversaryEvents by anniversaryVm.events.collectAsStateWithLifecycle()
@@ -82,6 +92,7 @@ fun MainShell(
             vm = settingsVm,
             onBack = { showSettings = false },
             onOpenAnniversary = { showSettings = false; showAnniversary = true },
+            onOpenLedger = { showSettings = false; showLedger = true },
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
         return

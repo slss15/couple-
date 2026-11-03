@@ -18,6 +18,7 @@ import com.qimingnan.couple.data.bootstrap.OkHttpServerProbe
 import com.qimingnan.couple.data.bootstrap.ServerProbe
 import com.qimingnan.couple.data.bootstrap.apiRoot
 import com.qimingnan.couple.data.db.AppDatabase
+import com.qimingnan.couple.data.db.LedgerDao
 import com.qimingnan.couple.data.db.AnniversaryDao
 import com.qimingnan.couple.data.db.ChatDao
 import com.qimingnan.couple.data.db.FeedDao
@@ -142,7 +143,7 @@ object AppModule {
     @Provides @Singleton
     fun database(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "couple.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
             .build()
 
     @Provides
@@ -156,6 +157,9 @@ object AppModule {
 
     @Provides
     fun anniversaryDao(db: AppDatabase): AnniversaryDao = db.anniversaryDao()
+
+    @Provides
+    fun ledgerDao(db: AppDatabase): LedgerDao = db.ledgerDao()
 
     @Provides @Singleton
     fun bootstrapManager(
