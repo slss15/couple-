@@ -11,6 +11,8 @@ enum class FontSize(val scale: Float, val label: String) {
 /** 本地设置（仅保存在本机 DataStore，不上传）。 */
 data class AppSettings(
     val hiddenTabs: Set<String> = emptySet(),
+    /** Plugin ids the user turned off; absent = on. Disabled plugins hide their entry but keep data. */
+    val disabledPlugins: Set<String> = emptySet(),
     val themeSeed: String = DEFAULT_SEED,
     val dynamicColor: Boolean = false,
     val darkMode: DarkMode = DarkMode.System,

@@ -36,6 +36,10 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
     suspend fun setDynamicColor(on: Boolean) = store.edit { it[DYNAMIC] = on }
     suspend fun setDarkMode(m: DarkMode) = store.edit { it[DARK] = m.name }
     suspend fun setFontSize(f: FontSize) = store.edit { it[FONT] = f.name }
+    suspend fun setPluginEnabled(id: String, enabled: Boolean) = store.edit { p ->
+        val cur = p[DISABLED_PLUGINS] ?: emptySet()
+        p[DISABLED_PLUGINS] = if (enabled) cur - id else cur + id
+    }
 
     companion object {
         private val HIDDEN = stringSetPreferencesKey("hidden_tabs")
@@ -43,6 +47,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
         private val DYNAMIC = booleanPreferencesKey("dynamic_color")
         private val DARK = stringPreferencesKey("dark_mode")
         private val FONT = stringPreferencesKey("font_size")
+        private val DISABLED_PLUGINS = stringSetPreferencesKey("disabled_plugins")
 
         fun decode(p: Preferences) = AppSettings(
             hiddenTabs = (p[HIDDEN] ?: emptySet()) - TabVisibility.LOCKED,
@@ -50,6 +55,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
             dynamicColor = p[DYNAMIC] ?: false,
             darkMode = DarkMode.entries.firstOrNull { it.name == p[DARK] } ?: DarkMode.System,
             fontSize = FontSize.entries.firstOrNull { it.name == p[FONT] } ?: FontSize.Standard,
+            disabledPlugins = p[DISABLED_PLUGINS] ?: emptySet(),
         )
     }
 }
