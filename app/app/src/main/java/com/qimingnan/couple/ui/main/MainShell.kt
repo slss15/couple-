@@ -55,6 +55,7 @@ fun MainShell(
     var tab by rememberSaveable { mutableStateOf(MainTab.Chat) }
     var showScheduled by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showAnniversary by rememberSaveable { mutableStateOf(false) }
     val allIds = MainTab.entries.map { it.layoutId }
     val visibleIds = TabVisibility.visible(allIds, settings.hiddenTabs)
     val visibleTabs = MainTab.entries.filter { it.layoutId in visibleIds }
@@ -64,10 +65,23 @@ fun MainShell(
     }
     androidx.activity.compose.BackHandler(enabled = showScheduled) { showScheduled = false }
     androidx.activity.compose.BackHandler(enabled = showSettings) { showSettings = false }
+    androidx.activity.compose.BackHandler(enabled = showAnniversary) { showAnniversary = false }
+    if (showAnniversary) {
+        val anniversaryVm: com.qimingnan.couple.ui.anniversary.AnniversaryViewModel = hiltViewModel()
+        val anniversaryEvents by anniversaryVm.events.collectAsStateWithLifecycle()
+        com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
+            events = anniversaryEvents,
+            today = java.time.LocalDate.now(),
+            onBack = { showAnniversary = false },
+            modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
+        )
+        return
+    }
     if (showSettings) {
         SettingsScreen(
             vm = settingsVm,
             onBack = { showSettings = false },
+            onOpenAnniversary = { showSettings = false; showAnniversary = true },
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
         return

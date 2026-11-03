@@ -100,15 +100,16 @@ interface ProfileDao {
 @Database(
     entities = [
         UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class,
-        ChatMessageEntity::class,
+        ChatMessageEntity::class, AnniversaryEventEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun profileDao(): ProfileDao
     abstract fun feedDao(): FeedDao
     abstract fun chatDao(): ChatDao
+    abstract fun anniversaryDao(): AnniversaryDao
 
     companion object {
         /** v1 → v2：feed 缓存表（纯新增，旧表不动）。 */
@@ -142,6 +143,19 @@ abstract class AppDatabase : RoomDatabase() {
                         "`sortAt` INTEGER NOT NULL, `recalledAt` INTEGER, `pendingState` TEXT, PRIMARY KEY(`id`))",
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_messages_sortAt` ON `chat_messages` (`sortAt`)")
+            }
+        }
+
+        /** v4 → v5：纪念日插件表（纯新增，旧表不动）。 */
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `anniversary_events` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, " +
+                        "`type` TEXT NOT NULL, `calendar` TEXT NOT NULL, `month` INTEGER NOT NULL, `day` INTEGER NOT NULL, " +
+                        "`isLeap` INTEGER NOT NULL, `year` INTEGER, `recurring` INTEGER NOT NULL, `onlyLeapMonth` INTEGER NOT NULL, " +
+                        "`reminderDaysAhead` INTEGER NOT NULL, `note` TEXT NOT NULL, `coupleId` TEXT, `createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
             }
         }
 
