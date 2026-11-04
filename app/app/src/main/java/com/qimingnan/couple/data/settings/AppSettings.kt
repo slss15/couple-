@@ -24,7 +24,7 @@ data class AppSettings(
 /** 底部 Tab 可见性：纯逻辑，id 与 MainTab.layoutId 一致；“我的”(me_entry) 永远可见。 */
 object TabVisibility {
     const val LOCKED = "me_entry"
-    val HIDEABLE = listOf("tab_chat", "tab_feed", "tab_ta")
+    val HIDEABLE = listOf("tab_chat", "tab_feed", "tab_ta", "tab_plugins")
 
     fun visible(all: List<String>, hidden: Set<String>): List<String> =
         all.filter { it == LOCKED || it !in hidden }

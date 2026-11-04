@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
@@ -36,12 +37,13 @@ import com.qimingnan.couple.data.settings.TabVisibility
 import com.qimingnan.couple.ui.settings.SettingsScreen
 import com.qimingnan.couple.ui.settings.SettingsViewModel
 
-/** 底部四个 Tab；id 与布局 JSON 的 bottomBar 条目一致（me_entry 为锁定项）。 */
+/** 底部五个 Tab；前四个 id 与布局 JSON 的 bottomBar 条目一致（me_entry 为锁定项），插件 Tab 不进 LayoutRules 默认布局，以免破坏其容量校验。 */
 enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: ImageVector) {
     Chat("tab_chat", R.string.tab_chat, Icons.Filled.Email),
     Feed("tab_feed", R.string.tab_feed, Icons.Filled.Home),
     Ta("tab_ta", R.string.tab_ta, Icons.Filled.Favorite),
     Me("me_entry", R.string.tab_me, Icons.Filled.Person),
+    Plugins("tab_plugins", R.string.tab_plugins, Icons.Filled.Build),
 }
 
 @Composable
@@ -130,6 +132,12 @@ fun MainShell(
     ) { padding ->
         when (tab) {
             MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, onOpenSettings = { showSettings = true }, modifier = Modifier.padding(padding))
+            MainTab.Plugins -> com.qimingnan.couple.ui.plugin.PluginScreen(
+                settingsVm = settingsVm,
+                onOpenAnniversary = { showAnniversary = true },
+                onOpenLedger = { showLedger = true },
+                modifier = Modifier.padding(padding),
+            )
             MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Chat -> ChatScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding), onOpenScheduled = { showScheduled = true })

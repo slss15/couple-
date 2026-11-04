@@ -7,6 +7,7 @@
     <string name="tab_feed">动态</string>
     <string name="tab_ta">TA</string>
     <string name="tab_me">我的</string>
+    <string name="tab_plugins">插件</string>
 
     <string name="bootstrap_title">连接到你们的服务器</string>
     <string name="bootstrap_subtitle">请扫描管理后台生成的配置二维码</string>
