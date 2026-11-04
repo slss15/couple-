@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.qimingnan.couple.core.Clock
 import com.qimingnan.couple.data.anniversary.AnniversaryEvent
 import com.qimingnan.couple.data.db.AnniversaryDao
+import com.qimingnan.couple.data.db.toEntity
 import com.qimingnan.couple.data.db.toModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
