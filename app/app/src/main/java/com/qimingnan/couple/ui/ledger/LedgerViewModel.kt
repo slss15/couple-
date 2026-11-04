@@ -28,6 +28,26 @@ object LedgerCategories {
     val INCOME = listOf("工资", "兼职", "理财收益", "红包", "退款", "其他")
 }
 
+/** 详细类型：大类下面的二级选择，例如餐饮 -> 早饭/午饭/晚饭。 */
+object LedgerSubcategories {
+    private val MAP = mapOf(
+        "餐饮" to listOf("早饭", "午饭", "晚饭", "夜宵", "零食", "饮料", "外卖", "其他"),
+        "交通" to listOf("公交", "地铁", "打车", "加油", "停车", "其他"),
+        "购物" to listOf("衣服", "日用品", "数码", "其他"),
+        "居住" to listOf("房租", "水电", "物业", "其他"),
+        "娱乐" to listOf("电影", "游戏", "运动", "其他"),
+        "医疗" to listOf("挂号", "药品", "其他"),
+        "教育" to listOf("书籍", "课程", "其他"),
+        "其他" to listOf("其他"),
+        "工资" to listOf("月薪", "奖金", "其他"),
+        "兼职" to listOf("工资", "其他"),
+        "理财收益" to listOf("利息", "分红", "其他"),
+        "红包" to listOf("红包", "其他"),
+        "退款" to listOf("退款", "其他"),
+    )
+    fun forCategory(category: String): List<String> = MAP[category] ?: listOf("其他")
+}
+
 @HiltViewModel
 class LedgerViewModel @Inject constructor(
     private val dao: LedgerDao,

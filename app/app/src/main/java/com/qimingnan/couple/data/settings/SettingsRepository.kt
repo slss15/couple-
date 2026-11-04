@@ -32,6 +32,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
             p[HIDDEN] = if (hidden) cur + id else cur - id
         }
     }
+    suspend fun setHomeTab(id: String) = store.edit { it[HOME_TAB] = id }
     suspend fun setThemeSeed(id: String) = store.edit { it[SEED] = id; it[DYNAMIC] = false }
     suspend fun setDynamicColor(on: Boolean) = store.edit { it[DYNAMIC] = on }
     suspend fun setDarkMode(m: DarkMode) = store.edit { it[DARK] = m.name }
@@ -43,6 +44,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
 
     companion object {
         private val HIDDEN = stringSetPreferencesKey("hidden_tabs")
+        private val HOME_TAB = stringPreferencesKey("home_tab")
         private val SEED = stringPreferencesKey("theme_seed")
         private val DYNAMIC = booleanPreferencesKey("dynamic_color")
         private val DARK = stringPreferencesKey("dark_mode")
@@ -51,6 +53,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
 
         fun decode(p: Preferences) = AppSettings(
             hiddenTabs = (p[HIDDEN] ?: emptySet()) - TabVisibility.LOCKED,
+            homeTab = p[HOME_TAB] ?: "tab_chat",
             themeSeed = p[SEED] ?: AppSettings.DEFAULT_SEED,
             dynamicColor = p[DYNAMIC] ?: false,
             darkMode = DarkMode.entries.firstOrNull { it.name == p[DARK] } ?: DarkMode.System,
