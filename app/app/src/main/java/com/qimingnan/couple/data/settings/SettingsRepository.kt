@@ -53,7 +53,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
 
         fun decode(p: Preferences) = AppSettings(
             hiddenTabs = (p[HIDDEN] ?: emptySet()) - TabVisibility.LOCKED,
-            homeTab = p[HOME_TAB] ?: "tab_chat",
+            homeTab = (p[HOME_TAB] ?: "tab_anniversary").takeIf { it != "tab_chat" } ?: "tab_anniversary",
             themeSeed = p[SEED] ?: AppSettings.DEFAULT_SEED,
             dynamicColor = p[DYNAMIC] ?: false,
             darkMode = DarkMode.entries.firstOrNull { it.name == p[DARK] } ?: DarkMode.System,

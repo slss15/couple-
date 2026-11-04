@@ -61,8 +61,8 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun setPluginEnabled(id: String, enabled: Boolean) = viewModelScope.launch { repo.setPluginEnabled(id, enabled) }
 }
 
-private val TAB_LABELS = mapOf("tab_chat" to "聊天", "tab_feed" to "动态", "tab_ta" to "TA", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
-private val HOME_TAB_LABELS = mapOf("tab_chat" to "聊天", "tab_feed" to "动态", "tab_ta" to "TA", "me_entry" to "我的", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
+private val TAB_LABELS = mapOf("tab_feed" to "动态", "tab_ta" to "TA", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
+private val HOME_TAB_LABELS = mapOf("tab_feed" to "动态", "tab_ta" to "TA", "me_entry" to "我的", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

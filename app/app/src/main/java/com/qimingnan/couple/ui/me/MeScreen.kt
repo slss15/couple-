@@ -43,6 +43,7 @@ fun MeScreen(
     modifier: Modifier = Modifier,
     onOpenKeepAlive: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onOpenChat: () -> Unit = {},
     vm: MeViewModel = hiltViewModel(),
     updateVm: UpdateViewModel = hiltViewModel(),
 ) {
@@ -63,6 +64,13 @@ fun MeScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("底部 Tab、主题色、深浅色、字号", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                Text("›", style = t.typography.title, color = t.colors.onSurfaceVariant)
+            }
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onOpenChat).padding(vertical = t.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("聊天（不在 Tab 栏，从这里进入）", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
                 Text("›", style = t.typography.title, color = t.colors.onSurfaceVariant)
             }
         }

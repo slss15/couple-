@@ -60,8 +60,8 @@ class SettingsRepositoryTest {
         val r = repo(File(tmp.root, "c.preferences_pb"))
         r.setTabHidden(TabVisibility.LOCKED, true)
         r.setTabHidden("bogus", true)
-        r.setTabHidden("tab_chat", true)
-        assertEquals(setOf("tab_chat"), r.await { it.hiddenTabs.isNotEmpty() }.hiddenTabs)
+        r.setTabHidden("tab_feed", true)
+        assertEquals(setOf("tab_feed"), r.await { it.hiddenTabs.isNotEmpty() }.hiddenTabs)
     }
 
     @Test fun dynamicColorTurnsOffWhenPickingSeed() = runBlocking {
@@ -101,8 +101,8 @@ class TabVisibilityTest {
 }
 
 class ThemeSettingsTest {
-    @Test fun sixSeedsAllPassContrast() {
-        assertEquals(6, ThemeSeeds.all.size)
+    @Test fun allSeedsPassContrast() {
+        assertEquals(7, ThemeSeeds.all.size)
         for (seed in ThemeSeeds.all) for (dark in listOf(false, true)) {
             val p = ThemeSeeds.palette(seed.id, dark)
             p.textPairs().forEach { (n, c) -> assertTrue("${seed.id}/$dark $n", Contrast.ratio(c.first, c.second) >= 4.5) }
