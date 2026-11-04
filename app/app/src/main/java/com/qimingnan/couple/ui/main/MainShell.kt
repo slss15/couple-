@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -36,12 +38,14 @@ import com.qimingnan.couple.data.settings.TabVisibility
 import com.qimingnan.couple.ui.settings.SettingsScreen
 import com.qimingnan.couple.ui.settings.SettingsViewModel
 
-/** 底部四个 Tab；id 与布局 JSON 的 bottomBar 条目一致（me_entry 为锁定项）。 */
-enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: ImageVector) {
+/** 底部 Tab：基础四个 + 每个插件一个独立 Tab；插件 Tab 可在设置里隐藏，关掉插件则连同 Tab 一起隐藏。 */
+enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: ImageVector, val pluginId: String? = null) {
     Chat("tab_chat", R.string.tab_chat, Icons.Filled.Email),
     Feed("tab_feed", R.string.tab_feed, Icons.Filled.Home),
     Ta("tab_ta", R.string.tab_ta, Icons.Filled.Favorite),
     Me("me_entry", R.string.tab_me, Icons.Filled.Person),
+    Anniversary("tab_anniversary", R.string.tab_anniversary, Icons.Filled.DateRange, "anniversary"),
+    Ledger("tab_ledger", R.string.tab_ledger, Icons.Filled.AddCircle, "ledger"),
 }
 
 @Composable
@@ -53,16 +57,36 @@ fun MainShell(
     val t = LocalCoupleTokens.current
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(MainTab.Chat) }
+    var homeApplied by rememberSaveable { mutableStateOf(false) }
     var showScheduled by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAnniversary by rememberSaveable { mutableStateOf(false) }
     var showLedger by rememberSaveable { mutableStateOf(false) }
     val allIds = MainTab.entries.map { it.layoutId }
     val visibleIds = TabVisibility.visible(allIds, settings.hiddenTabs)
-    val visibleTabs = MainTab.entries.filter { it.layoutId in visibleIds }
-    LaunchedEffect(settings.hiddenTabs, tab) {
+    val visibleTabs = MainTab.entries.filter { item ->
+        item.layoutId in visibleIds &&
+            (item.pluginId == null || com.qimingnan.couple.data.plugin.PluginRegistry.isEnabled(item.pluginId, settings.disabledPlugins))
+    }
+    // 首页：只在第一次加载设置时应用一次，之后用户自己切 Tab 不会被设置覆盖。
+    LaunchedEffect(settings.homeTab) {
+        if (!homeApplied) {
+            val home = MainTab.entries.firstOrNull { it.layoutId == settings.homeTab }
+            if (home != null && home in visibleTabs) tab = home
+            homeApplied = true
+        }
+    }
+    LaunchedEffect(settings.hiddenTabs, settings.disabledPlugins, tab) {
         val resolved = TabVisibility.resolveSelected(tab.layoutId, allIds, settings.hiddenTabs)
-        if (resolved != tab.layoutId) tab = MainTab.entries.first { it.layoutId == resolved }
+        val resolvedTab = MainTab.entries.first { it.layoutId == resolved }
+        val pluginOk = resolvedTab.pluginId == null ||
+            com.qimingnan.couple.data.plugin.PluginRegistry.isEnabled(resolvedTab.pluginId, settings.disabledPlugins)
+        if (!pluginOk || resolvedTab !in visibleTabs) {
+            val home = MainTab.entries.firstOrNull { it.layoutId == settings.homeTab && it in visibleTabs }
+            tab = home ?: MainTab.Me
+        } else if (resolved != tab.layoutId) {
+            tab = resolvedTab
+        }
     }
     androidx.activity.compose.BackHandler(enabled = showScheduled) { showScheduled = false }
     androidx.activity.compose.BackHandler(enabled = showSettings) { showSettings = false }
@@ -133,6 +157,23 @@ fun MainShell(
             MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Chat -> ChatScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding), onOpenScheduled = { showScheduled = true })
+            MainTab.Anniversary -> {
+                val anniversaryVm: com.qimingnan.couple.ui.anniversary.AnniversaryViewModel = hiltViewModel()
+                val anniversaryEvents by anniversaryVm.events.collectAsStateWithLifecycle()
+                com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
+                    events = anniversaryEvents,
+                    today = java.time.LocalDate.now(),
+                    onBack = { tab = MainTab.Me },
+                    showBack = false,
+                    modifier = Modifier.padding(padding),
+                )
+            }
+            MainTab.Ledger -> com.qimingnan.couple.ui.ledger.LedgerScreen(
+                vm = hiltViewModel(),
+                onBack = { tab = MainTab.Me },
+                showBack = false,
+                modifier = Modifier.padding(padding),
+            )
         }
     }
 }

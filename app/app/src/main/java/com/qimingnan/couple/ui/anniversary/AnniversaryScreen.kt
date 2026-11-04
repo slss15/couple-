@@ -40,12 +40,13 @@ fun AnniversaryScreen(
     today: LocalDate,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    showBack: Boolean = true,
 ) {
     val t = LocalCoupleTokens.current
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = t.spacing.xs), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
+            if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
             Text("纪念日", style = t.typography.headline, color = t.colors.onSurface)
         }
         Column(

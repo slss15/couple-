@@ -53,6 +53,7 @@ import javax.inject.Inject
 class SettingsViewModel @Inject constructor(private val repo: SettingsRepository) : ViewModel() {
     val settings: StateFlow<AppSettings> = repo.settings
     fun setTabHidden(id: String, hidden: Boolean) = viewModelScope.launch { repo.setTabHidden(id, hidden) }
+    fun setHomeTab(id: String) = viewModelScope.launch { repo.setHomeTab(id) }
     fun setSeed(id: String) = viewModelScope.launch { repo.setThemeSeed(id) }
     fun setDynamic(on: Boolean) = viewModelScope.launch { repo.setDynamicColor(on) }
     fun setDarkMode(m: DarkMode) = viewModelScope.launch { repo.setDarkMode(m) }
@@ -60,7 +61,8 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun setPluginEnabled(id: String, enabled: Boolean) = viewModelScope.launch { repo.setPluginEnabled(id, enabled) }
 }
 
-private val TAB_LABELS = mapOf("tab_chat" to "聊天", "tab_feed" to "动态", "tab_ta" to "TA")
+private val TAB_LABELS = mapOf("tab_chat" to "聊天", "tab_feed" to "动态", "tab_ta" to "TA", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
+private val HOME_TAB_LABELS = mapOf("tab_chat" to "聊天", "tab_feed" to "动态", "tab_ta" to "TA", "me_entry" to "我的", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -89,6 +91,14 @@ fun SettingsScreen(
                     SwitchRow("显示「${TAB_LABELS[id]}」", checked = id !in s.hiddenTabs) { vm.setTabHidden(id, !it) }
                 }
                 SwitchRow("显示「我的」（不可隐藏）", checked = true, enabled = false) {}
+            }
+            SectionCard("首页 Tab") {
+                Text("打开 App 时首先显示哪个 Tab，点一个就是首页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                    HOME_TAB_LABELS.forEach { (id, label) ->
+                        FilterChip(selected = s.homeTab == id, onClick = { vm.setHomeTab(id) }, label = { Text(label) })
+                    }
+                }
             }
             SectionCard("主题色") {
                 val dynAvail = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S

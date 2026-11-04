@@ -11,6 +11,8 @@ enum class FontSize(val scale: Float, val label: String) {
 /** 本地设置（仅保存在本机 DataStore，不上传）。 */
 data class AppSettings(
     val hiddenTabs: Set<String> = emptySet(),
+    /** 首页 Tab 的 layoutId，默认聊天；用户可在设置里自由改成记账、纪念日等。 */
+    val homeTab: String = "tab_chat",
     /** Plugin ids the user turned off; absent = on. Disabled plugins hide their entry but keep data. */
     val disabledPlugins: Set<String> = emptySet(),
     val themeSeed: String = DEFAULT_SEED,
@@ -24,7 +26,7 @@ data class AppSettings(
 /** 底部 Tab 可见性：纯逻辑，id 与 MainTab.layoutId 一致；“我的”(me_entry) 永远可见。 */
 object TabVisibility {
     const val LOCKED = "me_entry"
-    val HIDEABLE = listOf("tab_chat", "tab_feed", "tab_ta")
+    val HIDEABLE = listOf("tab_chat", "tab_feed", "tab_ta", "tab_anniversary", "tab_ledger")
 
     fun visible(all: List<String>, hidden: Set<String>): List<String> =
         all.filter { it == LOCKED || it !in hidden }
