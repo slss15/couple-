@@ -129,7 +129,7 @@ fun CouplePalette.withAccent(a: Accent) = copy(
     secondary = a.secondary, onSecondary = a.onSecondary, secondaryContainer = a.secondaryContainer, onSecondaryContainer = a.onSecondaryContainer,
 )
 
-/** 6 个预设种子色；rose 即原默认配色。 */
+/** 7 个预设种子色；rose 即原默认配色，linepuppy 为线条小狗情侣灵感：白狗的米白底色 + 砂糖橘主色。 */
 object ThemeSeeds {
     private fun accentOf(p: CouplePalette) = Accent(p.primary, p.onPrimary, p.primaryContainer, p.onPrimaryContainer, p.secondary, p.onSecondary, p.secondaryContainer, p.onSecondaryContainer)
 
@@ -150,6 +150,9 @@ object ThemeSeeds {
         ThemeSeed("teal", "青碧",
             Accent(0xFF006A6A, 0xFFFFFFFF, 0xFF6FF7F6, 0xFF002020, 0xFF4A6363, 0xFFFFFFFF, 0xFFCCE8E7, 0xFF051F1F),
             Accent(0xFF4CDADA, 0xFF003737, 0xFF004F4F, 0xFF6FF7F6, 0xFFB0CCCB, 0xFF1B3534, 0xFF324B4B, 0xFFCCE8E7)),
+        ThemeSeed("linepuppy", "鸡毛和小白",
+            Accent(0xFF9C4E00, 0xFFFFFFFF, 0xFFFFE0B8, 0xFF2C1600, 0xFF6E5B4A, 0xFFFFFFFF, 0xFFF5E6D8, 0xFF2A1A0F),
+            Accent(0xFFFFB877, 0xFF4A2800, 0xFF6E3A00, 0xFFFFE0B8, 0xFFD8C2AE, 0xFF3A2A1E, 0xFF4A382A, 0xFFF5E6D8)),
     )
 
     fun byId(id: String) = all.firstOrNull { it.id == id } ?: all.first()

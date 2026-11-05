@@ -8,7 +8,6 @@ import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
@@ -38,9 +37,8 @@ import com.qimingnan.couple.data.settings.TabVisibility
 import com.qimingnan.couple.ui.settings.SettingsScreen
 import com.qimingnan.couple.ui.settings.SettingsViewModel
 
-/** 底部 Tab：基础四个 + 每个插件一个独立 Tab；插件 Tab 可在设置里隐藏，关掉插件则连同 Tab 一起隐藏。 */
+/** 底部 Tab：聊天已不在 Tab 栏（从「我的」进入），TA 先保留原样，插件各为独立 Tab。 */
 enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: ImageVector, val pluginId: String? = null) {
-    Chat("tab_chat", R.string.tab_chat, Icons.Filled.Email),
     Feed("tab_feed", R.string.tab_feed, Icons.Filled.Home),
     Ta("tab_ta", R.string.tab_ta, Icons.Filled.Favorite),
     Me("me_entry", R.string.tab_me, Icons.Filled.Person),
@@ -56,8 +54,9 @@ fun MainShell(
 ) {
     val t = LocalCoupleTokens.current
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableStateOf(MainTab.Chat) }
+    var tab by rememberSaveable { mutableStateOf(MainTab.Anniversary) }
     var homeApplied by rememberSaveable { mutableStateOf(false) }
+    var showChat by rememberSaveable { mutableStateOf(false) }
     var showScheduled by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAnniversary by rememberSaveable { mutableStateOf(false) }
@@ -88,10 +87,19 @@ fun MainShell(
             tab = resolvedTab
         }
     }
+    androidx.activity.compose.BackHandler(enabled = showChat) { showChat = false }
     androidx.activity.compose.BackHandler(enabled = showScheduled) { showScheduled = false }
     androidx.activity.compose.BackHandler(enabled = showSettings) { showSettings = false }
     androidx.activity.compose.BackHandler(enabled = showAnniversary) { showAnniversary = false }
     androidx.activity.compose.BackHandler(enabled = showLedger) { showLedger = false }
+    if (showChat) {
+        com.qimingnan.couple.ui.chat.ChatScreen(
+            vm = hiltViewModel(),
+            onOpenScheduled = { showScheduled = true },
+            modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
+        )
+        return
+    }
     if (showLedger) {
         com.qimingnan.couple.ui.ledger.LedgerScreen(
             vm = hiltViewModel(),
@@ -153,10 +161,9 @@ fun MainShell(
         },
     ) { padding ->
         when (tab) {
-            MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, onOpenSettings = { showSettings = true }, modifier = Modifier.padding(padding))
+            MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, onOpenSettings = { showSettings = true }, onOpenChat = { showChat = true }, modifier = Modifier.padding(padding))
             MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
-            MainTab.Chat -> ChatScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding), onOpenScheduled = { showScheduled = true })
             MainTab.Anniversary -> {
                 val anniversaryVm: com.qimingnan.couple.ui.anniversary.AnniversaryViewModel = hiltViewModel()
                 val anniversaryEvents by anniversaryVm.events.collectAsStateWithLifecycle()
