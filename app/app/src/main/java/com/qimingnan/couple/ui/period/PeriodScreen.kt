@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.R
 import com.qimingnan.couple.data.period.PeriodLog
 import com.qimingnan.couple.data.period.PeriodLogic
+import com.qimingnan.couple.data.period.Stats
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import java.time.Instant
 import java.time.LocalDate
@@ -100,7 +101,7 @@ fun PeriodScreen(vm: PeriodViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun StatusCard(stats: PeriodLogic.Stats?) {
+private fun StatusCard(stats: Stats?) {
     val t = LocalCoupleTokens.current
     Surface(shape = t.shapes.large, color = t.colors.primaryContainer, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(t.spacing.lg), verticalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
