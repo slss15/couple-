@@ -39,6 +39,12 @@ import com.qimingnan.couple.ui.components.SectionCard
 import java.math.BigDecimal
 import java.time.LocalDate
 
+enum class LedgerSubTab(val label: String) {
+    Stats("统计"),
+    Record("记账"),
+    Accounts("账户"),
+}
+
 /**
  * Ordinary personal ledger screen (PR4).
  *
@@ -55,6 +61,7 @@ fun LedgerScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     showBack: Boolean = true,
+    subTab: LedgerSubTab = LedgerSubTab.Record,
 ) {
     val t = LocalCoupleTokens.current
     val accounts by vm.accounts.collectAsStateWithLifecycle()
@@ -76,60 +83,95 @@ fun LedgerScreen(
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
             Text("记账", style = t.typography.headline, color = t.colors.onSurface)
             Spacer(Modifier.weight(1f))
-            Button(onClick = { showQuick = !showQuick }) { Text(if (showQuick) "收起" else "立即记账") }
+            if (subTab == LedgerSubTab.Record) Button(onClick = { showQuick = !showQuick }) { Text(if (showQuick) "收起" else "立即记账") }
         }
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(t.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
         ) {
-            if (showQuick) QuickEntryForm(vm, accounts, onSaved = { showQuick = false })
-            SectionCard("本月 · ${month.year}年${month.monthValue}月") {
-                Text("结余 ${centsText(totals.netCents)}", style = t.typography.headline, color = t.colors.primary)
-                Text("收入 ${centsText(totals.incomeCents)}", style = t.typography.body, color = t.colors.onSurface)
-                Text("支出 ${centsText(totals.expenseCents)}", style = t.typography.body, color = t.colors.onSurface)
-                Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.md)) {
-                    Button(onClick = { vm.setMonth(month.minusMonths(1)) }) { Text("上月") }
-                    Button(onClick = { vm.setMonth(month.plusMonths(1)) }) { Text("下月") }
-                }
-            }
-            SectionCard("总资产 ${centsText(LedgerLogic.totalAssets(accounts, entries))}") {
-                accounts.forEach { a ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${a.name} · ${accountTypeLabel(a.type)}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-                        Text(centsText(vm.balance(a, entries)), style = t.typography.body, color = t.colors.onSurface)
+            when (subTab) {
+                LedgerSubTab.Record -> {
+                    if (showQuick) QuickEntryForm(vm, accounts, onSaved = { showQuick = false })
+                    Button(onClick = { showForm = !showForm }) { Text(if (showForm) "收起详细记账" else "详细记账 / 转账") }
+                    if (showForm) EntryForm(vm, accounts)
+                    SectionCard("账目") {
+                        if (entries.isEmpty()) {
+                            Text("还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
+                        }
+                        entries.filter { java.time.YearMonth.from(it.occurredOn) == month }.forEach { e ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        when (e.type) {
+                                            LedgerEntryType.EXPENSE -> "支出 · ${e.categoryId ?: "已删除分类"}"
+                                            LedgerEntryType.INCOME -> "收入 · ${e.categoryId ?: "已删除分类"}"
+                                            LedgerEntryType.TRANSFER -> "转账"
+                                        },
+                                        style = t.typography.body, color = t.colors.onSurface,
+                                    )
+                                    Text("${e.occurredOn}", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                                }
+                                Text(
+                                    when (e.type) {
+                                        LedgerEntryType.EXPENSE -> "-${centsText(e.amountCents)}"
+                                        LedgerEntryType.INCOME -> "+${centsText(e.amountCents)}"
+                                        LedgerEntryType.TRANSFER -> centsText(e.amountCents)
+                                    },
+                                    style = t.typography.body, color = t.colors.onSurface,
+                                )
+                            }
+                        }
                     }
                 }
-                if (accounts.isEmpty()) Text("还没有账户，先在下方添加一个账户。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                Button(onClick = { showAccounts = !showAccounts }) { Text(if (showAccounts) "收起账户" else "添加账户") }
-                if (showAccounts) AccountForm(vm)
-            }
-            Button(onClick = { showForm = !showForm }) { Text(if (showForm) "收起详细记账" else "详细记账 / 转账") }
-            if (showForm) EntryForm(vm, accounts)
-            SectionCard("账目") {
-                if (entries.isEmpty()) {
-                    Text("还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
-                }
-                entries.filter { java.time.YearMonth.from(it.occurredOn) == month }.forEach { e ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                when (e.type) {
-                                    LedgerEntryType.EXPENSE -> "支出 · ${e.categoryId ?: "已删除分类"}"
-                                    LedgerEntryType.INCOME -> "收入 · ${e.categoryId ?: "已删除分类"}"
-                                    LedgerEntryType.TRANSFER -> "转账"
-                                },
-                                style = t.typography.body, color = t.colors.onSurface,
-                            )
-                            Text("${e.occurredOn}", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                LedgerSubTab.Stats -> {
+                    SectionCard("本月 · ${month.year}年${month.monthValue}月") {
+                        Text("结余 ${centsText(totals.netCents)}", style = t.typography.headline, color = t.colors.primary)
+                        Text("收入 ${centsText(totals.incomeCents)}", style = t.typography.body, color = t.colors.onSurface)
+                        Text("支出 ${centsText(totals.expenseCents)}", style = t.typography.body, color = t.colors.onSurface)
+                        Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.md)) {
+                            Button(onClick = { vm.setMonth(month.minusMonths(1)) }) { Text("上月") }
+                            Button(onClick = { vm.setMonth(month.plusMonths(1)) }) { Text("下月") }
                         }
-                        Text(
-                            when (e.type) {
-                                LedgerEntryType.EXPENSE -> "-${centsText(e.amountCents)}"
-                                LedgerEntryType.INCOME -> "+${centsText(e.amountCents)}"
-                                LedgerEntryType.TRANSFER -> centsText(e.amountCents)
-                            },
-                            style = t.typography.body, color = t.colors.onSurface,
-                        )
+                    }
+                    val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
+                    SectionCard("支出分类") {
+                        val byCat = monthEntries.filter { it.type == LedgerEntryType.EXPENSE }
+                            .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
+                            .mapValues { (_, list) -> list.sumOf { it.amountCents } }
+                            .entries.sortedByDescending { it.value }
+                        if (byCat.isEmpty()) Text("本月还没有支出。", style = t.typography.body, color = t.colors.onSurfaceVariant)
+                        byCat.forEach { (cat, cents) ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(cat, style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                                Text(centsText(cents), style = t.typography.body, color = t.colors.onSurface)
+                            }
+                        }
+                    }
+                    SectionCard("收入分类") {
+                        val byCat = monthEntries.filter { it.type == LedgerEntryType.INCOME }
+                            .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
+                            .mapValues { (_, list) -> list.sumOf { it.amountCents } }
+                            .entries.sortedByDescending { it.value }
+                        if (byCat.isEmpty()) Text("本月还没有收入。", style = t.typography.body, color = t.colors.onSurfaceVariant)
+                        byCat.forEach { (cat, cents) ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(cat, style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                                Text(centsText(cents), style = t.typography.body, color = t.colors.onSurface)
+                            }
+                        }
+                    }
+                }
+                LedgerSubTab.Accounts -> {
+                    SectionCard("总资产 ${centsText(LedgerLogic.totalAssets(accounts, entries))}") {
+                        accounts.forEach { a ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("${a.name} · ${accountTypeLabel(a.type)}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                                Text(centsText(vm.balance(a, entries)), style = t.typography.body, color = t.colors.onSurface)
+                            }
+                        }
+                        if (accounts.isEmpty()) Text("还没有账户，先在下方添加一个账户。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                        Button(onClick = { showAccounts = !showAccounts }) { Text(if (showAccounts) "收起账户" else "添加账户") }
+                        if (showAccounts) AccountForm(vm)
                     }
                 }
             }

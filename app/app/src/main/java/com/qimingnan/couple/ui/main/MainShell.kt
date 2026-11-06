@@ -55,12 +55,12 @@ fun MainShell(
     val t = LocalCoupleTokens.current
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(MainTab.Anniversary) }
+    var ledgerSubTab by rememberSaveable { mutableStateOf(com.qimingnan.couple.ui.ledger.LedgerSubTab.Record) }
     var homeApplied by rememberSaveable { mutableStateOf(false) }
     var showChat by rememberSaveable { mutableStateOf(false) }
     var showScheduled by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAnniversary by rememberSaveable { mutableStateOf(false) }
-    var showLedger by rememberSaveable { mutableStateOf(false) }
     val allIds = MainTab.entries.map { it.layoutId }
     val visibleIds = TabVisibility.visible(allIds, settings.hiddenTabs)
     val visibleTabs = MainTab.entries.filter { item ->
@@ -91,19 +91,13 @@ fun MainShell(
     androidx.activity.compose.BackHandler(enabled = showScheduled) { showScheduled = false }
     androidx.activity.compose.BackHandler(enabled = showSettings) { showSettings = false }
     androidx.activity.compose.BackHandler(enabled = showAnniversary) { showAnniversary = false }
-    androidx.activity.compose.BackHandler(enabled = showLedger) { showLedger = false }
+    // 进记账 Tab 默认回到中间的「记账」子 Tab；系统返回键在记账页里回到首页 Tab。
+    androidx.activity.compose.BackHandler(enabled = tab == MainTab.Ledger) { tab = MainTab.Anniversary }
+    LaunchedEffect(tab) { if (tab == MainTab.Ledger) ledgerSubTab = com.qimingnan.couple.ui.ledger.LedgerSubTab.Record }
     if (showChat) {
         com.qimingnan.couple.ui.chat.ChatScreen(
             vm = hiltViewModel(),
             onOpenScheduled = { showScheduled = true },
-            modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
-        )
-        return
-    }
-    if (showLedger) {
-        com.qimingnan.couple.ui.ledger.LedgerScreen(
-            vm = hiltViewModel(),
-            onBack = { showLedger = false },
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
         return
@@ -124,7 +118,7 @@ fun MainShell(
             vm = settingsVm,
             onBack = { showSettings = false },
             onOpenAnniversary = { showSettings = false; showAnniversary = true },
-            onOpenLedger = { showSettings = false; showLedger = true },
+            onOpenLedger = { showSettings = false; tab = MainTab.Ledger; ledgerSubTab = com.qimingnan.couple.ui.ledger.LedgerSubTab.Record },
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
         return
@@ -141,21 +135,47 @@ fun MainShell(
         containerColor = t.colors.background,
         contentColor = t.colors.onBackground,
         bottomBar = {
-            NavigationBar(containerColor = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
-                visibleTabs.forEach { item ->
-                    NavigationBarItem(
-                        selected = tab == item,
-                        onClick = { tab = item },
-                        icon = { Icon(item.icon, contentDescription = null) },
-                        label = { Text(stringResource(item.label), style = t.typography.caption) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = t.colors.onPrimaryContainer,
-                            selectedTextColor = t.colors.primary,
-                            indicatorColor = t.colors.primaryContainer,
-                            unselectedIconColor = t.colors.onSurfaceVariant,
-                            unselectedTextColor = t.colors.onSurfaceVariant,
-                        ),
+            if (tab == MainTab.Ledger) {
+                // 记账专属底栏：顺序统计、记账、账户，记账在中间是默认页；主底栏在这里不显示。
+                NavigationBar(containerColor = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
+                    val ledgerTabs = listOf(
+                        com.qimingnan.couple.ui.ledger.LedgerSubTab.Stats to Icons.Filled.DateRange,
+                        com.qimingnan.couple.ui.ledger.LedgerSubTab.Record to Icons.Filled.AddCircle,
+                        com.qimingnan.couple.ui.ledger.LedgerSubTab.Accounts to Icons.Filled.Person,
                     )
+                    ledgerTabs.forEach { (sub, icon) ->
+                        NavigationBarItem(
+                            selected = ledgerSubTab == sub,
+                            onClick = { ledgerSubTab = sub },
+                            icon = { Icon(icon, contentDescription = null) },
+                            label = { Text(sub.label, style = t.typography.caption) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = t.colors.onPrimaryContainer,
+                                selectedTextColor = t.colors.primary,
+                                indicatorColor = t.colors.primaryContainer,
+                                unselectedIconColor = t.colors.onSurfaceVariant,
+                                unselectedTextColor = t.colors.onSurfaceVariant,
+                            ),
+                        )
+                    }
+                }
+            } else {
+                NavigationBar(containerColor = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
+                    visibleTabs.forEach { item ->
+                        NavigationBarItem(
+                            selected = tab == item,
+                            onClick = { tab = item },
+                            icon = { Icon(item.icon, contentDescription = null) },
+                            label = { Text(stringResource(item.label), style = t.typography.caption) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = t.colors.onPrimaryContainer,
+                                selectedTextColor = t.colors.primary,
+                                indicatorColor = t.colors.primaryContainer,
+                                unselectedIconColor = t.colors.onSurfaceVariant,
+                                unselectedTextColor = t.colors.onSurfaceVariant,
+                            ),
+                        )
+                    }
                 }
             }
         },
@@ -177,8 +197,9 @@ fun MainShell(
             }
             MainTab.Ledger -> com.qimingnan.couple.ui.ledger.LedgerScreen(
                 vm = hiltViewModel(),
-                onBack = { tab = MainTab.Me },
-                showBack = false,
+                onBack = { tab = MainTab.Anniversary },
+                showBack = true,
+                subTab = ledgerSubTab,
                 modifier = Modifier.padding(padding),
             )
         }
