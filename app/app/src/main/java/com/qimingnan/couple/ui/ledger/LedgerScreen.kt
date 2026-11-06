@@ -1,6 +1,9 @@
 package com.qimingnan.couple.ui.ledger
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -8,12 +11,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
+import androidx.compose.material3.Surface
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -21,12 +33,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.data.ledger.LedgerAccount
@@ -71,6 +86,9 @@ fun LedgerScreen(
     var showForm by remember { mutableStateOf(false) }
     var showQuick by remember { mutableStateOf(false) }
     var showAccounts by remember { mutableStateOf(false) }
+    var selectedAccountId by remember { mutableStateOf<String?>(null) }
+    val selectedAccount = accounts.firstOrNull { it.id == selectedAccountId }
+    LaunchedEffect(subTab) { if (subTab != LedgerSubTab.Accounts) selectedAccountId = null }
 
     fun centsText(cents: Long): String {
         val sign = if (cents < 0) "-" else ""
@@ -162,11 +180,50 @@ fun LedgerScreen(
                     }
                 }
                 LedgerSubTab.Accounts -> {
-                    SectionCard("总资产 ${centsText(LedgerLogic.totalAssets(accounts, entries))}") {
+                    if (selectedAccount != null) {
+                        AccountDetail(
+                            vm = vm,
+                            account = selectedAccount,
+                            entries = entries,
+                            onBack = { selectedAccountId = null },
+                        )
+                    } else {
+                        val total = LedgerLogic.totalAssets(accounts, entries)
+                        SectionCard("总资产") {
+                            Text(centsText(total), style = t.typography.headline, color = t.colors.primary)
+                            Text("${accounts.size} 个账户", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                        }
+                        if (accounts.isNotEmpty()) SectionCard("资产分布") {
+                            accounts.forEach { a ->
+                                val bal = vm.balance(a, entries)
+                                val share = if (total > 0) (bal.toDouble() / total.toDouble() * 100).toInt() else 0
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        AccountIcon(a.type, Modifier.size(32.dp))
+                                        Text(a.name, style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                                        Text("$share%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                                        Text(centsText(bal), style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.padding(start = 8.dp))
+                                    }
+                                    Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(t.colors.surface)) {
+                                        Box(Modifier.fillMaxWidth((share / 100f).coerceIn(0f, 1f)).height(6.dp).clip(CircleShape).background(t.colors.primary))
+                                    }
+                                }
+                            }
+                        }
                         accounts.forEach { a ->
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text("${a.name} · ${accountTypeLabel(a.type)}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-                                Text(centsText(vm.balance(a, entries)), style = t.typography.body, color = t.colors.onSurface)
+                            Surface(
+                                color = t.colors.surfaceContainer,
+                                shape = t.shapes.large,
+                                modifier = Modifier.fillMaxWidth().clickable { selectedAccountId = a.id },
+                            ) {
+                                Row(Modifier.fillMaxWidth().padding(t.spacing.lg), verticalAlignment = Alignment.CenterVertically) {
+                                    AccountIcon(a.type, Modifier.size(48.dp))
+                                    Column(Modifier.weight(1f).padding(start = t.spacing.md)) {
+                                        Text(a.name, style = t.typography.title, color = t.colors.onSurface)
+                                        Text(accountTypeLabel(a.type), style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                                    }
+                                    Text(centsText(vm.balance(a, entries)), style = t.typography.title, color = t.colors.onSurface)
+                                }
                             }
                         }
                         if (accounts.isEmpty()) Text("还没有账户，先在下方添加一个账户。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
@@ -177,6 +234,123 @@ fun LedgerScreen(
             }
             Text("个人私密账本，不会出现在动态、聊天或 TA 页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
         }
+    }
+}
+
+/** 每种账户类型一个图标：现金、储蓄卡、支付宝、微信、其他。 */
+@Composable
+private fun AccountIcon(type: LedgerAccountType, modifier: Modifier = Modifier) {
+    val t = LocalCoupleTokens.current
+    // 只用核心图标库里已有的图标：现金是圆币、储蓄卡是银行楼、支付宝是付款、
+    // 微信是聊天头像、其他是加号。扩展图标库不在依赖里，加它会让包变大。
+    val icon: ImageVector = when (type) {
+        LedgerAccountType.CASH -> Icons.Filled.AddCircle
+        LedgerAccountType.BANK -> Icons.Filled.Home
+        LedgerAccountType.ALIPAY -> Icons.Filled.Send
+        LedgerAccountType.WECHAT -> Icons.Filled.Face
+        LedgerAccountType.OTHER -> Icons.Filled.Add
+    }
+    Box(
+        modifier.clip(CircleShape).background(t.colors.primaryContainer),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, contentDescription = accountTypeLabel(type), tint = t.colors.onPrimaryContainer, modifier = Modifier.size(28.dp)) }
+}
+
+/**
+ * 账户详情：点开一个账户能看到它的账目，还能改名、改类型、改期初余额、
+ * 删除账户。删除是软删除，账目本身留在明细里；有账目的账户删除前会先提示笔数。
+ */
+@Composable
+private fun AccountDetail(vm: LedgerViewModel, account: LedgerAccount, entries: List<LedgerEntry>, onBack: () -> Unit) {
+    val t = LocalCoupleTokens.current
+    var editing by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val myEntries = entries.filter { it.accountId == account.id || it.fromAccountId == account.id || it.toAccountId == account.id }
+    val balance = vm.balance(account, entries)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回账户列表", tint = t.colors.onSurface) }
+        Text("账户详情", style = t.typography.headline, color = t.colors.onSurface)
+    }
+    Surface(color = t.colors.surfaceContainer, shape = t.shapes.large, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(t.spacing.lg), verticalAlignment = Alignment.CenterVertically) {
+            AccountIcon(account.type, Modifier.size(56.dp))
+            Column(Modifier.weight(1f).padding(start = t.spacing.md)) {
+                Text(account.name, style = t.typography.title, color = t.colors.onSurface)
+                Text(accountTypeLabel(account.type), style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text("期初 ${centsTextStatic(account.initialBalanceCents)}", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+            }
+            Text(centsTextStatic(balance), style = t.typography.headline, color = t.colors.primary)
+        }
+    }
+    Button(onClick = { editing = !editing }) { Text(if (editing) "收起修改" else "修改信息") }
+    if (editing) AccountEditForm(vm, account, onSaved = { editing = false })
+    SectionCard("这个账户的账目（${myEntries.size} 笔）") {
+        if (myEntries.isEmpty()) Text("这个账户还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
+        myEntries.forEach { e ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        when (e.type) {
+                            LedgerEntryType.EXPENSE -> "支出 · ${e.categoryId ?: "已删除分类"}"
+                            LedgerEntryType.INCOME -> "收入 · ${e.categoryId ?: "已删除分类"}"
+                            LedgerEntryType.TRANSFER -> "转账"
+                        },
+                        style = t.typography.body, color = t.colors.onSurface,
+                    )
+                    Text("${e.occurredOn}", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                }
+                Text(
+                    when (e.type) {
+                        LedgerEntryType.EXPENSE -> "-${centsTextStatic(e.amountCents)}"
+                        LedgerEntryType.INCOME -> "+${centsTextStatic(e.amountCents)}"
+                        LedgerEntryType.TRANSFER -> centsTextStatic(e.amountCents)
+                    },
+                    style = t.typography.body, color = t.colors.onSurface,
+                )
+            }
+        }
+    }
+    if (!confirmDelete) {
+        Button(onClick = { confirmDelete = true }) { Text("删除账户") }
+    } else {
+        Text(
+            if (myEntries.isEmpty()) "确定删除这个账户吗？删除后不能恢复。"
+            else "这个账户下还有 ${myEntries.size} 笔账，删除账户后这些账目仍保留在明细里。确定删除吗？",
+            style = t.typography.body, color = t.colors.onSurface,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { vm.deleteAccount(account.id); onBack() }) { Text("确定删除") }
+            Button(onClick = { confirmDelete = false }) { Text("取消") }
+        }
+    }
+}
+
+private fun centsTextStatic(cents: Long): String {
+    val sign = if (cents < 0) "-" else ""
+    val abs = kotlin.math.abs(cents)
+    return "$sign${abs / 100}.${(abs % 100).toString().padStart(2, '0')} 元"
+}
+
+/** 修改账户信息：改名、改类型、改期初余额，保存时用同一个 id 覆盖。 */
+@Composable
+private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved: () -> Unit) {
+    val t = LocalCoupleTokens.current
+    var name by remember { mutableStateOf(account.name) }
+    var initial by remember { mutableStateOf((account.initialBalanceCents / 100).toString()) }
+    var type by remember { mutableStateOf(account.type) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("账户名") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = initial, onValueChange = { initial = it }, label = { Text("期初余额（元）") }, modifier = Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LedgerAccountType.entries.forEach { ty ->
+                FilterChip(selected = type == ty, onClick = { type = ty }, label = { Text(accountTypeLabel(ty)) })
+            }
+        }
+        Button(onClick = {
+            val cents = runCatching { BigDecimal(initial).multiply(BigDecimal(100)).toLong() }.getOrDefault(account.initialBalanceCents)
+            if (name.isNotBlank()) vm.saveAccount(account.copy(name = name, type = type, initialBalanceCents = cents))
+            onSaved()
+        }) { Text("保存修改") }
     }
 }
 
