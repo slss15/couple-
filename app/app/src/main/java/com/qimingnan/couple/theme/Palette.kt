@@ -151,7 +151,10 @@ object ThemeSeeds {
             Accent(0xFF006A6A, 0xFFFFFFFF, 0xFF6FF7F6, 0xFF002020, 0xFF4A6363, 0xFFFFFFFF, 0xFFCCE8E7, 0xFF051F1F),
             Accent(0xFF4CDADA, 0xFF003737, 0xFF004F4F, 0xFF6FF7F6, 0xFFB0CCCB, 0xFF1B3534, 0xFF324B4B, 0xFFCCE8E7)),
         ThemeSeed("linepuppy", "鸡毛和小白",
-            Accent(0xFF9C4E00, 0xFFFFFFFF, 0xFFFFE0B8, 0xFF2C1600, 0xFF6E5B4A, 0xFFFFFFFF, 0xFFF5E6D8, 0xFF2A1A0F),
+            // 浅色版按 Stitch 设计系统 Tender Tangerine & Cream：主色砂糖橘 #FF793F
+            // 做 primaryContainer，深棕 #A63B00 做 primary（白字对比度 6.47，容器上深棕字 4.55，
+            // 抹茶绿 secondary 那组也都 ≥4.5，见 ThemeSettingsTest 全种子对比度校验）。
+            Accent(0xFFA63B00, 0xFFFFFFFF, 0xFFFF793F, 0xFF652100, 0xFF4D6546, 0xFFFFFFFF, 0xFFCCE8C1, 0xFF51694A),
             Accent(0xFFFFB877, 0xFF4A2800, 0xFF6E3A00, 0xFFFFE0B8, 0xFFD8C2AE, 0xFF3A2A1E, 0xFF4A382A, 0xFFF5E6D8)),
     )
 

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,9 +42,12 @@ import com.qimingnan.couple.data.settings.DarkMode
 import com.qimingnan.couple.data.settings.FontSize
 import com.qimingnan.couple.data.settings.SettingsRepository
 import com.qimingnan.couple.data.settings.TabVisibility
+import com.qimingnan.couple.data.update.ShizukuState
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.theme.ThemeSeeds
+import com.qimingnan.couple.ui.components.SecondaryButton
 import com.qimingnan.couple.ui.components.SectionCard
+import androidx.compose.material3.TextButton
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -59,10 +63,34 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun setDarkMode(m: DarkMode) = viewModelScope.launch { repo.setDarkMode(m) }
     fun setFontSize(f: FontSize) = viewModelScope.launch { repo.setFontSize(f) }
     fun setPluginEnabled(id: String, enabled: Boolean) = viewModelScope.launch { repo.setPluginEnabled(id, enabled) }
+    fun setMonthlyBudget(cents: Long) = viewModelScope.launch { repo.setMonthlyBudget(cents) }
+    fun moveTab(id: String, delta: Int) = viewModelScope.launch { repo.moveTabOrder(id, delta) }
+    fun moveAccount(id: String, delta: Int, allIds: List<String>) =
+        viewModelScope.launch { repo.moveAccountOrder(id, delta, allIds) }
+}
+
+/**
+ * 任务栏留存保活开关：复用已有的 KeepAliveController（前台服务 + 常驻静音通知），
+ * 不新引库；开关状态存在 SharedPreferences 里，App 启动时按它恢复。
+ */
+@HiltViewModel
+class KeepAliveSettingsViewModel @Inject constructor(
+    private val controller: com.qimingnan.couple.data.keepalive.KeepAliveController,
+) : ViewModel() {
+    val enabled: StateFlow<Boolean> = controller.enabled
+    fun setEnabled(on: Boolean) = controller.setEnabled(on)
 }
 
 private val TAB_LABELS = mapOf("tab_feed" to "动态", "tab_ta" to "TA", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
-private val HOME_TAB_LABELS = mapOf("tab_feed" to "动态", "tab_ta" to "TA", "me_entry" to "我的", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
+/** 默认启动页：含独立首页（打开 App 先看到的启动页）和动态等 5 个 Tab。 */
+private val HOME_TAB_LABELS = mapOf(
+    "home_page" to "首页（启动页）",
+    "tab_feed" to "动态",
+    "tab_ta" to "TA",
+    "me_entry" to "我的",
+    "tab_anniversary" to "纪念日",
+    "tab_ledger" to "记账",
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -71,12 +99,17 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenAnniversary: () -> Unit = {},
     onOpenLedger: () -> Unit = {},
+    onOpenKeepAlive: () -> Unit = {},
     modifier: Modifier = Modifier,
     exportVm: ChatExportViewModel = hiltViewModel(),
     notifyVm: NotifyViewModel = hiltViewModel(),
+    updateVm: com.qimingnan.couple.ui.update.UpdateViewModel = hiltViewModel(),
+    keepAliveVm: KeepAliveSettingsViewModel = hiltViewModel(),
 ) {
     val t = LocalCoupleTokens.current
     val s by vm.settings.collectAsStateWithLifecycle()
+    val upd by updateVm.state.collectAsStateWithLifecycle()
+    val keepAliveOn by keepAliveVm.enabled.collectAsStateWithLifecycle()
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = t.spacing.xs), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
@@ -87,13 +120,48 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
         ) {
             SectionCard("底部 Tab") {
+                Text("最多显示 5 个，隐藏的 Tab 不在主底栏出现。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 TabVisibility.HIDEABLE.forEach { id ->
                     SwitchRow("显示「${TAB_LABELS[id]}」", checked = id !in s.hiddenTabs) { vm.setTabHidden(id, !it) }
                 }
                 SwitchRow("显示「我的」（不可隐藏）", checked = true, enabled = false) {}
             }
-            SectionCard("首页 Tab") {
-                Text("打开 App 时首先显示哪个 Tab，点一个就是首页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+            SectionCard("底部 Tab 顺序") {
+                Text("点 ↑ ↓ 调整底栏从左到右的顺序，改完立即保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                val orderLabels = mapOf("tab_feed" to "动态", "tab_ta" to "TA", "me_entry" to "我的", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
+                s.tabOrder.forEachIndexed { index, id ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("${index + 1}. ${orderLabels[id] ?: id}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { vm.moveTab(id, -1) }, enabled = index > 0) { Text("↑ 上移") }
+                        TextButton(onClick = { vm.moveTab(id, 1) }, enabled = index < s.tabOrder.lastIndex) { Text("↓ 下移") }
+                    }
+                }
+                Text("实时预览", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                    if (s.homeTab == "home_page") {
+                        Surface(color = t.colors.primaryContainer, shape = t.shapes.pill) {
+                            Text("首页", style = t.typography.label, color = t.colors.onPrimaryContainer, modifier = Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm))
+                        }
+                    }
+                    s.tabOrder.filter { it == TabVisibility.LOCKED || it !in s.hiddenTabs }.forEach { id ->
+                        val selected = s.homeTab == id
+                        Surface(
+                            color = if (selected) t.colors.primaryContainer else t.colors.surfaceContainer,
+                            shape = t.shapes.pill,
+                        ) {
+                            Text(
+                                orderLabels[id] ?: id,
+                                style = t.typography.label,
+                                color = if (selected) t.colors.onPrimaryContainer else t.colors.onSurface,
+                                modifier = Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
+                            )
+                        }
+                    }
+                }
+                Text("橘色的是默认启动页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+            }
+            SectionCard("默认启动页") {
+                Text("打开 App 时首先显示哪个页面：选「首页（启动页）」就是独立的首页，也可以选动态等任意一个 Tab。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
                     HOME_TAB_LABELS.forEach { (id, label) ->
                         FilterChip(selected = s.homeTab == id, onClick = { vm.setHomeTab(id) }, label = { Text(label) })
@@ -157,6 +225,31 @@ fun SettingsScreen(
                     "关闭插件只隐藏入口，不删除数据；插件内容由后续单独的 PR 提供。",
                     style = t.typography.caption, color = t.colors.onSurfaceVariant,
                 )
+            }
+            SectionCard("静默安装（Shizuku）") {
+                Text(
+                    when (upd.shizuku) {
+                        ShizukuState.AUTHORIZED -> "Shizuku 已授权：有新版本时可静默安装，不用再点系统安装确认。"
+                        ShizukuState.NOT_AUTHORIZED -> "Shizuku 未授权：更新时走系统安装确认。"
+                        ShizukuState.UNSUPPORTED -> "Shizuku 版本过旧，请先升级 Shizuku。"
+                        ShizukuState.NOT_RUNNING -> "未检测到正在运行的 Shizuku：更新时走系统安装确认。"
+                    },
+                    style = t.typography.body, color = t.colors.onSurface,
+                )
+                if (upd.shizuku == ShizukuState.NOT_AUTHORIZED) {
+                    SecondaryButton("授权 Shizuku 静默安装", onClick = updateVm::requestShizukuPermission)
+                }
+                Text("同一份授权也用于后台保活的一键豁免（我的 → 后台保活）。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+            }
+            SectionCard("后台保活") {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "任务栏留存：开启后通知栏常驻一条静音通知（前台服务），让系统不再冻结连接；关掉就撤掉通知。",
+                        style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f),
+                    )
+                    Switch(checked = keepAliveOn, onCheckedChange = keepAliveVm::setEnabled)
+                }
+                SecondaryButton("打开后台保活 · 连接诊断", onClick = onOpenKeepAlive)
             }
             NotifySection(notifyVm)
             ChatExportSection(exportVm)

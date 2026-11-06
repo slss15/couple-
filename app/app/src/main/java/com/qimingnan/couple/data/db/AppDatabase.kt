@@ -102,7 +102,7 @@ interface ProfileDao {
         UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class,
         ChatMessageEntity::class, AnniversaryEventEntity::class, LedgerAccountEntity::class, LedgerEntryEntity::class,
     ],
-    version = 6,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -175,6 +175,20 @@ abstract class AppDatabase : RoomDatabase() {
                         "`fromAccountId` TEXT, `toAccountId` TEXT, `occurredOn` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
                         "`updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
                 )
+            }
+        }
+
+        /** v6 → v7：账户加银行字段（可空，只给储蓄卡用）。 */
+        val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `ledger_accounts` ADD COLUMN `bankCode` TEXT")
+            }
+        }
+
+        /** v7 → v8：账目加备注列（记一笔向导第 6 步的选填备注，旧数据默认为空）。 */
+        val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `ledger_entries` ADD COLUMN `note` TEXT NOT NULL DEFAULT ''")
             }
         }
 

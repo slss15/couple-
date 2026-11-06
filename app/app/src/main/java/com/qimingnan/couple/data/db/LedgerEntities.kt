@@ -26,6 +26,7 @@ data class LedgerAccountEntity(
     val name: String,
     val type: String,
     val initialBalanceCents: Long,
+    val bankCode: String?,
     val ownerId: String,
     val createdAt: Long,
     val updatedAt: Long,
@@ -49,25 +50,27 @@ data class LedgerEntryEntity(
     val updatedAt: Long,
     val deleted: Boolean,
     val pendingSync: Boolean,
+    /** 备注（选填，v8 新增列，旧数据默认为空）。 */
+    val note: String = "",
 )
 
 fun LedgerAccount.toEntity(ownerId: String, nowMillis: Long, existing: LedgerAccountEntity? = null) =
-    LedgerAccountEntity(id, name, type.name, initialBalanceCents, ownerId, existing?.createdAt ?: nowMillis, nowMillis, false, true)
+    LedgerAccountEntity(id, name, type.name, initialBalanceCents, bankCode, ownerId, existing?.createdAt ?: nowMillis, nowMillis, false, true)
 
 fun LedgerAccountEntity.toModel() = LedgerAccount(
-    id, name, LedgerAccountType.entries.firstOrNull { it.name == type } ?: LedgerAccountType.OTHER, initialBalanceCents,
+    id, name, LedgerAccountType.entries.firstOrNull { it.name == type } ?: LedgerAccountType.OTHER, initialBalanceCents, bankCode,
 )
 
 fun LedgerEntry.toEntity(nowMillis: Long, existing: LedgerEntryEntity? = null) =
     LedgerEntryEntity(
         id, ownerId, accountId, type.name, categoryId, amountCents, fromAccountId, toAccountId,
-        occurredOn.toString(), existing?.createdAt ?: nowMillis, nowMillis, deleted, true,
+        occurredOn.toString(), existing?.createdAt ?: nowMillis, nowMillis, deleted, true, note,
     )
 
 fun LedgerEntryEntity.toModel() = LedgerEntry(
     id, ownerId, accountId,
     LedgerEntryType.entries.firstOrNull { it.name == type } ?: LedgerEntryType.EXPENSE,
-    categoryId, amountCents, fromAccountId, toAccountId, LocalDate.parse(occurredOn), deleted,
+    categoryId, amountCents, fromAccountId, toAccountId, LocalDate.parse(occurredOn), deleted, note,
 )
 
 @Dao

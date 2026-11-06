@@ -55,6 +55,8 @@ fun MainShell(
     val t = LocalCoupleTokens.current
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(MainTab.Anniversary) }
+    var showHome by rememberSaveable { mutableStateOf(true) }
+    var openLedgerWizard by rememberSaveable { mutableStateOf(false) }
     var ledgerSubTab by rememberSaveable { mutableStateOf(com.qimingnan.couple.ui.ledger.LedgerSubTab.Record) }
     var homeApplied by rememberSaveable { mutableStateOf(false) }
     var showChat by rememberSaveable { mutableStateOf(false) }
@@ -63,11 +65,15 @@ fun MainShell(
     var showAnniversary by rememberSaveable { mutableStateOf(false) }
     val allIds = MainTab.entries.map { it.layoutId }
     val visibleIds = TabVisibility.visible(allIds, settings.hiddenTabs)
+    // 底部 Tab 按设置里保存的顺序排（默认 动态、TA、我的、纪念日、记账）。
+    val orderedIds = com.qimingnan.couple.data.settings.SettingsRepository
+        .effectiveTabOrder(settings.tabOrder)
     val visibleTabs = MainTab.entries.filter { item ->
         item.layoutId in visibleIds &&
             (item.pluginId == null || com.qimingnan.couple.data.plugin.PluginRegistry.isEnabled(item.pluginId, settings.disabledPlugins))
-    }
-    // 首页：只在第一次加载设置时应用一次，之后用户自己切 Tab 不会被设置覆盖。
+    }.sortedBy { orderedIds.indexOf(it.layoutId) }
+    // 默认启动页：只在第一次加载设置时应用一次，之后用户自己切 Tab 不会被设置覆盖。
+    // "home_page" 是独立首页（启动页本身，不占 Tab 位），这时不改 tab，首页照常先出现。
     LaunchedEffect(settings.homeTab) {
         if (!homeApplied) {
             val home = MainTab.entries.firstOrNull { it.layoutId == settings.homeTab }
@@ -93,7 +99,22 @@ fun MainShell(
     androidx.activity.compose.BackHandler(enabled = showAnniversary) { showAnniversary = false }
     // 进记账 Tab 默认回到中间的「记账」子 Tab；系统返回键在记账页里回到首页 Tab。
     androidx.activity.compose.BackHandler(enabled = tab == MainTab.Ledger) { tab = MainTab.Anniversary }
+    // 首页是独立启动页，不在底栏里；在主 Tab 页按返回回到首页。
+    androidx.activity.compose.BackHandler(enabled = !showHome && tab == MainTab.Anniversary) { showHome = true }
+    LaunchedEffect(tab) { if (tab != MainTab.Ledger) openLedgerWizard = false }
     LaunchedEffect(tab) { if (tab == MainTab.Ledger) ledgerSubTab = com.qimingnan.couple.ui.ledger.LedgerSubTab.Record }
+    if (showHome) {
+        com.qimingnan.couple.ui.home.HomeScreen(
+            anniversaryVm = hiltViewModel(),
+            ledgerVm = hiltViewModel(),
+            onRecord = { showHome = false; tab = MainTab.Ledger; openLedgerWizard = true },
+            onOpenAnniversary = { showHome = false; tab = MainTab.Anniversary },
+            onOpenLedger = { showHome = false; tab = MainTab.Ledger },
+            onOpenFeed = { showHome = false; tab = MainTab.Feed },
+            modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
+        )
+        return
+    }
     if (showChat) {
         com.qimingnan.couple.ui.chat.ChatScreen(
             vm = hiltViewModel(),
@@ -103,10 +124,9 @@ fun MainShell(
         return
     }
     if (showAnniversary) {
-        val anniversaryVm: com.qimingnan.couple.ui.anniversary.AnniversaryViewModel = hiltViewModel()
-        val anniversaryEvents by anniversaryVm.events.collectAsStateWithLifecycle()
         com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
-            events = anniversaryEvents,
+            anniversaryVm = hiltViewModel(),
+            ledgerVm = hiltViewModel(),
             today = java.time.LocalDate.now(),
             onBack = { showAnniversary = false },
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
@@ -119,6 +139,7 @@ fun MainShell(
             onBack = { showSettings = false },
             onOpenAnniversary = { showSettings = false; showAnniversary = true },
             onOpenLedger = { showSettings = false; tab = MainTab.Ledger; ledgerSubTab = com.qimingnan.couple.ui.ledger.LedgerSubTab.Record },
+            onOpenKeepAlive = onOpenKeepAlive,
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
         return
@@ -185,10 +206,9 @@ fun MainShell(
             MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             MainTab.Anniversary -> {
-                val anniversaryVm: com.qimingnan.couple.ui.anniversary.AnniversaryViewModel = hiltViewModel()
-                val anniversaryEvents by anniversaryVm.events.collectAsStateWithLifecycle()
                 com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
-                    events = anniversaryEvents,
+                    anniversaryVm = hiltViewModel(),
+                    ledgerVm = hiltViewModel(),
                     today = java.time.LocalDate.now(),
                     onBack = { tab = MainTab.Me },
                     showBack = false,
@@ -200,6 +220,7 @@ fun MainShell(
                 onBack = { tab = MainTab.Anniversary },
                 showBack = true,
                 subTab = ledgerSubTab,
+                autoOpenWizard = openLedgerWizard,
                 modifier = Modifier.padding(padding),
             )
         }

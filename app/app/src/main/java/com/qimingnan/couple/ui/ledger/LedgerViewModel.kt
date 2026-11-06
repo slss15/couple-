@@ -10,6 +10,8 @@ import com.qimingnan.couple.data.db.toModel
 import com.qimingnan.couple.data.ledger.LedgerAccount
 import com.qimingnan.couple.data.ledger.LedgerEntry
 import com.qimingnan.couple.data.ledger.LedgerLogic
+import com.qimingnan.couple.data.ledger.LoanRecord
+import com.qimingnan.couple.data.settings.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -53,7 +55,16 @@ class LedgerViewModel @Inject constructor(
     private val dao: LedgerDao,
     private val profileDao: ProfileDao,
     private val clock: Clock,
+    private val settingsRepo: SettingsRepository,
 ) : ViewModel() {
+    /** 借贷记录（信用与负债）：存在设置 DataStore 里，不动数据库版本，见 LoanRecord。 */
+    val loans: StateFlow<List<LoanRecord>> = settingsRepo.settings
+        .map { s -> s.loans.mapNotNull(LoanRecord::decode) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun addLoan(record: LoanRecord) = viewModelScope.launch { settingsRepo.addLoan(record) }
+    fun repayLoan(id: String, addCents: Long) = viewModelScope.launch { settingsRepo.repayLoan(id, addCents) }
+    fun deleteLoan(id: String) = viewModelScope.launch { settingsRepo.deleteLoan(id) }
     private val selfId: StateFlow<String?> = profileDao.observeSelf()
         .map { it?.id }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)

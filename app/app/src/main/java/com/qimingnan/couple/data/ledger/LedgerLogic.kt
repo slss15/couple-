@@ -24,6 +24,8 @@ data class LedgerAccount(
     val type: LedgerAccountType,
     /** Opening balance in cents, before any entry. */
     val initialBalanceCents: Long,
+    /** Bank code from BankCatalog, only when type is BANK; null otherwise. */
+    val bankCode: String? = null,
 )
 
 data class LedgerEntry(
@@ -39,6 +41,8 @@ data class LedgerEntry(
     val toAccountId: String?,
     val occurredOn: LocalDate,
     val deleted: Boolean = false,
+    /** 备注（选填）：记一笔向导第 6 步确认页填的备注，存下来随账目显示。 */
+    val note: String = "",
 )
 
 object LedgerLogic {
