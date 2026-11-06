@@ -103,7 +103,7 @@ fun LedgerScreen(
                 Button(onClick = { showAccounts = !showAccounts }) { Text(if (showAccounts) "收起账户" else "添加账户") }
                 if (showAccounts) AccountForm(vm)
             }
-            Button(onClick = { showForm = !showForm }) { Text(if (showForm) "收起记一笔" else "记一笔") }
+            Button(onClick = { showForm = !showForm }) { Text(if (showForm) "收起详细记账" else "详细记账 / 转账") }
             if (showForm) EntryForm(vm, accounts)
             SectionCard("账目") {
                 if (entries.isEmpty()) {
@@ -147,14 +147,15 @@ private fun accountTypeLabel(type: LedgerAccountType): String = when (type) {
 }
 
 /**
- * 立即记账：一步到底的快速流程 —— 先输金额，再选收支类型，再选大类，
- * 再选详细类型（例如餐饮 -> 早饭），点“记账”直接保存，不用再进完整表单。
- * 账户默认用第一个账户，可点选切换；没有账户时先提示去添加账户。
+ * 立即记账向导：一次只问一件事，点一个进下一步，不是长表单。
+ * 顺序：金额 -> 账户 -> 一级用途（支出/收入） -> 二级用途（大类，如餐饮）
+ * -> 三级用途（详细，如早饭/午饭/晚饭） -> 确认。点选项直接进下一步，
+ * 上一步可以回去改；最后一步确认后才保存。转账不走向导，留给下方的详细记账。
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuickEntryForm(vm: LedgerViewModel, accounts: List<LedgerAccount>, onSaved: () -> Unit) {
     val t = LocalCoupleTokens.current
+    var step by remember { mutableStateOf(0) }
     var amount by remember { mutableStateOf("") }
     var type by remember { mutableStateOf(LedgerEntryType.EXPENSE) }
     var category by remember { mutableStateOf(LedgerCategories.EXPENSE.first()) }
@@ -162,51 +163,69 @@ private fun QuickEntryForm(vm: LedgerViewModel, accounts: List<LedgerAccount>, o
     var accountId by remember { mutableStateOf<String?>(accounts.firstOrNull()?.id) }
     val categories = if (type == LedgerEntryType.INCOME) LedgerCategories.INCOME else LedgerCategories.EXPENSE
     val details = LedgerSubcategories.forCategory(category)
+    val amountCents = runCatching { BigDecimal(amount).multiply(BigDecimal(100)).toLong() }.getOrDefault(0L)
+    val accountName = accounts.firstOrNull { it.id == accountId }?.name ?: ""
+    val picked = listOf(
+        if (amountCents > 0) "${amount} 元" else "",
+        accountName,
+        if (step > 2) if (type == LedgerEntryType.EXPENSE) "支出" else "收入" else "",
+        if (step > 3) category else "",
+        if (step > 4) detail else "",
+    ).filter { it.isNotBlank() }.joinToString(" · ")
+    val titles = listOf("第 1 步 · 金额", "第 2 步 · 账户", "第 3 步 · 支出还是收入", "第 4 步 · 大类", "第 5 步 · 详细类型", "第 6 步 · 确认记账")
     SectionCard("立即记账") {
-        OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("金额（元）") }, modifier = Modifier.fillMaxWidth())
-        Text("类型", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = type == LedgerEntryType.EXPENSE, onClick = { type = LedgerEntryType.EXPENSE; category = LedgerCategories.EXPENSE.first(); detail = LedgerSubcategories.forCategory(category).first() }, label = { Text("支出") })
-            FilterChip(selected = type == LedgerEntryType.INCOME, onClick = { type = LedgerEntryType.INCOME; category = LedgerCategories.INCOME.first(); detail = LedgerSubcategories.forCategory(category).first() }, label = { Text("收入") })
-        }
-        Text("大类", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            categories.forEach { c ->
-                FilterChip(selected = category == c, onClick = { category = c; detail = LedgerSubcategories.forCategory(c).first() }, label = { Text(c) })
+        Text("第 ${step + 1} 步 / 共 6 步", style = t.typography.caption, color = t.colors.primary)
+        Text(titles[step], style = t.typography.title, color = t.colors.onSurface)
+        if (picked.isNotBlank()) Text(picked, style = t.typography.caption, color = t.colors.onSurfaceVariant)
+        when (step) {
+            0 -> {
+                OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("金额（元）") }, modifier = Modifier.fillMaxWidth())
+                Button(onClick = { if (amountCents > 0) step = 1 }, enabled = amountCents > 0) { Text("下一步") }
             }
-        }
-        Text("详细类型", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            details.forEach { d ->
-                FilterChip(selected = detail == d, onClick = { detail = d }, label = { Text(d) })
-            }
-        }
-        if (accounts.isEmpty()) {
-            Text("还没有账户，先在下方添加一个账户再记账。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-        } else {
-            Text("账户", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                accounts.forEach { a ->
-                    FilterChip(selected = accountId == a.id, onClick = { accountId = a.id }, label = { Text(a.name) })
+            1 -> {
+                if (accounts.isEmpty()) {
+                    Text("还没有账户，先在下方添加一个账户再记账。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                } else {
+                    accounts.forEach { a ->
+                        Button(onClick = { accountId = a.id; step = 2 }, modifier = Modifier.fillMaxWidth()) { Text(a.name) }
+                    }
                 }
             }
+            2 -> {
+                Button(onClick = { type = LedgerEntryType.EXPENSE; category = LedgerCategories.EXPENSE.first(); detail = LedgerSubcategories.forCategory(category).first(); step = 3 }, modifier = Modifier.fillMaxWidth()) { Text("支出") }
+                Button(onClick = { type = LedgerEntryType.INCOME; category = LedgerCategories.INCOME.first(); detail = LedgerSubcategories.forCategory(category).first(); step = 3 }, modifier = Modifier.fillMaxWidth()) { Text("收入") }
+            }
+            3 -> {
+                categories.forEach { c ->
+                    Button(onClick = { category = c; detail = LedgerSubcategories.forCategory(c).first(); step = 4 }, modifier = Modifier.fillMaxWidth()) { Text(c) }
+                }
+            }
+            4 -> {
+                details.forEach { d ->
+                    Button(onClick = { detail = d; step = 5 }, modifier = Modifier.fillMaxWidth()) { Text(d) }
+                }
+            }
+            5 -> {
+                Text("金额 ${amount} 元", style = t.typography.body, color = t.colors.onSurface)
+                Text("账户 $accountName", style = t.typography.body, color = t.colors.onSurface)
+                Text("用途 ${if (type == LedgerEntryType.EXPENSE) "支出" else "收入"} · $category · $detail", style = t.typography.body, color = t.colors.onSurface)
+                Button(onClick = {
+                    if (amountCents <= 0 || accountId == null) return@Button
+                    vm.saveEntry(
+                        LedgerEntry(
+                            id = vm.newId(), ownerId = "",
+                            accountId = accountId, type = type,
+                            categoryId = "$category·$detail",
+                            amountCents = amountCents,
+                            fromAccountId = null, toAccountId = null,
+                            occurredOn = LocalDate.now(),
+                        )
+                    )
+                    onSaved()
+                }) { Text("记账") }
+            }
         }
-        Button(onClick = {
-            val cents = runCatching { BigDecimal(amount).multiply(BigDecimal(100)).toLong() }.getOrDefault(0L)
-            if (cents <= 0 || accountId == null) return@Button
-            vm.saveEntry(
-                LedgerEntry(
-                    id = vm.newId(), ownerId = "",
-                    accountId = accountId, type = type,
-                    categoryId = "$category·$detail",
-                    amountCents = cents,
-                    fromAccountId = null, toAccountId = null,
-                    occurredOn = LocalDate.now(),
-                )
-            )
-            amount = ""
-            onSaved()
-        }) { Text("记账") }
+        if (step > 0) Button(onClick = { step -= 1 }) { Text("上一步") }
     }
 }
 
