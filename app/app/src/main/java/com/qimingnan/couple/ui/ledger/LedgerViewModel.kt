@@ -97,6 +97,10 @@ class LedgerViewModel @Inject constructor(
         dao.softDeleteEntry(id, clock.nowMillis())
     }
 
+    fun deleteAccount(id: String) = viewModelScope.launch {
+        dao.softDeleteAccount(id, clock.nowMillis())
+    }
+
     fun balance(account: LedgerAccount, entries: List<LedgerEntry>): Long =
         LedgerLogic.balance(account, entries)
 }
