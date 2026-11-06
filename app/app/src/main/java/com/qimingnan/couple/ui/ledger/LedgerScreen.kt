@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -109,7 +110,7 @@ fun LedgerScreen(
         ) {
             when (subTab) {
                 LedgerSubTab.Record -> {
-                    if (showQuick) QuickEntryForm(vm, accounts, onSaved = { showQuick = false })
+                    if (showQuick) QuickEntryDialog(vm, accounts, onDismiss = { showQuick = false })
                     Button(onClick = { showForm = !showForm }) { Text(if (showForm) "收起详细记账" else "详细记账 / 转账") }
                     if (showForm) EntryForm(vm, accounts)
                     SectionCard("账目") {
@@ -336,11 +337,11 @@ private fun centsTextStatic(cents: Long): String {
 private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved: () -> Unit) {
     val t = LocalCoupleTokens.current
     var name by remember { mutableStateOf(account.name) }
-    var initial by remember { mutableStateOf((account.initialBalanceCents / 100).toString()) }
+    var initial by remember { mutableStateOf(BigDecimal(account.initialBalanceCents).divide(BigDecimal(100)).toPlainString()) }
     var type by remember { mutableStateOf(account.type) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("账户名") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(value = initial, onValueChange = { initial = it }, label = { Text("期初余额（元）") }, modifier = Modifier.fillMaxWidth())
+        AmountField(value = initial, onValueChange = { initial = it }, label = "期初余额（元）")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LedgerAccountType.entries.forEach { ty ->
                 FilterChip(selected = type == ty, onClick = { type = ty }, label = { Text(accountTypeLabel(ty)) })
@@ -354,6 +355,68 @@ private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved
     }
 }
 
+/**
+ * 金额输入框：点一下拉起内置数字键盘，不拉系统键盘。文字输入不用这个，
+ * 仍用系统键盘。键盘在输入框下面展开，正在输的数字一直看得见。
+ */
+@Composable
+private fun AmountField(value: String, onValueChange: (String) -> Unit, label: String, modifier: Modifier = Modifier) {
+    var showKeypad by remember { mutableStateOf(false) }
+    Column(modifier) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            modifier = Modifier.fillMaxWidth().clickable { showKeypad = !showKeypad },
+        )
+        if (showKeypad) AmountKeypad(value = value, onValueChange = onValueChange, onDone = { showKeypad = false })
+    }
+}
+
+/** 内置数字键盘：1-9、0、小数点、删除、确认。最多两位小数，只有一个小数点。 */
+@Composable
+private fun AmountKeypad(value: String, onValueChange: (String) -> Unit, onDone: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("123", "456", "789").forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { c ->
+                    Button(onClick = { appendDigit(value, c, onValueChange) }, modifier = Modifier.weight(1f)) { Text(c.toString()) }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { appendDot(value, onValueChange) }, modifier = Modifier.weight(1f)) { Text(".") }
+            Button(onClick = { appendDigit(value, '0', onValueChange) }, modifier = Modifier.weight(1f)) { Text("0") }
+            Button(onClick = { onValueChange(value.dropLast(1)) }, modifier = Modifier.weight(1f)) { Text("删除") }
+        }
+        Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("确认") }
+    }
+}
+
+private fun appendDigit(value: String, d: Char, onValueChange: (String) -> Unit) {
+    if (value.contains(".")) {
+        if (value.substringAfter(".").length >= 2) return
+        onValueChange(value + d)
+        return
+    }
+    if (value == "0") {
+        if (d == '0') return
+        onValueChange("0.$d")
+        return
+    }
+    if (value.isEmpty() && d == '0') {
+        onValueChange("0")
+        return
+    }
+    onValueChange(value + d)
+}
+
+private fun appendDot(value: String, onValueChange: (String) -> Unit) {
+    if (value.contains(".")) return
+    onValueChange(if (value.isEmpty()) "0." else "$value.")
+}
+
 private fun accountTypeLabel(type: LedgerAccountType): String = when (type) {
     LedgerAccountType.CASH -> "现金"
     LedgerAccountType.BANK -> "储蓄卡"
@@ -363,13 +426,14 @@ private fun accountTypeLabel(type: LedgerAccountType): String = when (type) {
 }
 
 /**
- * 立即记账向导：一次只问一件事，点一个进下一步，不是长表单。
- * 顺序：金额 -> 账户 -> 一级用途（支出/收入） -> 二级用途（大类，如餐饮）
- * -> 三级用途（详细，如早饭/午饭/晚饭） -> 确认。点选项直接进下一步，
- * 上一步可以回去改；最后一步确认后才保存。转账不走向导，留给下方的详细记账。
+ * 立即记账向导：一个弹窗，一次只问一件事，点一个进下一步，不是长表单，
+ * 也不在页面里展开。顺序：金额 -> 一级用途（支出/收入） -> 账户
+ * -> 二级用途（大类，如餐饮） -> 三级用途（详细，如早饭/午饭/晚饭）
+ * -> 确认。点选项直接进下一步，上一步可以回去改；最后一步确认后才保存。
+ * 点弹窗外面或返回键关掉，不保存。转账不走向导，留给下方的详细记账。
  */
 @Composable
-private fun QuickEntryForm(vm: LedgerViewModel, accounts: List<LedgerAccount>, onSaved: () -> Unit) {
+private fun QuickEntryDialog(vm: LedgerViewModel, accounts: List<LedgerAccount>, onDismiss: () -> Unit) {
     val t = LocalCoupleTokens.current
     var step by remember { mutableStateOf(0) }
     var amount by remember { mutableStateOf("") }
@@ -383,33 +447,40 @@ private fun QuickEntryForm(vm: LedgerViewModel, accounts: List<LedgerAccount>, o
     val accountName = accounts.firstOrNull { it.id == accountId }?.name ?: ""
     val picked = listOf(
         if (amountCents > 0) "${amount} 元" else "",
-        accountName,
-        if (step > 2) if (type == LedgerEntryType.EXPENSE) "支出" else "收入" else "",
+        if (step > 1) if (type == LedgerEntryType.EXPENSE) "支出" else "收入" else "",
+        if (step > 2) accountName else "",
         if (step > 3) category else "",
         if (step > 4) detail else "",
     ).filter { it.isNotBlank() }.joinToString(" · ")
-    val titles = listOf("第 1 步 · 金额", "第 2 步 · 账户", "第 3 步 · 支出还是收入", "第 4 步 · 大类", "第 5 步 · 详细类型", "第 6 步 · 确认记账")
-    SectionCard("立即记账") {
+    val titles = listOf("第 1 步 · 金额", "第 2 步 · 支出还是收入", "第 3 步 · 账户", "第 4 步 · 大类", "第 5 步 · 详细类型", "第 6 步 · 确认记账")
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(color = t.colors.surface, shape = t.shapes.large, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(t.spacing.lg), verticalArrangement = Arrangement.spacedBy(t.spacing.md)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("立即记账", style = t.typography.title, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                    Button(onClick = onDismiss) { Text("取消") }
+                }
+                // 向导本体从这里开始，结构和原来一样，只改了步骤顺序。
         Text("第 ${step + 1} 步 / 共 6 步", style = t.typography.caption, color = t.colors.primary)
         Text(titles[step], style = t.typography.title, color = t.colors.onSurface)
         if (picked.isNotBlank()) Text(picked, style = t.typography.caption, color = t.colors.onSurfaceVariant)
         when (step) {
             0 -> {
-                OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("金额（元）") }, modifier = Modifier.fillMaxWidth())
+                AmountField(value = amount, onValueChange = { amount = it }, label = "金额（元）")
                 Button(onClick = { if (amountCents > 0) step = 1 }, enabled = amountCents > 0) { Text("下一步") }
             }
             1 -> {
-                if (accounts.isEmpty()) {
-                    Text("还没有账户，先在下方添加一个账户再记账。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                } else {
-                    accounts.forEach { a ->
-                        Button(onClick = { accountId = a.id; step = 2 }, modifier = Modifier.fillMaxWidth()) { Text(a.name) }
-                    }
-                }
+                Button(onClick = { type = LedgerEntryType.EXPENSE; category = LedgerCategories.EXPENSE.first(); detail = LedgerSubcategories.forCategory(category).first(); step = 2 }, modifier = Modifier.fillMaxWidth()) { Text("支出") }
+                Button(onClick = { type = LedgerEntryType.INCOME; category = LedgerCategories.INCOME.first(); detail = LedgerSubcategories.forCategory(category).first(); step = 2 }, modifier = Modifier.fillMaxWidth()) { Text("收入") }
             }
             2 -> {
-                Button(onClick = { type = LedgerEntryType.EXPENSE; category = LedgerCategories.EXPENSE.first(); detail = LedgerSubcategories.forCategory(category).first(); step = 3 }, modifier = Modifier.fillMaxWidth()) { Text("支出") }
-                Button(onClick = { type = LedgerEntryType.INCOME; category = LedgerCategories.INCOME.first(); detail = LedgerSubcategories.forCategory(category).first(); step = 3 }, modifier = Modifier.fillMaxWidth()) { Text("收入") }
+                if (accounts.isEmpty()) {
+                    Text("还没有账户，先在账户页添加一个账户再记账。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                } else {
+                    accounts.forEach { a ->
+                        Button(onClick = { accountId = a.id; step = 3 }, modifier = Modifier.fillMaxWidth()) { Text(a.name) }
+                    }
+                }
             }
             3 -> {
                 categories.forEach { c ->
@@ -437,11 +508,13 @@ private fun QuickEntryForm(vm: LedgerViewModel, accounts: List<LedgerAccount>, o
                             occurredOn = LocalDate.now(),
                         )
                     )
-                    onSaved()
+                    onDismiss()
                 }) { Text("记账") }
             }
         }
         if (step > 0) Button(onClick = { step -= 1 }) { Text("上一步") }
+            }
+        }
     }
 }
 
@@ -453,7 +526,7 @@ private fun AccountForm(vm: LedgerViewModel) {
     var type by remember { mutableStateOf(LedgerAccountType.CASH) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("账户名") }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(value = initial, onValueChange = { initial = it }, label = { Text("期初余额（元）") }, modifier = Modifier.fillMaxWidth())
+        AmountField(value = initial, onValueChange = { initial = it }, label = "期初余额（元）")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LedgerAccountType.entries.forEach { t ->
                 FilterChip(selected = type == t, onClick = { type = t }, label = { Text(accountTypeLabel(t)) })
@@ -484,7 +557,7 @@ private fun EntryForm(vm: LedgerViewModel, accounts: List<LedgerAccount>) {
             FilterChip(selected = type == LedgerEntryType.INCOME, onClick = { type = LedgerEntryType.INCOME; category = LedgerCategories.INCOME.first() }, label = { Text("收入") })
             FilterChip(selected = type == LedgerEntryType.TRANSFER, onClick = { type = LedgerEntryType.TRANSFER }, label = { Text("转账") })
         }
-        OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("金额（元）") }, modifier = Modifier.fillMaxWidth())
+        AmountField(value = amount, onValueChange = { amount = it }, label = "金额（元）")
         if (type != LedgerEntryType.TRANSFER) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 categories.forEach { c ->
