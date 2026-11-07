@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
@@ -44,6 +45,7 @@ enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: Im
     Me("me_entry", R.string.tab_me, Icons.Filled.Person),
     Anniversary("tab_anniversary", R.string.tab_anniversary, Icons.Filled.DateRange, "anniversary"),
     Ledger("tab_ledger", R.string.tab_ledger, Icons.Filled.AddCircle, "ledger"),
+    Period("tab_period", R.string.tab_period, Icons.Filled.FavoriteBorder, "period"),
 }
 
 @Composable
@@ -223,6 +225,7 @@ fun MainShell(
                 autoOpenWizard = openLedgerWizard,
                 modifier = Modifier.padding(padding),
             )
+            MainTab.Period -> com.qimingnan.couple.ui.period.PeriodScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
         }
     }
 }
