@@ -10,6 +10,7 @@ import com.qimingnan.couple.data.db.PeriodLogEntity
 import com.qimingnan.couple.data.db.toModel
 import com.qimingnan.couple.data.period.PeriodLog
 import com.qimingnan.couple.data.period.PeriodLogic
+import com.qimingnan.couple.data.period.Stats
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import javax.inject.Inject
@@ -30,7 +31,7 @@ class PeriodViewModel @Inject constructor(
     data class UiState(
         val loading: Boolean = true,
         val logs: List<PeriodLog> = emptyList(),
-        val stats: PeriodLogic.Stats? = null,
+        val stats: Stats? = null,
         /** 界面上可用的 owner（未登录为空 → 空态）。 */
         val ready: Boolean = false,
     )

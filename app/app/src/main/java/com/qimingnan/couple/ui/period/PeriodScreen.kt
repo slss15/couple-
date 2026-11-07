@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -174,6 +176,7 @@ private fun AddLogDialog(onSave: (LocalDate, LocalDate?, String) -> Unit, onCanc
     var picking by remember { mutableStateOf<Pick?>(null) }
     val error = start?.let { PeriodLogic.validate(it, end) }
 
+    @Composable
     fun picker(state: androidx.compose.material3.DatePickerState, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit) {
         DatePickerDialog(
             onDismissRequest = onDismiss,
@@ -194,7 +197,7 @@ private fun AddLogDialog(onSave: (LocalDate, LocalDate?, String) -> Unit, onCanc
         title = { Text(stringResource(R.string.period_add), color = t.colors.onSurface) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                DateField(stringResource(R.string.period_start), start ?: stringResource(R.string.period_pick_date)) { picking = Pick.START }
+                DateField(stringResource(R.string.period_start), start?.format(ISO) ?: stringResource(R.string.period_pick_date)) { picking = Pick.START }
                 DateField(stringResource(R.string.period_end), end?.format(ISO) ?: stringResource(R.string.period_pick_date)) { picking = Pick.END }
                 OutlinedTextField(note, { note = it }, label = { Text(stringResource(R.string.period_note)) }, textStyle = t.typography.body)
                 error?.let { Text(it, style = t.typography.caption, color = t.colors.error) }

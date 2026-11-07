@@ -11,7 +11,7 @@ import org.junit.Test
 
 /** 经期预测数学（与 LunarCalendarTest 同风格：固定日期，不依赖当前时钟）。 */
 class PeriodLogicTest {
-    private val d = LocalDate::parse
+    private fun d(s: String): LocalDate = LocalDate.parse(s)
 
     @Test fun `no history falls back to defaults`() {
         val s = PeriodLogic.stats(emptyList(), d("2026-11-06"))
