@@ -36,6 +36,7 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class KeepAliveService : Service() {
     @Inject lateinit var mqtt: MqttManager
+    @Inject lateinit var controller: KeepAliveController
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watcher: Job? = null
@@ -43,6 +44,16 @@ class KeepAliveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            controller.setEnabled(false)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // START_STICKY 的空 intent 也尊重用户关闭，不把已关的服务重新拉起。
+        if (!controller.enabled.value) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         ensureChannel(this)
         val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
         try {
@@ -73,6 +84,10 @@ class KeepAliveService : Service() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val stop = PendingIntent.getService(
+            this, 1, Intent(this, KeepAliveService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
             .setContentTitle("正在保持连接")
@@ -84,6 +99,7 @@ class KeepAliveService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(open)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "关闭常驻连接", stop)
             .build()
     }
 
@@ -95,6 +111,7 @@ class KeepAliveService : Service() {
     }
 
     companion object {
+        const val ACTION_STOP = "com.qimingnan.couple.keepalive.STOP"
         const val TAG = "CoupleKeepAlive"
         const val CHANNEL_ID = "keepalive"
         const val NOTIFICATION_ID = 0x4b41

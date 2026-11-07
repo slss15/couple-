@@ -176,3 +176,7 @@ app/src/main/java/com/qimingnan/couple/
 - 发码方仍通过轮询 `GET /couple` 发现配对成功（待改 MQTT 通知）。
 - 解绑申请编号仍需口头告诉对方（待改 MQTT 推送）。
 - 聊天记录导出、双机 e2e 脚本未做。
+
+## 单人记账与 UI 更新
+
+本次页面更新与数据边界、Windows 构建注意事项及真机检查清单见 [个人 UI 更新说明](../docs/personal-ui-refresh.md)。

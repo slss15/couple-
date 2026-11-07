@@ -23,10 +23,10 @@ class LoanRecordTest {
         assertFalse(decoded.settled)
     }
 
-    @Test fun labelPipeIsSanitizedSoDecodingDoesNotShift() {
+    @Test fun labelPipeIsPreservedWithoutShiftingFields() {
         val record = LoanRecord("id1", LoanKind.LENT, null, 5_000, 0, "借给|小白")
         val decoded = LoanRecord.decode(record.encode())
-        assertEquals("借给 小白", decoded!!.label)
+        assertEquals("借给|小白", decoded!!.label)
         assertNull(decoded.accountId)
     }
 
@@ -55,4 +55,32 @@ class LoanRecordTest {
         assertEquals(3_000L, summary.repaidCents)
         assertEquals(12_000L, summary.remainingCents)
     }
+    @Test fun legacyPipeRecordStillDecodes() {
+        val record = LoanRecord.decode("id1|BORROWED|acc1|10000|3000|向妈妈借的")!!
+        assertEquals(7000L, record.remainingCents)
+        assertTrue(record.repayments.isEmpty())
+    }
+    @Test fun repaymentHistoryAndDueDateRoundTrip() {
+        val loan = LoanRecord("a", LoanKind.LENT, "bank", 10000, label = "旅行", counterparty = "小白", dueOn = "2026-12-01")
+            .repay(2000, "2026-11-07", "第一笔")!!
+        assertEquals(loan, LoanRecord.decode(loan.encode()))
+        assertEquals(1, loan.repayments.size)
+        assertEquals("第一笔", loan.repayments.single().note)
+        assertTrue(loan.overdue(java.time.LocalDate.of(2026, 12, 2)))
+        assertFalse(loan.overdue(java.time.LocalDate.of(2026, 12, 1)))
+    }
+    @Test fun repaymentCannotBeNegativeOrExceedRemaining() {
+        val loan = LoanRecord("a", LoanKind.BORROWED, null, 10000, 9000)
+        assertNull(loan.repay(0, "2026-11-07"))
+        assertNull(loan.repay(-1, "2026-11-07"))
+        assertNull(loan.repay(1001, "2026-11-07"))
+        assertNull(loan.repay(100, "not-a-date"))
+        assertTrue(loan.repay(1000, "2026-11-07")!!.settled)
+    }
+    @Test fun repaymentNearLongLimitDoesNotOverflow() {
+        val loan = LoanRecord("a", LoanKind.BORROWED, null, Long.MAX_VALUE, Long.MAX_VALUE - 100)
+        assertNull(loan.repay(Long.MAX_VALUE, "2026-11-07"))
+        assertEquals(Long.MAX_VALUE, loan.repay(100, "2026-11-07")!!.repaidCents)
+    }
+
 }

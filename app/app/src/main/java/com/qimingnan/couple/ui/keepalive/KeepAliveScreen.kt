@@ -22,6 +22,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -55,7 +58,16 @@ fun KeepAliveScreen(onBack: () -> Unit, vm: KeepAliveViewModel = hiltViewModel()
     val s by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
-    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.refresh() }
+    var enablingFgs by remember { mutableStateOf(false) }
+    var notificationDenied by remember { mutableStateOf(false) }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (enablingFgs) {
+            notificationDenied = !granted
+            if (granted) vm.setFgs(true)
+            enablingFgs = false
+        }
+        vm.refresh()
+    }
 
     Column(
         Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding()
@@ -136,14 +148,19 @@ fun KeepAliveScreen(onBack: () -> Unit, vm: KeepAliveViewModel = hiltViewModel()
                 horizontalArrangement = Arrangement.spacedBy(t.spacing.md),
             ) {
                 Text(
-                    "在通知栏保留一条静音通知，让系统不再冻结连接（更省心，但会常驻一条通知）",
+                    "通过静音前台服务尽量维持实时连接；仍可能被系统回收，不代表绝对保活。",
                     style = t.typography.body,
                     color = t.colors.onSurface,
                     modifier = Modifier.weight(1f),
                 )
-                Switch(checked = s.fgsEnabled, onCheckedChange = vm::setFgs)
+                Switch(checked = s.fgsEnabled, onCheckedChange = { on ->
+                    if (on && Build.VERSION.SDK_INT >= 33) { enablingFgs = true; notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
+                    else vm.setFgs(on)
+                })
             }
         }
+
+        if (notificationDenied) Text("通知权限未允许，暂未开启常驻连接。", style = t.typography.caption, color = t.colors.error)
 
         SectionCard("连接诊断") {
             val (label, color) = when (val m = s.mqtt) {

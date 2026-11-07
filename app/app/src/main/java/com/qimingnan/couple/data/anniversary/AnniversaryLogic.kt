@@ -50,6 +50,22 @@ data class Occurrence(
 )
 
 object AnniversaryLogic {
+    /** 输入合法性；农历超出表范围明确拒绝，不猜日期。 */
+    fun validationError(event: AnniversaryEvent): String? = when {
+        event.title.isBlank() -> "请填写纪念日名称"
+        event.month !in 1..12 -> "月份应为 1–12"
+        event.day !in 1..31 -> "日期无效"
+        event.year != null && event.year !in 1..9999 -> "年份无效"
+        !event.recurring && event.year == null -> "一次性事件需要填写年份"
+        event.calendar == AnniversaryCalendar.SOLAR &&
+            runCatching { LocalDate.of(2000, event.month, event.day) }.isFailure -> "该月份没有这一天"
+        event.calendar == AnniversaryCalendar.LUNAR && event.day > 30 -> "农历日期应为 1–30"
+        event.calendar == AnniversaryCalendar.LUNAR && event.year != null && event.year !in LunarCalendar.MIN_YEAR..LunarCalendar.MAX_YEAR -> "农历年份支持 1900–2049"
+        event.onlyLeapMonth && (event.calendar != AnniversaryCalendar.LUNAR || !event.isLeap) -> "仅闰月提醒需要选择农历闰月"
+        event.reminderDaysAhead !in 0..365 -> "提前提醒天数应为 0–365"
+        else -> null
+    }
+
     private fun solarOccurrence(year: Int, event: AnniversaryEvent): LocalDate? {
         return try {
             if (event.month == 2 && event.day == 29 && !LocalDate.of(year, 1, 1).isLeapYear) {

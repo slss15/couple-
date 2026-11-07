@@ -162,6 +162,13 @@ object ThemeSeeds {
 
     fun palette(id: String, dark: Boolean): CouplePalette {
         val s = byId(id)
-        return if (dark) Palettes.Dark.withAccent(s.dark) else Palettes.Light.withAccent(s.light)
+        val palette = if (dark) Palettes.Dark.withAccent(s.dark) else Palettes.Light.withAccent(s.light)
+        if (id != "linepuppy" || dark) return palette
+        return palette.copy(
+            background = 0xFFFFF8F6, onBackground = 0xFF231915,
+            surface = 0xFFFFFFFF, onSurface = 0xFF231915,
+            surfaceVariant = 0xFFF2DFD7, onSurfaceVariant = 0xFF584239,
+            surfaceContainer = 0xFFFFF1EC, outline = 0xFF8C7168,
+        )
     }
 }

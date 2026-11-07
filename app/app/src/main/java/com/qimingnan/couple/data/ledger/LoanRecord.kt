@@ -1,16 +1,24 @@
 package com.qimingnan.couple.data.ledger
 
-/**
- * 借贷记录（信用与负债）：借入/借出、还了多少钱、还剩多少。
- *
- * 现状说明：记账表里没有借贷字段，数据库版本这次不升，所以记录先存在
- * 应用设置 DataStore 里（字符串编码），不新开表、不改 Room 版本。
- * 要长期存、要和账目联动（还款自动记一笔账、按对方汇总），下一步需要
- * 给 ledger_entries 加借贷类型字段或单独的 loans 表，那时再升数据库版本。
- * 编码用竖线分隔，标签里的竖线和换行会被替换掉，避免解析错位。
- */
+import java.time.LocalDate
+import java.util.UUID
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+/** 个人借贷备忘，存本机 DataStore；关联账户只作归属，不重复改变账本余额。 */
+@Serializable
 enum class LoanKind(val label: String) { BORROWED("借入"), LENT("借出") }
 
+@Serializable
+data class LoanRepayment(
+    val id: String,
+    val amountCents: Long,
+    val date: String,
+    val note: String = "",
+)
+
+@Serializable
 data class LoanRecord(
     val id: String,
     val kind: LoanKind,
@@ -18,41 +26,72 @@ data class LoanRecord(
     val amountCents: Long,
     val repaidCents: Long = 0,
     val label: String = "",
+    val counterparty: String = "",
+    val dueOn: String? = null,
+    val repayments: List<LoanRepayment> = emptyList(),
 ) {
-    /** 还剩多少没还（借入和借出都按“未结清”算）。 */
     val remainingCents: Long get() = (amountCents - repaidCents).coerceAtLeast(0)
     val settled: Boolean get() = remainingCents == 0L
 
-    fun encode(): String = listOf(
-        id,
-        kind.name,
-        accountId ?: "",
-        amountCents.toString(),
-        repaidCents.toString(),
-        label.replace('|', ' ').replace('\n', ' '),
-    ).joinToString("|")
+    fun validationError(): String? = when {
+        id.isBlank() -> "借贷编号不能为空"
+        amountCents <= 0 -> "金额必须大于 0"
+        repaidCents < 0 || repaidCents > amountCents -> "已还金额不能超过借贷金额"
+        dueOn != null && runCatching { LocalDate.parse(dueOn) }.isFailure -> "约定日期格式为 yyyy-MM-dd"
+        repayments.any { it.amountCents <= 0 || runCatching { LocalDate.parse(it.date) }.isFailure } -> "还款记录无效"
+        else -> null
+    }
+
+    fun overdue(today: LocalDate): Boolean = !settled && dueOn?.let {
+        runCatching { LocalDate.parse(it).isBefore(today) }.getOrDefault(false)
+    } == true
+
+    /** 拒绝负数、零、超额与非法日期；加法上界先检查，不会 Long 溢出。 */
+    fun repay(cents: Long, date: String, note: String = ""): LoanRecord? {
+        if (validationError() != null || cents <= 0 || cents > remainingCents ||
+            runCatching { LocalDate.parse(date) }.isFailure) return null
+        return copy(
+            repaidCents = repaidCents + cents,
+            repayments = repayments + LoanRepayment(UUID.randomUUID().toString(), cents, date, note.trim()),
+        )
+    }
+
+    fun encode(): String = json.encodeToString(this)
 
     companion object {
-        fun decode(raw: String): LoanRecord? {
-            val parts = raw.split("|")
-            if (parts.size < 6) return null
-            val kind = LoanKind.entries.firstOrNull { it.name == parts[1] } ?: return null
-            val amount = parts[3].toLongOrNull() ?: return null
-            val repaid = parts[4].toLongOrNull() ?: return null
-            if (amount <= 0 || repaid < 0) return null
-            return LoanRecord(parts[0], kind, parts[2].ifBlank { null }, amount, repaid, parts.subList(5, parts.size).joinToString("|"))
-        }
+        private val json = Json { ignoreUnknownKeys = true }
+
+        /** 向后兼容六段竖线格式；新格式保留名字里的竖线、换行及完整还款明细。 */
+        fun decode(raw: String): LoanRecord? = runCatching {
+            val record = if (raw.trimStart().startsWith("{")) json.decodeFromString<LoanRecord>(raw) else {
+                val parts = raw.split("|")
+                if (parts.size < 6) return null
+                LoanRecord(
+                    parts[0], LoanKind.valueOf(parts[1]), parts[2].ifBlank { null },
+                    parts[3].toLong(), parts[4].toLong(), parts.drop(5).joinToString("|"),
+                )
+            }
+            record.takeIf { it.validationError() == null }
+        }.getOrNull()
     }
 }
 
 object LoanTotals {
-    data class Summary(val borrowedCents: Long, val lentCents: Long, val repaidCents: Long) {
-        val remainingCents: Long get() = (borrowedCents + lentCents - repaidCents).coerceAtLeast(0)
+    data class Summary(
+        val borrowedCents: Long,
+        val lentCents: Long,
+        val repaidCents: Long,
+        val outstandingBorrowedCents: Long = 0,
+        val outstandingLentCents: Long = 0,
+    ) {
+        val remainingCents: Long get() = outstandingBorrowedCents + outstandingLentCents
     }
 
     fun summarize(records: List<LoanRecord>): Summary = Summary(
         borrowedCents = records.filter { it.kind == LoanKind.BORROWED }.sumOf { it.amountCents },
         lentCents = records.filter { it.kind == LoanKind.LENT }.sumOf { it.amountCents },
         repaidCents = records.sumOf { it.repaidCents },
+        outstandingBorrowedCents = records.filter { it.kind == LoanKind.BORROWED }.sumOf { it.remainingCents },
+        outstandingLentCents = records.filter { it.kind == LoanKind.LENT }.sumOf { it.remainingCents },
     )
 }

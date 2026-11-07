@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.qimingnan.couple.core.Clock
 import com.qimingnan.couple.data.anniversary.AnniversaryEvent
+import com.qimingnan.couple.data.anniversary.AnniversaryLogic
+import com.qimingnan.couple.data.db.ProfileDao
 import com.qimingnan.couple.data.db.AnniversaryDao
 import com.qimingnan.couple.data.db.toEntity
 import com.qimingnan.couple.data.db.toModel
@@ -17,17 +19,13 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
-/**
- * 纪念日附加状态（打卡、神秘惊喜进度、旅行计划关联账户与目标金额）：
- * 存在设置 DataStore 里，不动数据库、不升版本；要长期存、要和事件表联动
- * （例如按事件汇总打卡次数、旅行目标金额参与统计），下一步需要给
- * anniversary_events 加字段或单独的表，那时再升数据库版本。
- */
+/** 纪念日附加状态在本机 DataStore 持久保存；不升 Room 版本，不同步准备进度和旅行账户。 */
 data class AnniversaryExtras(
     val checkins: Set<String> = emptySet(),
     val surpriseProgress: Map<String, Int> = emptyMap(),
     val travelAccountId: String? = null,
     val travelTargetCents: Long = 0,
+    val travelName: String = "",
 ) {
     fun checkedIn(eventId: String, date: String): Boolean = "$eventId:$date" in checkins
     fun checkinCount(eventId: String): Int = checkins.count { it.substringBefore(':') == eventId }
@@ -46,6 +44,7 @@ class AnniversaryViewModel @Inject constructor(
     private val dao: AnniversaryDao,
     private val clock: Clock,
     private val settingsRepo: SettingsRepository,
+    private val profileDao: ProfileDao,
 ) : ViewModel() {
     val events: StateFlow<List<AnniversaryEvent>> = dao.observeAll()
         .map { list -> list.map { it.toModel() } }
@@ -62,6 +61,7 @@ class AnniversaryViewModel @Inject constructor(
                 }.toMap(),
                 travelAccountId = s.travelAccountId,
                 travelTargetCents = s.travelTargetCents,
+                travelName = s.travelName,
             )
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AnniversaryExtras())
@@ -74,12 +74,19 @@ class AnniversaryViewModel @Inject constructor(
         viewModelScope.launch { settingsRepo.setSurpriseProgress(eventId, progress) }
 
     /** 旅行计划：关联账户 + 目标金额（分）；accountId 为 null 表示清除计划。 */
-    fun setTravel(accountId: String?, targetCents: Long) =
-        viewModelScope.launch { settingsRepo.setTravel(accountId, targetCents) }
+    fun setTravel(accountId: String?, targetCents: Long, name: String = "", onComplete: (String?) -> Unit = {}) =
+        viewModelScope.launch { onComplete(runCatching { settingsRepo.setTravel(accountId, targetCents, name) }.exceptionOrNull()?.message) }
 
-    fun save(event: AnniversaryEvent, coupleId: String?) = viewModelScope.launch {
-        val existing = dao.byId(event.id)
-        dao.upsert(event.toEntity(coupleId, clock.nowMillis(), existing))
+    fun save(event: AnniversaryEvent, coupleId: String? = null, onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
+        val error = runCatching {
+            val invalid = AnniversaryLogic.validationError(event)
+            if (invalid != null) invalid else {
+                val existing = dao.byId(event.id)
+                dao.upsert(event.toEntity(coupleId ?: profileDao.self()?.coupleId, clock.nowMillis(), existing))
+                null
+            }
+        }.getOrElse { it.message ?: "纪念日保存失败" }
+        onComplete(error)
     }
 
     fun newId(): String = UUID.randomUUID().toString()

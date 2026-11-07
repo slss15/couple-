@@ -54,8 +54,8 @@ fun MainShell(
 ) {
     val t = LocalCoupleTokens.current
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableStateOf(MainTab.Anniversary) }
-    var showHome by rememberSaveable { mutableStateOf(true) }
+    var tab by rememberSaveable { mutableStateOf(MainTab.Feed) }
+    var showHome by rememberSaveable { mutableStateOf(false) }
     var openLedgerWizard by rememberSaveable { mutableStateOf(false) }
     var ledgerSubTab by rememberSaveable { mutableStateOf(com.qimingnan.couple.ui.ledger.LedgerSubTab.Record) }
     var homeApplied by rememberSaveable { mutableStateOf(false) }
@@ -72,14 +72,25 @@ fun MainShell(
         item.layoutId in visibleIds &&
             (item.pluginId == null || com.qimingnan.couple.data.plugin.PluginRegistry.isEnabled(item.pluginId, settings.disabledPlugins))
     }.sortedBy { orderedIds.indexOf(it.layoutId) }
-    // 默认启动页：只在第一次加载设置时应用一次，之后用户自己切 Tab 不会被设置覆盖。
-    // "home_page" 是独立首页（启动页本身，不占 Tab 位），这时不改 tab，首页照常先出现。
-    LaunchedEffect(settings.homeTab) {
+    // 等持久设置读完再应用一次；用户切换 Tab 后不被 StateFlow 默认值覆盖。
+    LaunchedEffect(Unit) {
         if (!homeApplied) {
-            val home = MainTab.entries.firstOrNull { it.layoutId == settings.homeTab }
-            if (home != null && home in visibleTabs) tab = home
+            val initial = settingsVm.initialSettings()
+            val initialVisible = MainTab.entries.filter { item ->
+                item.layoutId in TabVisibility.visible(allIds, initial.hiddenTabs) &&
+                    (item.pluginId == null || item.pluginId !in initial.disabledPlugins)
+            }.map { it.layoutId }
+            val destination = com.qimingnan.couple.data.settings.StartupPage.resolve(initial.homeTab, initialVisible)
+            showHome = destination == "home_page"
+            tab = MainTab.entries.firstOrNull { it.layoutId == destination } ?: MainTab.Feed
             homeApplied = true
         }
+    }
+    if (!homeApplied) {
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(t.colors.background), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator(color = t.colors.primary)
+        }
+        return
     }
     LaunchedEffect(settings.hiddenTabs, settings.disabledPlugins, tab) {
         val resolved = TabVisibility.resolveSelected(tab.layoutId, allIds, settings.hiddenTabs)
@@ -93,14 +104,25 @@ fun MainShell(
             tab = resolvedTab
         }
     }
-    androidx.activity.compose.BackHandler(enabled = showChat) { showChat = false }
-    androidx.activity.compose.BackHandler(enabled = showScheduled) { showScheduled = false }
-    androidx.activity.compose.BackHandler(enabled = showSettings) { showSettings = false }
-    androidx.activity.compose.BackHandler(enabled = showAnniversary) { showAnniversary = false }
-    // 进记账 Tab 默认回到中间的「记账」子 Tab；系统返回键在记账页里回到首页 Tab。
-    androidx.activity.compose.BackHandler(enabled = tab == MainTab.Ledger) { tab = MainTab.Anniversary }
-    // 首页是独立启动页，不在底栏里；在主 Tab 页按返回回到首页。
-    androidx.activity.compose.BackHandler(enabled = !showHome && tab == MainTab.Anniversary) { showHome = true }
+    fun returnToStart() {
+        val destination = com.qimingnan.couple.data.settings.StartupPage.resolve(settings.homeTab, visibleTabs.map { it.layoutId })
+        showHome = destination == "home_page"
+        tab = MainTab.entries.firstOrNull { it.layoutId == destination && it != MainTab.Ledger } ?: MainTab.Feed
+        openLedgerWizard = false
+    }
+    androidx.activity.compose.BackHandler(
+        enabled = showChat || showScheduled || showSettings || showAnniversary || (!showHome && (tab != MainTab.Feed || settings.homeTab == "home_page")),
+    ) {
+        when {
+            showScheduled -> showScheduled = false
+            showChat -> showChat = false
+            showSettings -> showSettings = false
+            showAnniversary -> showAnniversary = false
+            tab == MainTab.Ledger -> { tab = MainTab.Feed; openLedgerWizard = false }
+            settings.homeTab == "home_page" -> showHome = true
+            else -> tab = MainTab.Feed
+        }
+    }
     LaunchedEffect(tab) { if (tab != MainTab.Ledger) openLedgerWizard = false }
     LaunchedEffect(tab) { if (tab == MainTab.Ledger) ledgerSubTab = com.qimingnan.couple.ui.ledger.LedgerSubTab.Record }
     if (showHome) {
@@ -217,7 +239,7 @@ fun MainShell(
             }
             MainTab.Ledger -> com.qimingnan.couple.ui.ledger.LedgerScreen(
                 vm = hiltViewModel(),
-                onBack = { tab = MainTab.Anniversary },
+                onBack = { returnToStart() },
                 showBack = true,
                 subTab = ledgerSubTab,
                 autoOpenWizard = openLedgerWizard,

@@ -62,8 +62,15 @@ class LedgerViewModel @Inject constructor(
         .map { s -> s.loans.mapNotNull(LoanRecord::decode) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    fun addLoan(record: LoanRecord) = viewModelScope.launch { settingsRepo.addLoan(record) }
-    fun repayLoan(id: String, addCents: Long) = viewModelScope.launch { settingsRepo.repayLoan(id, addCents) }
+    fun addLoan(record: LoanRecord, onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
+        onComplete(runCatching { settingsRepo.addLoan(record) }.exceptionOrNull()?.message)
+    }
+    fun repayLoan(id: String, addCents: Long, date: String = LocalDate.now().toString(), note: String = "", onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
+        val error = runCatching {
+            if (!settingsRepo.repayLoan(id, addCents, date, note)) "金额无效、超过未结清金额或记录已变更" else null
+        }.getOrElse { it.message ?: "还款保存失败" }
+        onComplete(error)
+    }
     fun deleteLoan(id: String) = viewModelScope.launch { settingsRepo.deleteLoan(id) }
     private val selfId: StateFlow<String?> = profileDao.observeSelf()
         .map { it?.id }
@@ -93,15 +100,25 @@ class LedgerViewModel @Inject constructor(
 
     fun newId(): String = UUID.randomUUID().toString()
 
-    fun saveAccount(account: LedgerAccount) = viewModelScope.launch {
-        val ownerId = currentOwnerId()
-        dao.upsertAccount(account.toEntity(ownerId, clock.nowMillis(), dao.accountById(account.id)))
+    fun saveAccount(account: LedgerAccount, onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
+        val error = runCatching {
+            require(account.name.isNotBlank()) { "请填写账户名称" }
+            val ownerId = currentOwnerId()
+            dao.upsertAccount(account.toEntity(ownerId, clock.nowMillis(), dao.accountById(account.id)))
+        }.exceptionOrNull()?.let { it.message ?: "账户保存失败" }
+        onComplete(error)
     }
 
-    fun saveEntry(entry: LedgerEntry) = viewModelScope.launch {
-        val withOwner = entry.copy(ownerId = currentOwnerId())
-        if (LedgerLogic.validate(withOwner) != null) return@launch
-        dao.upsertEntry(withOwner.toEntity(clock.nowMillis()))
+    fun saveEntry(entry: LedgerEntry, onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
+        val error = runCatching {
+            val withOwner = entry.copy(ownerId = currentOwnerId())
+            val invalid = LedgerLogic.validate(withOwner)
+            if (invalid != null) invalid else {
+                dao.upsertEntry(withOwner.toEntity(clock.nowMillis()))
+                null
+            }
+        }.getOrElse { it.message ?: "记账保存失败" }
+        onComplete(error)
     }
 
     fun deleteEntry(id: String) = viewModelScope.launch {

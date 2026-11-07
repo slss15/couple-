@@ -1,6 +1,12 @@
 package com.qimingnan.couple.ui.settings
 
 import android.os.Build
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,6 +64,8 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     val settings: StateFlow<AppSettings> = repo.settings
     fun setTabHidden(id: String, hidden: Boolean) = viewModelScope.launch { repo.setTabHidden(id, hidden) }
     fun setHomeTab(id: String) = viewModelScope.launch { repo.setHomeTab(id) }
+    suspend fun initialSettings(): AppSettings = repo.initialSettings()
+    fun setRetainRecentTask(on: Boolean) = viewModelScope.launch { repo.setRetainRecentTask(on) }
     fun setSeed(id: String) = viewModelScope.launch { repo.setThemeSeed(id) }
     fun setDynamic(on: Boolean) = viewModelScope.launch { repo.setDynamicColor(on) }
     fun setDarkMode(m: DarkMode) = viewModelScope.launch { repo.setDarkMode(m) }
@@ -70,7 +78,7 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
 }
 
 /**
- * 任务栏留存保活开关：复用已有的 KeepAliveController（前台服务 + 常驻静音通知），
+ * 常驻连接开关：复用已有的 KeepAliveController（前台服务 + 静音通知），
  * 不新引库；开关状态存在 SharedPreferences 里，App 启动时按它恢复。
  */
 @HiltViewModel
@@ -110,6 +118,11 @@ fun SettingsScreen(
     val s by vm.settings.collectAsStateWithLifecycle()
     val upd by updateVm.state.collectAsStateWithLifecycle()
     val keepAliveOn by keepAliveVm.enabled.collectAsStateWithLifecycle()
+    var notificationDenied by remember { mutableStateOf(false) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        notificationDenied = !granted
+        keepAliveVm.setEnabled(granted)
+    }
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = t.spacing.xs), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
@@ -158,13 +171,15 @@ fun SettingsScreen(
                         }
                     }
                 }
-                Text("橘色的是默认启动页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text("高亮的是默认启动页；未设置时默认打开动态。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
             }
             SectionCard("默认启动页") {
                 Text("打开 App 时首先显示哪个页面：选「首页（启动页）」就是独立的首页，也可以选动态等任意一个 Tab。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
                     HOME_TAB_LABELS.forEach { (id, label) ->
-                        FilterChip(selected = s.homeTab == id, onClick = { vm.setHomeTab(id) }, label = { Text(label) })
+                        val pluginId = when (id) { "tab_ledger" -> "ledger"; "tab_anniversary" -> "anniversary"; else -> null }
+                        val available = id == "home_page" || (id !in s.hiddenTabs && (pluginId == null || pluginId !in s.disabledPlugins))
+                        FilterChip(selected = s.homeTab == id, enabled = available, onClick = { vm.setHomeTab(id) }, label = { Text(label) })
                     }
                 }
             }
@@ -241,15 +256,16 @@ fun SettingsScreen(
                 }
                 Text("同一份授权也用于后台保活的一键豁免（我的 → 后台保活）。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
             }
-            SectionCard("后台保活") {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "任务栏留存：开启后通知栏常驻一条静音通知（前台服务），让系统不再冻结连接；关掉就撤掉通知。",
-                        style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f),
-                    )
-                    Switch(checked = keepAliveOn, onCheckedChange = keepAliveVm::setEnabled)
+            SectionCard("后台与任务保留") {
+                SwitchRow("常驻连接 · 静音通知", checked = keepAliveOn) { on ->
+                    if (on && Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    else keepAliveVm.setEnabled(on)
                 }
-                SecondaryButton("打开后台保活 · 连接诊断", onClick = onOpenKeepAlive)
+                Text("使用前台服务尽量保持消息连接；关闭后撤掉常驻通知。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                if (notificationDenied) Text("通知权限未允许，暂未开启常驻连接。可在后台保活页重新授权。", style = t.typography.caption, color = t.colors.error)
+                SwitchRow("在最近任务列表保留", checked = s.retainRecentTask, onChange = vm::setRetainRecentTask)
+                Text("显示在系统最近任务列表；可在支持的手机上手动锁定任务卡片。不能阻止手动划掉、强行停止或系统回收。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                SecondaryButton("后台保活 · Shizuku 豁免与诊断", onClick = onOpenKeepAlive)
             }
             NotifySection(notifyVm)
             ChatExportSection(exportVm)
