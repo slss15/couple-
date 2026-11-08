@@ -27,6 +27,8 @@ import com.qimingnan.couple.di.PlainClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -197,20 +199,45 @@ class UpdateRepository @Inject constructor(
         val base0 = bootstrapStore.currentConfigBlocking()?.baseUrl
         val isDemo = base0?.let { com.qimingnan.couple.data.demo.DemoBackend.isDemo(it) } ?: false
         if (!isDemo) {
-            when (val g = checkGithub(current0, manual)) {
+            // 服务器路径（快、附带设备上报）与 GitHub 直连路径并行起跑：
+            // 服务器给出确定结果（Ok，含「已是最新」）就用它；服务器失败（未登录/未配对/网络）时用 GitHub 结果。
+            val serverDeferred = scope.async { runCatching { checkServer(current0, manual) } }
+            val githubDeferred = scope.async {
+                runCatching { checkGithub(current0, manual) }.getOrElse { GithubResult.Failed("GitHub 检查异常") }
+            }
+            val server = serverDeferred.await()
+            if (server is ServerOutcome.Definitive) {
+                githubDeferred.cancel()
+                return server.message
+            }
+            val github = githubDeferred.await()
+            return when (github) {
                 is GithubResult.Available -> {
                     if (!manual) prefetchIfCheap()
-                    return "发现新版本 ${g.info.versionName}"
+                    "发现新版本 ${github.info.versionName}"
                 }
-                GithubResult.UpToDate -> return "已是最新版本"
-                is GithubResult.Failed -> {
-                    // Signature failures are authoritative: never offer that release.
-                    // Network failures fall through to the server path below, if one is configured.
-                    if (g.signatureBad || base0 == null) return g.message
-                }
+                GithubResult.UpToDate -> "已是最新版本"
+                is GithubResult.Failed ->
+                    (server as? ServerOutcome.Fallback)?.message ?: github.message
             }
         }
-        val base = bootstrapStore.currentConfigBlocking()?.baseUrl ?: return "尚未配置服务器"
+        checkServer(current0, manual).message
+    }
+
+    private sealed interface ServerOutcome {
+        val message: String
+
+        /** ApiResult.Ok：结果确定（含「已是最新版本」），直接采用。 */
+        data class Definitive(override val message: String) : ServerOutcome
+
+        /** ApiResult.Err：服务器路径失败，让位给 GitHub 直连结果。 */
+        data class Fallback(override val message: String) : ServerOutcome
+    }
+
+    /** 服务器路径：GET /app/update（附带设备上报与伴侣协议信息）。 */
+    private suspend fun checkServer(current0: Int, manual: Boolean): ServerOutcome {
+        val base = bootstrapStore.currentConfigBlocking()?.baseUrl
+            ?: return ServerOutcome.Fallback("尚未配置服务器")
         _state.update { it.copy(checking = true, shizuku = installer.shizukuState()) }
         val current = _state.value.currentVersionCode
         val result = apiCall {
@@ -255,7 +282,10 @@ class UpdateRepository @Inject constructor(
         _state.update { it.copy(lastCheckMessage = msg) }
         // OTA §9-4：自动检查（非手动）发现可选更新时，Wi-Fi + 电量充足就顺手预下载，用户点更新时已就绪。
         if (!manual) prefetchIfCheap()
-        msg
+        return when (result) {
+            is ApiResult.Ok -> ServerOutcome.Definitive(msg)
+            is ApiResult.Err -> ServerOutcome.Fallback(msg)
+        }
     }
 
     private sealed interface GithubResult {
@@ -274,25 +304,36 @@ class UpdateRepository @Inject constructor(
     }.getOrDefault(false)
 
     private fun githubClient(): OkHttpClient = plainClient.newBuilder()
-        .connectTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * 候选并行竞速：同时发所有候选，最先返回 200 且带体的获胜，其余取消。
+     * 旧实现是串行 for 循环，一个被墙的候选烧一次连接超时，五个候选最坏一分多钟。
+     * 全部候选都失败（或 45s 总兜底超时）返回 null。
+     */
     private suspend fun fetchFirstOk(client: OkHttpClient, urls: List<String>, maxBytes: Int): Pair<String, String>? =
-        withContext(Dispatchers.IO) {
-            for (url in urls) {
-                val body: String? = runCatching {
-                    val req = Request.Builder().url(url)
-                        .header("Accept", "application/vnd.github+json")
-                        .header("User-Agent", "couple-app-update")
-                        .build()
-                    client.newCall(req).execute().use { r ->
-                        if (!r.isSuccessful) null else r.body?.string()?.takeIf { it.length <= maxBytes }
-                    }
-                }.getOrNull()
-                if (body != null) return@withContext url to body
+        coroutineScope {
+            val winner = java.util.concurrent.atomic.AtomicReference<Pair<String, String>?>(null)
+            val done = kotlinx.coroutines.CompletableDeferred<Pair<String, String>?>()
+            val remaining = java.util.concurrent.atomic.AtomicInteger(urls.size)
+            urls.map { url ->
+                launch(Dispatchers.IO) {
+                    val got = runCatching {
+                        val req = Request.Builder().url(url)
+                            .header("Accept", "application/vnd.github+json")
+                            .header("User-Agent", "couple-app-update")
+                            .build()
+                        client.newCall(req).execute().use { r ->
+                            if (!r.isSuccessful) null else r.body?.string()?.takeIf { it.length <= maxBytes }
+                        }
+                    }.getOrNull()?.let { url to it }
+                    if (got != null && winner.compareAndSet(null, got)) done.complete(got)
+                    if (remaining.decrementAndGet() == 0 && winner.get() == null) done.complete(null)
+                }
             }
-            null
+            runCatching { kotlinx.coroutines.withTimeout(45_000) { done.await() } }.getOrNull()
         }
 
     /**
@@ -309,28 +350,46 @@ class UpdateRepository @Inject constructor(
         val client = githubClient()
         val ipv6 = hasIpv6()
         val lastHost = prefs.getString(KEY_LAST_MIRROR_HOST, null)
-        val listResult: Pair<Int, String?>? = withContext(Dispatchers.IO) {
-            runCatching {
-                val req = Request.Builder().url(MirrorNodes.API_URL)
-                    .header("Accept", "application/vnd.github+json")
-                    .header("User-Agent", "couple-app-update")
-                    .build()
-                client.newCall(req).execute().use { r -> r.code to r.body?.string() }
-            }.getOrNull()
+        // API 列表并行竞速：官方直连 + gh-proxy API 代理同时发，最先 200 的赢。
+        // 旧实现只打直连一个，被墙时干等 15s 连接超时，是「检查更新慢」的主因。
+        val firstError = java.util.concurrent.atomic.AtomicInteger(0)
+        val listResult: Pair<Int, String?>? = coroutineScope {
+            val winner = java.util.concurrent.atomic.AtomicReference<Pair<Int, String?>?>(null)
+            val done = kotlinx.coroutines.CompletableDeferred<Pair<Int, String?>?>()
+            val urls = MirrorNodes.apiCandidates(ipv6, lastHost)
+            val remaining = java.util.concurrent.atomic.AtomicInteger(urls.size)
+            urls.map { url ->
+                launch(Dispatchers.IO) {
+                    val got = runCatching {
+                        val req = Request.Builder().url(url)
+                            .header("Accept", "application/vnd.github+json")
+                            .header("User-Agent", "couple-app-update")
+                            .build()
+                        client.newCall(req).execute().use { r ->
+                            if (!r.isSuccessful) {
+                                firstError.compareAndSet(0, r.code)
+                                null
+                            } else r.code to r.body?.string()
+                        }
+                    }.getOrNull()
+                    if (got != null && got.second != null && winner.compareAndSet(null, got)) done.complete(got)
+                    if (remaining.decrementAndGet() == 0 && winner.get() == null) done.complete(null)
+                }
+            }
+            runCatching { kotlinx.coroutines.withTimeout(30_000) { done.await() } }.getOrNull()
         }
         if (listResult == null) {
             _state.update { it.copy(checking = false) }
-            return GithubResult.Failed("GitHub 检查失败：网络错误")
+            val code = firstError.get()
+            return GithubResult.Failed(
+                when (code) {
+                    403, 429 -> "GitHub 检查限流，稍后再试"
+                    in 400..599 -> "GitHub 检查失败：HTTP $code（已尝试镜像）"
+                    else -> "GitHub 检查失败：网络错误（已尝试镜像）"
+                },
+            )
         }
-        if (listResult.first == 403 || listResult.first == 429) {
-            _state.update { it.copy(checking = false) }
-            return GithubResult.Failed("GitHub 检查限流，稍后再试")
-        }
-        if (listResult.first !in 200..299 || listResult.second == null) {
-            _state.update { it.copy(checking = false) }
-            return GithubResult.Failed("GitHub 检查失败：HTTP ${listResult.first}")
-        }
-        val listBody: String = listResult.second!!
+        val listBody: String = listResult.second ?: return GithubResult.Failed("GitHub 检查失败：空响应")
         val release = GithubUpdate.pickLatest(GithubUpdate.parseReleases(listBody))
             ?: run {
                 _state.update { it.copy(checking = false) }

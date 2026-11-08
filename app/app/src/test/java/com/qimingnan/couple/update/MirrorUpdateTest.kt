@@ -64,4 +64,15 @@ class MirrorUpdateTest {
         assertEquals(emptyList<Any>(), GithubUpdate.parseReleases("not json"))
         assertNull(GithubUpdate.pickLatest(emptyList()))
     }
+
+    @Test fun `api candidates put direct first then mirrors, deduped`() {
+        val urls = MirrorNodes.apiCandidates(hasIpv6 = false, lastSuccess = null)
+        assertEquals("https://api.github.com/repos/slss15/couple-/releases?per_page=10", urls.first())
+        assertTrue(urls[1].startsWith("https://v4.gh-proxy.org/https://api.github.com/"))
+        assertTrue(urls.last().startsWith("https://v6.gh-proxy.org/https://api.github.com/"))
+        assertEquals(urls.size, urls.distinct().size)
+        // 上次成功的镜像提前
+        val ordered = MirrorNodes.apiCandidates(hasIpv6 = true, lastSuccess = "gh-proxy.org")
+        assertEquals("https://gh-proxy.org/https://api.github.com/repos/slss15/couple-/releases?per_page=10", ordered[1])
+    }
 }

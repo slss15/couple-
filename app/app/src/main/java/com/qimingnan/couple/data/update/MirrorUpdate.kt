@@ -65,6 +65,13 @@ object MirrorNodes {
     fun candidates(directUrl: String, hasIpv6: Boolean, lastSuccess: String?): List<String> =
         (ordered(hasIpv6, lastSuccess).mapNotNull { rewrite(directUrl, it) } + directUrl).distinct()
 
+    /**
+     * Releases 列表（API）请求的候选：官方直连在前，gh-proxy 的 API 代理随后兜底。
+     * 国内 api.github.com 常被墙，直连超时是「检查更新」慢的主因；这些候选配合并行竞速使用。
+     */
+    fun apiCandidates(hasIpv6: Boolean, lastSuccess: String?): List<String> =
+        (listOf(API_URL) + ordered(hasIpv6, lastSuccess).map { "https://$it/$API_URL" }).distinct()
+
     fun hostOf(url: String): String? = runCatching { java.net.URI(url).host }.getOrNull()
 
     /** Host to remember after a successful mirror download, or null for a direct success. */
