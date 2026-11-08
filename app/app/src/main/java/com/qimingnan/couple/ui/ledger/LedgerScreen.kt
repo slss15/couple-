@@ -622,13 +622,22 @@ private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved
 @Composable
 fun AmountField(value: String, onValueChange: (String) -> Unit, label: String, modifier: Modifier = Modifier) {
     var showKeypad by remember { mutableStateOf(false) }
+    val t = LocalCoupleTokens.current
     Column(modifier) {
+        // enabled=false：readOnly 的 TextField 自己会消费点击（光标/焦点），外层 clickable 永远收不到，
+        // 内置键盘就拉不起来。禁用后点击穿透到 clickable；disabled 配色保持与可输入态一致。
         OutlinedTextField(
             value = value,
             onValueChange = {},
-            readOnly = true,
+            enabled = false,
             label = { Text(label) },
             modifier = Modifier.fillMaxWidth().clickable { showKeypad = !showKeypad },
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                disabledTextColor = t.colors.onSurface,
+                disabledBorderColor = t.colors.onSurfaceVariant,
+                disabledLabelColor = t.colors.onSurfaceVariant,
+                disabledContainerColor = t.colors.surface,
+            ),
         )
         if (showKeypad) AmountKeypad(value = value, onValueChange = onValueChange, onDone = { showKeypad = false })
     }
