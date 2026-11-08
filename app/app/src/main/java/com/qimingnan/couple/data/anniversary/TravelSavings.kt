@@ -12,6 +12,6 @@ data class TravelSavings(val balanceCents: Long, val targetCents: Long) {
 
     companion object {
         fun from(account: LedgerAccount?, entries: List<LedgerEntry>, targetCents: Long): TravelSavings? =
-            account?.let { TravelSavings(LedgerLogic.balance(it, entries), targetCents) }
+            account?.takeUnless { it.type.isLoan }?.let { TravelSavings(LedgerLogic.balance(it, entries), targetCents) }
     }
 }

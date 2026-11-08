@@ -18,6 +18,7 @@ import com.qimingnan.couple.ui.ledger.parseCents
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TravelPlanCard(vm: AnniversaryViewModel, extras: AnniversaryExtras, accounts: List<LedgerAccount>, entries: List<LedgerEntry>) {
+    val cashAccounts = accounts.filterNot { it.type.isLoan }
     val t = LocalCoupleTokens.current
     var editing by remember { mutableStateOf(false) }
     var name by remember(extras.travelName) { mutableStateOf(extras.travelName) }
@@ -31,20 +32,20 @@ internal fun TravelPlanCard(vm: AnniversaryViewModel, extras: AnniversaryExtras,
             Text("给下一次出发留一点期待", style = t.typography.title, color = t.colors.onSurface)
             OutlinedTextField(name, { name = it }, label = { Text("目的地 / 计划名称（选填）") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Text("旅行攒钱关联账户", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-            if (accounts.isEmpty()) Text("先在记账 → 账户页新增一个账户。", style = t.typography.body, color = t.colors.onSurfaceVariant)
+            if (cashAccounts.isEmpty()) Text("先在记账 → 账户页新增一个账户。", style = t.typography.body, color = t.colors.onSurfaceVariant)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                accounts.forEach { account -> FilterChip(selected == account.id, { selected = account.id }, label = { Text(account.name) }) }
+                cashAccounts.forEach { account -> FilterChip(selected == account.id, { selected = account.id }, label = { Text(account.name) }) }
             }
             AmountField(target, { target = it }, "攒钱目标（元）")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
                     busy = true
                     vm.setTravel(selected, parseCents(target), name) { problem -> busy = false; error = problem; if (problem == null) editing = false }
-                }, enabled = !busy && accounts.any { it.id == selected } && parseCents(target) > 0) { Text(if (busy) "保存中…" else "保存旅行计划") }
+                }, enabled = !busy && cashAccounts.any { it.id == selected } && parseCents(target) > 0) { Text(if (busy) "保存中…" else "保存旅行计划") }
                 if (configured) TextButton(onClick = { editing = false }) { Text("取消") }
             }
         } else {
-            val account = accounts.firstOrNull { it.id == extras.travelAccountId }
+            val account = cashAccounts.firstOrNull { it.id == extras.travelAccountId }
             Text(extras.travelName.ifBlank { "下一次出发" }, style = t.typography.title, color = t.colors.onSurface)
             val savings = TravelSavings.from(account, entries, extras.travelTargetCents)
             if (savings == null) Text("关联账户已删除或不可用，请重新选择。", style = t.typography.body, color = t.colors.error)

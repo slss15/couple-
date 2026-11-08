@@ -14,7 +14,11 @@ import java.time.YearMonth
  * income and not expense: it only moves money between two accounts, so
  * total assets do not change because of a transfer.
  */
-enum class LedgerAccountType { CASH, BANK, ALIPAY, WECHAT, OTHER }
+enum class LedgerAccountType {
+    CASH, BANK, ALIPAY, WECHAT, OTHER, LENT, BORROWED;
+    val isLoan: Boolean get() = this == LENT || this == BORROWED
+    val loanKind: LoanKind? get() = when (this) { LENT -> LoanKind.LENT; BORROWED -> LoanKind.BORROWED; else -> null }
+}
 
 enum class LedgerEntryType { EXPENSE, INCOME, TRANSFER }
 
@@ -43,6 +47,8 @@ data class LedgerEntry(
     val deleted: Boolean = false,
     /** 备注（选填）：记一笔向导第 6 步确认页填的备注，存下来随账目显示。 */
     val note: String = "",
+    val loanId: String? = null,
+    val loanAction: LoanAction? = null,
 )
 
 object LedgerLogic {
@@ -56,6 +62,8 @@ object LedgerLogic {
      * take an account negative, and the UI warns instead of blocking.
      */
     fun validate(entry: LedgerEntry): String? = when {
+        (entry.loanId == null) != (entry.loanAction == null) -> "借贷关联信息不完整"
+        entry.loanAction != null && entry.type != entry.loanAction.entryType -> "借贷资金方向不匹配"
         entry.amountCents <= 0 -> "金额必须大于 0"
         entry.type == LedgerEntryType.TRANSFER && entry.categoryId != null -> "转账不需要分类"
         entry.type == LedgerEntryType.TRANSFER &&
@@ -66,7 +74,11 @@ object LedgerLogic {
         else -> null
     }
 
-    fun balance(account: LedgerAccount, entries: List<LedgerEntry>): Long {
+    fun balance(account: LedgerAccount, entries: List<LedgerEntry>, loans: List<LoanRecord> = emptyList()): Long {
+        if (account.type.isLoan) {
+            val outstanding = loans.filter { it.loanAccountId == account.id }.sumOf { it.remainingCents }
+            return if (account.type == LedgerAccountType.BORROWED) -outstanding else outstanding
+        }
         var total = account.initialBalanceCents
         for (e in live(entries)) {
             when (e.type) {
@@ -81,8 +93,8 @@ object LedgerLogic {
         return total
     }
 
-    fun totalAssets(accounts: List<LedgerAccount>, entries: List<LedgerEntry>): Long =
-        accounts.sumOf { balance(it, entries) }
+    fun totalAssets(accounts: List<LedgerAccount>, entries: List<LedgerEntry>, loans: List<LoanRecord> = emptyList()): Long =
+        accounts.sumOf { balance(it, entries, loans) }
 
     data class MonthTotals(val incomeCents: Long, val expenseCents: Long) {
         val netCents: Long get() = incomeCents - expenseCents
@@ -93,7 +105,7 @@ object LedgerLogic {
         var income = 0L
         var expense = 0L
         for (e in live(entries)) {
-            if (YearMonth.from(e.occurredOn) != month) continue
+            if (YearMonth.from(e.occurredOn) != month || e.loanAction != null) continue
             when (e.type) {
                 LedgerEntryType.INCOME -> income += e.amountCents
                 LedgerEntryType.EXPENSE -> expense += e.amountCents
@@ -106,7 +118,7 @@ object LedgerLogic {
     fun categoryTotals(entries: List<LedgerEntry>, month: YearMonth, type: LedgerEntryType): Map<String, Long> {
         val out = LinkedHashMap<String, Long>()
         for (e in live(entries)) {
-            if (e.type != type || YearMonth.from(e.occurredOn) != month) continue
+            if (e.type != type || YearMonth.from(e.occurredOn) != month || e.loanAction != null) continue
             val key = e.categoryId ?: continue
             out[key] = (out[key] ?: 0L) + e.amountCents
         }

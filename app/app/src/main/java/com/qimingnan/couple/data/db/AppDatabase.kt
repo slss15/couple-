@@ -100,9 +100,9 @@ interface ProfileDao {
 @Database(
     entities = [
         UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class,
-        ChatMessageEntity::class, AnniversaryEventEntity::class, LedgerAccountEntity::class, LedgerEntryEntity::class,
+        ChatMessageEntity::class, AnniversaryEventEntity::class, LedgerAccountEntity::class, LedgerEntryEntity::class, LedgerLoanEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -189,6 +189,15 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `ledger_entries` ADD COLUMN `note` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** v8 → v9：借贷本金账目关联与本地明细，旧账目保持不变。 */
+        val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `ledger_entries` ADD COLUMN `loanId` TEXT")
+                db.execSQL("ALTER TABLE `ledger_entries` ADD COLUMN `loanAction` TEXT")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `ledger_loans` (`id` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `payload` TEXT NOT NULL, PRIMARY KEY(`id`))")
             }
         }
 

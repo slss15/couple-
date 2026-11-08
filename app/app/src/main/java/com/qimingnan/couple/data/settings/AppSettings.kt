@@ -21,9 +21,9 @@ data class AppSettings(
     val fontSize: FontSize = FontSize.Standard,
     /** 本月个人支出预算（分），0 = 没设；统计页显示已用/剩余，80%/100% 时提醒。 */
     val monthlyBudgetCents: Long = 0,
-    /** 底部 Tab 栏顺序（layoutId 列表），设置里上下移动保存；默认见 DEFAULT_TAB_ORDER。 */
+    /** 底部 Tab 栏顺序（layoutId 列表），设置里长按拖拽、松手保存；默认见 DEFAULT_TAB_ORDER。 */
     val tabOrder: List<String> = DEFAULT_TAB_ORDER,
-    /** 账户顺序（账户 id 列表），账户页上下移动保存；空 = 按添加顺序。 */
+    /** 账户顺序（账户 id 列表），账户页长按拖拽、松手保存；空 = 按添加顺序。 */
     val accountOrder: List<String> = emptyList(),
     /** 在系统最近任务列表显示本应用；不能阻止用户划掉或系统回收。 */
     val retainRecentTask: Boolean = true,

@@ -55,6 +55,17 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
     /** 本月个人预算（分），0 = 没设。 */
     suspend fun setMonthlyBudget(cents: Long) = store.edit { it[MONTHLY_BUDGET] = cents.coerceAtLeast(0) }
 
+    /** 长按拖拽松手后一次保存完整顺序；缺失、重复或未知的 Tab 仍按原规则归一化。 */
+    suspend fun setTabOrder(order: List<String>) = store.edit { p ->
+        p[TAB_ORDER] = effectiveTabOrder(order).joinToString(",")
+    }
+
+    /** 只保存当前账户；删除的 id 去掉，新建或未拖动的账户补齐，沿用原 preference。 */
+    suspend fun setAccountOrder(order: List<String>, allIds: List<String>) = store.edit { p ->
+        val current = p[ACCOUNT_ORDER]?.split(",") ?: emptyList()
+        p[ACCOUNT_ORDER] = (order + current + allIds).distinct().filter { it in allIds }.joinToString(",")
+    }
+
     /** 在持久事务里计算顺序，连续点击也不丢失更新。 */
     suspend fun moveTabOrder(id: String, delta: Int) {
         if (delta != -1 && delta != 1) return
@@ -137,6 +148,14 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
         return saved
     }
 
+    /** Import is acknowledged only after the Room transaction commits; original strings stay as backup. */
+    suspend fun legacyLoansForImport(): List<LoanRecord> {
+        val preferences = store.data.first()
+        return if (preferences[LOANS_IMPORTED] == true) emptyList()
+            else (preferences[LOANS] ?: emptySet()).mapNotNull(LoanRecord::decode)
+    }
+    suspend fun markLegacyLoansImported() = store.edit { it[LOANS_IMPORTED] = true }
+
     suspend fun deleteLoan(id: String) = store.edit { p ->
         p[LOANS] = (p[LOANS] ?: emptySet()).filterNot { LoanRecord.decode(it)?.id == id }.toSet()
     }
@@ -158,6 +177,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
         private val TRAVEL_ACCOUNT = stringPreferencesKey("travel_account_id")
         private val TRAVEL_TARGET = longPreferencesKey("travel_target_cents")
         private val TRAVEL_NAME = stringPreferencesKey("travel_name")
+        private val LOANS_IMPORTED = booleanPreferencesKey("loan_records_imported_to_room")
         private val LOANS = stringSetPreferencesKey("loan_records")
 
         /** 顺序里补齐缺失的 Tab、去掉多余的，保证 5 个都在。 */
