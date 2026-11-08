@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 9,
-    "identityHash": "c4f727936837ca0ba9eb39259789c9c5",
+    "identityHash": "45dd279f4832b3e5fe6bcd122e37460e",
     "entities": [
       {
         "tableName": "users",
@@ -602,7 +602,7 @@
       },
       {
         "tableName": "ledger_entries",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `accountId` TEXT, `type` TEXT NOT NULL, `categoryId` TEXT, `amountCents` INTEGER NOT NULL, `fromAccountId` TEXT, `toAccountId` TEXT, `occurredOn` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, `note` TEXT NOT NULL, `loanId` TEXT, `loanAction` TEXT, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `accountId` TEXT, `type` TEXT NOT NULL, `categoryId` TEXT, `amountCents` INTEGER NOT NULL, `fromAccountId` TEXT, `toAccountId` TEXT, `occurredOn` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, `note` TEXT NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -687,18 +687,6 @@
             "columnName": "note",
             "affinity": "TEXT",
             "notNull": true
-          },
-          {
-            "fieldPath": "loanId",
-            "columnName": "loanId",
-            "affinity": "TEXT",
-            "notNull": false
-          },
-          {
-            "fieldPath": "loanAction",
-            "columnName": "loanAction",
-            "affinity": "TEXT",
-            "notNull": false
           }
         ],
         "primaryKey": {
@@ -711,8 +699,8 @@
         "foreignKeys": []
       },
       {
-        "tableName": "ledger_loans",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `payload` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "tableName": "period_logs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `startDate` TEXT NOT NULL, `endDate` TEXT, `note` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -727,9 +715,45 @@
             "notNull": true
           },
           {
-            "fieldPath": "payload",
-            "columnName": "payload",
+            "fieldPath": "startDate",
+            "columnName": "startDate",
             "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endDate",
+            "columnName": "endDate",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deleted",
+            "columnName": "deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pendingSync",
+            "columnName": "pendingSync",
+            "affinity": "INTEGER",
             "notNull": true
           }
         ],
@@ -746,7 +770,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'c4f727936837ca0ba9eb39259789c9c5')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '45dd279f4832b3e5fe6bcd122e37460e')"
     ]
   }
 }

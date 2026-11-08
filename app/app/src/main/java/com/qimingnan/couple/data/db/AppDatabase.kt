@@ -100,9 +100,10 @@ interface ProfileDao {
 @Database(
     entities = [
         UserEntity::class, CoupleEntity::class, PostEntity::class, PostMediaEntity::class, CommentEntity::class,
-        ChatMessageEntity::class, AnniversaryEventEntity::class, LedgerAccountEntity::class, LedgerEntryEntity::class, LedgerLoanEntity::class,
+        ChatMessageEntity::class, AnniversaryEventEntity::class, LedgerAccountEntity::class, LedgerEntryEntity::class,
+        PeriodLogEntity::class, LedgerLoanEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -111,6 +112,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun anniversaryDao(): AnniversaryDao
     abstract fun ledgerDao(): LedgerDao
+    abstract fun periodDao(): PeriodDao
 
     companion object {
         /** v1 → v2：feed 缓存表（纯新增，旧表不动）。 */
@@ -192,8 +194,8 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /** v8 → v9：借贷本金账目关联与本地明细，旧账目保持不变。 */
-        val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+        /** v9 → v10：借贷本金账目关联与本地明细，旧账目保持不变。 */
+        val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `ledger_entries` ADD COLUMN `loanId` TEXT")
                 db.execSQL("ALTER TABLE `ledger_entries` ADD COLUMN `loanAction` TEXT")
@@ -210,6 +212,17 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `height` INTEGER")
                 db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `localUri` TEXT")
                 db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `stickerUrl` TEXT")
+            }
+        }
+
+        /** v8 → v9：经期插件表（纯新增，旧表不动）。 */
+        val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `period_logs` (`id` TEXT NOT NULL, `ownerId` TEXT NOT NULL, " +
+                        "`startDate` TEXT NOT NULL, `endDate` TEXT, `note` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
             }
         }
     }

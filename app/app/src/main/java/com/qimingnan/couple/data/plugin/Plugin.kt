@@ -30,6 +30,7 @@ data class PluginDescriptor(
 object PluginRegistry {
     const val ANNIVERSARY = "anniversary"
     const val LEDGER = "ledger"
+    const val PERIOD = "period"
 
     val all: List<PluginDescriptor> = listOf(
         PluginDescriptor(
@@ -45,6 +46,13 @@ object PluginRegistry {
             description = "普通个人记账：账户、支出、收入、转账与月预算",
             scope = PluginScope.PERSONAL,
             available = true, // PR4 enables the ledger plugin.
+        ),
+        PluginDescriptor(
+            id = PERIOD,
+            title = "经期记录",
+            description = "经期日志、周期预测与提醒；数据只保存在本机",
+            scope = PluginScope.PERSONAL,
+            available = true,
         ),
     )
 
