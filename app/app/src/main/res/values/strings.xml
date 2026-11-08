@@ -156,4 +156,21 @@
     <string name="sched_cancel">取消</string>
     <string name="sched_created">已设置定时消息</string>
     <string name="sched_open">定时消息</string>
+    <string name="tab_period">经期</string>
+    <string name="period_add">记录经期</string>
+    <string name="period_start">开始日</string>
+    <string name="period_end">结束日（可选）</string>
+    <string name="period_pick_date">点选日期</string>
+    <string name="period_note">备注</string>
+    <string name="period_ongoing">进行中</string>
+    <string name="period_history_title">历史记录</string>
+    <string name="period_empty">还没有记录，点右下角「+」添加第一次经期。</string>
+    <string name="period_privacy_note">🔒 经期数据只保存在这台手机上，不会同步给 TA 或服务器。</string>
+    <string name="period_state_none">记录第一次经期</string>
+    <string name="period_state_none_hint">记下开始和结束日，之后会自动预测下次。</string>
+    <string name="period_state_in">经期中 · 第 %1$d 天</string>
+    <string name="period_state_next">距下次约 %1$d 天</string>
+    <string name="period_state_overdue">预计已推迟 %1$d 天</string>
+    <string name="period_predict">预测下次：%1$s</string>
+    <string name="period_stats">周期约 %1$d 天 · 经期约 %2$d 天（近 %3$d 个周期）</string>
 </resources>
