@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -132,6 +133,26 @@ fun LedgerScreen(
     }
     val accountById = remember(accounts) { accounts.associateBy { it.id } }
 
+    // 账户详情全屏呈现（自带唯一返回键）：此前它叠在记账页头下面，出现双返回键，
+    // 外层大标题与间距又在详情上方留出一大块空白。详情现在占满整屏、可滚动，适配小屏。
+    if (subTab == LedgerSubTab.Accounts) {
+        accounts.firstOrNull { it.id == selectedAccountId }?.let { detail ->
+            Column(
+                Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = t.spacing.lg, vertical = t.spacing.md),
+                verticalArrangement = Arrangement.spacedBy(t.spacing.md),
+            ) {
+                if (detail.type.isLoan) {
+                    LoanAccountDetail(vm, detail, accounts.filterNot { it.type.isLoan }, loans, entries, { selectedAccountId = null })
+                } else {
+                    AccountDetail(vm = vm, account = detail, entries = entries, onBack = { selectedAccountId = null })
+                }
+            }
+            return
+        }
+    }
+
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = t.spacing.xs), verticalAlignment = Alignment.CenterVertically) {
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
@@ -245,16 +266,8 @@ fun LedgerScreen(
                     }
                 }
                 LedgerSubTab.Accounts -> {
-                    if (selectedAccount != null) {
-                        if (selectedAccount.type.isLoan) LoanAccountDetail(vm, selectedAccount, accounts.filterNot { it.type.isLoan }, loans, entries, { selectedAccountId = null })
-                        else AccountDetail(
-                            vm = vm,
-                            account = selectedAccount,
-                            entries = entries,
-                            onBack = { selectedAccountId = null },
-                        )
-                    } else {
-                        val total = LedgerLogic.totalAssets(accounts, entries, loans)
+                    // 账户详情已提前全屏呈现（见函数开头），这里只剩列表。
+                    val total = LedgerLogic.totalAssets(accounts, entries, loans)
                         SectionCard("总资产") {
                             Text(centsText(total), style = t.typography.headline, color = t.colors.primary)
                             Text("${accounts.size} 个账户 · 含借出待收回、扣除借入待还", style = t.typography.caption, color = t.colors.onSurfaceVariant)
@@ -307,7 +320,6 @@ fun LedgerScreen(
                 }
             }
             Text("个人私密账本，不会出现在动态、聊天或 TA 页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-        }
     }
 }
 
@@ -622,13 +634,22 @@ private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved
 @Composable
 fun AmountField(value: String, onValueChange: (String) -> Unit, label: String, modifier: Modifier = Modifier) {
     var showKeypad by remember { mutableStateOf(false) }
+    val t = LocalCoupleTokens.current
     Column(modifier) {
+        // enabled=false：readOnly 的 TextField 自己会消费点击（光标/焦点），外层 clickable 永远收不到，
+        // 内置键盘就拉不起来。禁用后点击穿透到 clickable；disabled 配色保持与可输入态一致。
         OutlinedTextField(
             value = value,
             onValueChange = {},
-            readOnly = true,
+            enabled = false,
             label = { Text(label) },
             modifier = Modifier.fillMaxWidth().clickable { showKeypad = !showKeypad },
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                disabledTextColor = t.colors.onSurface,
+                disabledBorderColor = t.colors.onSurfaceVariant,
+                disabledLabelColor = t.colors.onSurfaceVariant,
+                disabledContainerColor = t.colors.surface,
+            ),
         )
         if (showKeypad) AmountKeypad(value = value, onValueChange = onValueChange, onDone = { showKeypad = false })
     }
