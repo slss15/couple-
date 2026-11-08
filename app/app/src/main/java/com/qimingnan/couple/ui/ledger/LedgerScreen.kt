@@ -71,6 +71,7 @@ import com.qimingnan.couple.ui.components.GlyphAvatar
 import com.qimingnan.couple.ui.components.LedgerEntryRow
 import com.qimingnan.couple.ui.components.MonthSwitcher
 import com.qimingnan.couple.ui.components.RatioBar
+import com.qimingnan.couple.ui.components.LongPressReorderableColumn
 import com.qimingnan.couple.ui.components.SectionCard
 import com.qimingnan.couple.ui.settings.SettingsViewModel
 import java.math.BigDecimal
@@ -107,11 +108,13 @@ fun LedgerScreen(
     autoOpenWizard: Boolean = false,
 ) {
     val t = LocalCoupleTokens.current
+    val scrollState = rememberScrollState()
     val accounts by vm.accounts.collectAsStateWithLifecycle()
     val entries by vm.entries.collectAsStateWithLifecycle()
     val totals by vm.monthTotals.collectAsStateWithLifecycle()
     val month by vm.month.collectAsStateWithLifecycle()
     val loans by vm.loans.collectAsStateWithLifecycle()
+    val operationError by vm.operationError.collectAsStateWithLifecycle()
     val settingsVm: SettingsViewModel = hiltViewModel()
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
     var showQuick by remember { mutableStateOf(false) }
@@ -137,9 +140,10 @@ fun LedgerScreen(
             if (subTab == LedgerSubTab.Record) Button(onClick = { showQuick = !showQuick }) { Text(if (showQuick) "收起" else "立即记账") }
         }
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(t.spacing.lg),
+            Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
         ) {
+            operationError?.let { Text(it, color = t.colors.error) }
             when (subTab) {
                 LedgerSubTab.Record -> {
                     if (showQuick) LedgerEntryWizard(vm, orderedAccounts, entries, onDismiss = { showQuick = false })
@@ -218,7 +222,7 @@ fun LedgerScreen(
                     )
                     val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
                     SectionCard("支出分类") {
-                        val byCat = monthEntries.filter { it.type == LedgerEntryType.EXPENSE }
+                        val byCat = monthEntries.filter { it.type == LedgerEntryType.EXPENSE && it.loanAction == null }
                             .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
                             .mapValues { (_, list) -> list.sumOf { it.amountCents } }
                             .entries.sortedByDescending { it.value }
@@ -229,7 +233,7 @@ fun LedgerScreen(
                         }
                     }
                     SectionCard("收入分类") {
-                        val byCat = monthEntries.filter { it.type == LedgerEntryType.INCOME }
+                        val byCat = monthEntries.filter { it.type == LedgerEntryType.INCOME && it.loanAction == null }
                             .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
                             .mapValues { (_, list) -> list.sumOf { it.amountCents } }
                             .entries.sortedByDescending { it.value }
@@ -242,37 +246,45 @@ fun LedgerScreen(
                 }
                 LedgerSubTab.Accounts -> {
                     if (selectedAccount != null) {
-                        AccountDetail(
+                        if (selectedAccount.type.isLoan) LoanAccountDetail(vm, selectedAccount, accounts.filterNot { it.type.isLoan }, loans, entries, { selectedAccountId = null })
+                        else AccountDetail(
                             vm = vm,
                             account = selectedAccount,
                             entries = entries,
-                            loans = loans,
                             onBack = { selectedAccountId = null },
                         )
                     } else {
-                        val total = LedgerLogic.totalAssets(accounts, entries)
+                        val total = LedgerLogic.totalAssets(accounts, entries, loans)
                         SectionCard("总资产") {
                             Text(centsText(total), style = t.typography.headline, color = t.colors.primary)
-                            Text("${accounts.size} 个账户", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                            Text("${accounts.size} 个账户 · 含借出待收回、扣除借入待还", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                         }
-                        if (accounts.isNotEmpty()) SectionCard("资产分布") {
-                            val withBalance = accounts.map { a -> a to vm.balance(a, entries) }
+                        if (accounts.isNotEmpty()) SectionCard("资金账户分布") {
+                            val withBalance = accounts.filterNot { it.type.isLoan }.map { a -> a to vm.balance(a, entries) }
                                 .sortedByDescending { it.second }
+                            val cashTotal = withBalance.sumOf { it.second }
                             withBalance.forEach { (a, bal) ->
-                                val share = if (total > 0) (bal.toDouble() / total.toDouble() * 100).toInt() else 0
+                                val share = if (cashTotal > 0) (bal.toDouble() / cashTotal.toDouble() * 100).toInt() else 0
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                         AccountIcon(a.type, Modifier.size(32.dp), a.bankCode)
                                         Text(a.name, style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f).padding(start = 8.dp))
-                                        if (total > 0) Text("$share%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                                        if (cashTotal > 0) Text("$share%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                                         Text(centsText(bal), style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.padding(start = 8.dp))
                                     }
-                                    if (total > 0) RatioBar(share / 100f)
+                                    if (cashTotal > 0) RatioBar(share / 100f)
                                 }
                             }
                         }
                         Text("我的账户", style = t.typography.title, color = t.colors.onSurface)
-                        orderedAccounts.forEachIndexed { index, a ->
+                        if (accounts.size > 1) Text("长按账户，浮起后拖动调整顺序，松手保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                        LongPressReorderableColumn(
+                            items = orderedAccounts,
+                            itemKey = { it.id },
+                            spacing = t.spacing.md,
+                            scrollState = scrollState,
+                            onOrderChange = { order, onSaved -> settingsVm.saveAccountOrder(order, accounts.map { it.id }, onSaved) },
+                        ) { a, _ ->
                             Surface(
                                 color = t.colors.surfaceContainer,
                                 shape = t.shapes.large,
@@ -287,21 +299,10 @@ fun LedgerScreen(
                                     Text(centsText(vm.balance(a, entries)), style = t.typography.title, color = t.colors.onSurface)
                                 }
                             }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                TextButton(
-                                    onClick = { settingsVm.moveAccount(a.id, -1, accounts.map { it.id }) },
-                                    enabled = index > 0,
-                                ) { Text("↑ 上移") }
-                                TextButton(
-                                    onClick = { settingsVm.moveAccount(a.id, 1, accounts.map { it.id }) },
-                                    enabled = index < orderedAccounts.lastIndex,
-                                ) { Text("↓ 下移") }
-                            }
                         }
                         if (accounts.isEmpty()) Text("还没有账户，先在下方添加一个账户。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                         Button(onClick = { showAccounts = !showAccounts }) { Text(if (showAccounts) "收起账户" else "添加账户") }
                         if (showAccounts) AccountForm(vm, onDone = { showAccounts = false })
-                        LoanSection(vm, orderedAccounts, loans)
                     }
                 }
             }
@@ -434,22 +435,25 @@ internal fun AccountIcon(type: LedgerAccountType, modifier: Modifier = Modifier,
         else -> Icons.Filled.Add
     }
     Box(
-        modifier.clip(CircleShape).background(t.colors.primaryContainer),
+        modifier,
         contentAlignment = Alignment.Center,
     ) {
-        val bank = BankCatalog.byCode(bankCode)
-        if (bank != null) {
-            Image(painterResource(bank.drawableRes), contentDescription = bank.name, modifier = Modifier.size(28.dp))
+        // Bank vectors retain their original fills. Font glyphs are inherently monochrome;
+        // use a neutral foreground, not a theme-coloured badge or a filter over the artwork.
+        val bank = if (type == LedgerAccountType.BANK) BankCatalog.byCode(bankCode) else null
+        if (type.isLoan) {
+            Text(if (type == LedgerAccountType.LENT) "借出" else "借入", style = t.typography.label, color = t.colors.onSurface)
+        } else if (bank != null) {
+            Image(painterResource(bank.drawableRes), contentDescription = bank.name, modifier = Modifier.fillMaxSize(0.85f))
         } else if (iconChar != null) {
-            Text(iconChar, fontFamily = iconFont, fontSize = 28.sp, color = t.colors.onPrimaryContainer)
+            Text(iconChar, fontFamily = iconFont, fontSize = 28.sp, color = t.colors.onSurface)
         } else {
-            Icon(icon, contentDescription = accountTypeLabel(type), tint = t.colors.onPrimaryContainer, modifier = Modifier.size(28.dp))
+            Icon(icon, contentDescription = accountTypeLabel(type), tint = t.colors.onSurface, modifier = Modifier.fillMaxSize(0.7f))
         }
     }
 }
 
-internal fun parseCents(text: String): Long =
-    runCatching { BigDecimal(text).multiply(BigDecimal(100)).toLong() }.getOrDefault(0L)
+internal fun parseCents(text: String): Long = Money.parseCents(text) ?: 0L
 
 /**
  * 账户详情：点开一个账户能看到它的账目，还能改名、改类型、改期初余额、
@@ -460,14 +464,12 @@ private fun AccountDetail(
     vm: LedgerViewModel,
     account: LedgerAccount,
     entries: List<LedgerEntry>,
-    loans: List<LoanRecord>,
     onBack: () -> Unit,
 ) {
     val t = LocalCoupleTokens.current
     var editing by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val myEntries = entries.filter { it.accountId == account.id || it.fromAccountId == account.id || it.toAccountId == account.id }
-    val myLoans = loans.filter { it.accountId == account.id }
     val balance = vm.balance(account, entries)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回账户列表", tint = t.colors.onSurface) }
@@ -486,7 +488,6 @@ private fun AccountDetail(
     }
     Button(onClick = { editing = !editing }) { Text(if (editing) "收起修改" else "修改信息") }
     if (editing) AccountEditForm(vm, account, onSaved = { editing = false })
-    LoanSection(vm, listOf(account), myLoans, initialAccountId = account.id)
     SectionCard("这个账户的账目（${myEntries.size} 笔）") {
         if (myEntries.isEmpty()) Text("这个账户还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
         myEntries.forEach { e ->
@@ -570,6 +571,8 @@ private fun accountTypeLabel(type: LedgerAccountType): String = when (type) {
     LedgerAccountType.ALIPAY -> "支付宝"
     LedgerAccountType.WECHAT -> "微信"
     LedgerAccountType.OTHER -> "其他"
+    LedgerAccountType.LENT -> "借出账户"
+    LedgerAccountType.BORROWED -> "借入账户"
 }
 
 /** 修改账户信息：改名、改类型、改期初余额，保存时用同一个 id 覆盖。 */
@@ -593,7 +596,7 @@ private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved
         )
         AmountField(value = initial, onValueChange = { initial = it }, label = "期初余额（元）")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LedgerAccountType.entries.forEach { ty ->
+            LedgerAccountType.entries.filterNot { it.isLoan }.forEach { ty ->
                 FilterChip(selected = type == ty, onClick = { type = ty }, label = { Text(accountTypeLabel(ty)) })
             }
         }
@@ -752,7 +755,8 @@ internal fun AmountKeypad(
 
 /** 新建账户：输名字自动认银行（没手动选过的时候），手动选过之后改名字不再自动改。 */
 @Composable
-internal fun AccountForm(vm: LedgerViewModel, onDone: () -> Unit = {}) {
+@OptIn(ExperimentalLayoutApi::class)
+internal fun AccountForm(vm: LedgerViewModel, onDone: () -> Unit = {}, allowLoanTypes: Boolean = true) {
     val t = LocalCoupleTokens.current
     val accountId = remember { UUID.randomUUID().toString() }
     var saving by remember { mutableStateOf(false) }
@@ -772,9 +776,10 @@ internal fun AccountForm(vm: LedgerViewModel, onDone: () -> Unit = {}) {
             label = { Text("账户名，如 工资卡") },
             modifier = Modifier.fillMaxWidth(),
         )
-        AmountField(value = initial, onValueChange = { initial = it }, label = "期初余额（元）")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LedgerAccountType.entries.forEach { ty ->
+        if (!type.isLoan) AmountField(value = initial, onValueChange = { initial = it }, label = "期初余额（元）")
+        else Text("借贷余额由个人/平台的借款与还款明细计算。建好账户后点进账户添加明细。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LedgerAccountType.entries.filter { allowLoanTypes || !it.isLoan }.forEach { ty ->
                 FilterChip(selected = type == ty, onClick = { type = ty }, label = { Text(accountTypeLabel(ty)) })
             }
         }
@@ -787,10 +792,10 @@ internal fun AccountForm(vm: LedgerViewModel, onDone: () -> Unit = {}) {
             vm.saveAccount(
                 LedgerAccount(
                     id = accountId, name = name.trim(), type = type,
-                    initialBalanceCents = parseCents(initial),
+                    initialBalanceCents = if (type.isLoan) 0 else parseCents(initial),
                     bankCode = if (type == LedgerAccountType.BANK) bank?.code else null,
                 ),
             ) { problem -> saving = false; error = problem; if (problem == null) onDone() }
-        }, enabled = !saving && name.isNotBlank() && (initial.isBlank() || Money.parseCents(initial) != null)) { Text(if (saving) "保存中…" else "保存账户") }
+        }, enabled = !saving && name.isNotBlank() && (type.isLoan || initial.isBlank() || Money.parseCents(initial) != null)) { Text(if (saving) "保存中…" else "保存账户") }
     }
 }

@@ -50,7 +50,8 @@ fun HomeScreen(
     val today = LocalDate.now()
     val events by anniversaryVm.events.collectAsStateWithLifecycle()
     val entries by ledgerVm.entries.collectAsStateWithLifecycle()
-    val accounts by ledgerVm.accounts.collectAsStateWithLifecycle()
+    val allAccounts by ledgerVm.accounts.collectAsStateWithLifecycle()
+    val accounts = allAccounts.filterNot { it.type.isLoan }
     val totals by ledgerVm.monthTotals.collectAsStateWithLifecycle()
     val accountById = accounts.associateBy { it.id }
 

@@ -72,7 +72,7 @@ android {
         buildConfigField("String", "OTA_PUBLIC_KEY", "\"$otaPublicKey\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // OTA 包瘦身：两台手机都是现代 arm64 设备，只打 arm64-v8a（ML Kit barhopper 等 .so 每个 ABI ~3–6 MB）。
-        ndk { abiFilters += "arm64-v8a" }
+        ndk { abiFilters += (findProperty("couple.testAbi") as String? ?: "arm64-v8a") }
         // 只保留中文/英文资源（AndroidX/Material/Play services 自带几十种语言）。
         resourceConfigurations += listOf("zh", "en")
     }
@@ -131,6 +131,7 @@ android {
         }
     }
     sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
         // edge is a minified debug: reuse src/debug (debug manifest, cleartext network config, MQTT probe receiver)
         getByName("edge") {
             java.srcDirs("src/debug/java")
@@ -220,6 +221,12 @@ dependencies {
     // Silent self-update through Shizuku when available (see data/update/ApkInstaller.kt)
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
+
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

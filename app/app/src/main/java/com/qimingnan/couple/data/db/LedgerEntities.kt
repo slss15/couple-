@@ -9,6 +9,8 @@ import androidx.room.Query
 import com.qimingnan.couple.data.ledger.LedgerAccount
 import com.qimingnan.couple.data.ledger.LedgerAccountType
 import com.qimingnan.couple.data.ledger.LedgerEntry
+import com.qimingnan.couple.data.ledger.LoanRecord
+import com.qimingnan.couple.data.ledger.LoanAction
 import com.qimingnan.couple.data.ledger.LedgerEntryType
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
@@ -52,6 +54,8 @@ data class LedgerEntryEntity(
     val pendingSync: Boolean,
     /** 备注（选填，v8 新增列，旧数据默认为空）。 */
     val note: String = "",
+    val loanId: String? = null,
+    val loanAction: String? = null,
 )
 
 fun LedgerAccount.toEntity(ownerId: String, nowMillis: Long, existing: LedgerAccountEntity? = null) =
@@ -64,17 +68,49 @@ fun LedgerAccountEntity.toModel() = LedgerAccount(
 fun LedgerEntry.toEntity(nowMillis: Long, existing: LedgerEntryEntity? = null) =
     LedgerEntryEntity(
         id, ownerId, accountId, type.name, categoryId, amountCents, fromAccountId, toAccountId,
-        occurredOn.toString(), existing?.createdAt ?: nowMillis, nowMillis, deleted, true, note,
+        occurredOn.toString(), existing?.createdAt ?: nowMillis, nowMillis, deleted, true, note, loanId, loanAction?.name,
     )
 
 fun LedgerEntryEntity.toModel() = LedgerEntry(
     id, ownerId, accountId,
     LedgerEntryType.entries.firstOrNull { it.name == type } ?: LedgerEntryType.EXPENSE,
-    categoryId, amountCents, fromAccountId, toAccountId, LocalDate.parse(occurredOn), deleted, note,
+    categoryId, amountCents, fromAccountId, toAccountId, LocalDate.parse(occurredOn), deleted, note, loanId, loanAction?.let { value -> LoanAction.entries.firstOrNull { it.name == value } },
 )
+
+@Entity(tableName = "ledger_loans")
+data class LedgerLoanEntity(@PrimaryKey val id: String, val ownerId: String, val payload: String)
+
+fun LoanRecord.toEntity(ownerId: String) = LedgerLoanEntity(id, ownerId, encode())
 
 @Dao
 interface LedgerDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAccountIfAbsent(account: LedgerAccountEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertLoanIfAbsent(loan: LedgerLoanEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertLoan(loan: LedgerLoanEntity)
+
+    @Query("SELECT * FROM ledger_loans")
+    fun observeLoans(): Flow<List<LedgerLoanEntity>>
+
+    @Query("SELECT * FROM ledger_loans WHERE id = :id LIMIT 1")
+    suspend fun loanById(id: String): LedgerLoanEntity?
+
+    @Query("SELECT * FROM ledger_loans WHERE ownerId = :ownerId")
+    suspend fun loansByOwner(ownerId: String): List<LedgerLoanEntity>
+
+    @Query("DELETE FROM ledger_loans WHERE id = :id")
+    suspend fun deleteLoan(id: String)
+
+    @Query("SELECT * FROM ledger_entries WHERE id = :id LIMIT 1")
+    suspend fun entryById(id: String): LedgerEntryEntity?
+
+    @Query("SELECT * FROM ledger_entries WHERE loanId = :loanId AND deleted = 0")
+    suspend fun entriesForLoan(loanId: String): List<LedgerEntryEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAccount(account: LedgerAccountEntity)
 

@@ -11,7 +11,8 @@ import com.qimingnan.couple.data.ledger.LedgerAccount
 import com.qimingnan.couple.data.ledger.LedgerEntry
 import com.qimingnan.couple.data.ledger.LedgerLogic
 import com.qimingnan.couple.data.ledger.LoanRecord
-import com.qimingnan.couple.data.settings.SettingsRepository
+import com.qimingnan.couple.data.ledger.LoanKind
+import com.qimingnan.couple.data.ledger.LoanLedgerRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -55,23 +56,21 @@ class LedgerViewModel @Inject constructor(
     private val dao: LedgerDao,
     private val profileDao: ProfileDao,
     private val clock: Clock,
-    private val settingsRepo: SettingsRepository,
+    private val loanLedger: LoanLedgerRepository,
 ) : ViewModel() {
-    /** 借贷记录（信用与负债）：存在设置 DataStore 里，不动数据库版本，见 LoanRecord。 */
-    val loans: StateFlow<List<LoanRecord>> = settingsRepo.settings
-        .map { s -> s.loans.mapNotNull(LoanRecord::decode) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val operationError = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    init { viewModelScope.launch { operationError.value = runCatching { loanLedger.importLegacy(currentOwnerId()) }.exceptionOrNull()?.message } }
 
     fun addLoan(record: LoanRecord, onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
-        onComplete(runCatching { settingsRepo.addLoan(record) }.exceptionOrNull()?.message)
+        onComplete(runCatching { loanLedger.saveLoan(record, currentOwnerId()) }.exceptionOrNull()?.message)
     }
-    fun repayLoan(id: String, addCents: Long, date: String = LocalDate.now().toString(), note: String = "", onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
-        val error = runCatching {
-            if (!settingsRepo.repayLoan(id, addCents, date, note)) "金额无效、超过未结清金额或记录已变更" else null
-        }.getOrElse { it.message ?: "还款保存失败" }
-        onComplete(error)
+    fun recordRepayment(entryId: String, loanId: String, cashAccountId: String, cents: Long,
+        date: String, note: String, expectedKind: LoanKind, onComplete: (String?) -> Unit) = viewModelScope.launch {
+        onComplete(runCatching { loanLedger.repay(entryId, loanId, cashAccountId, cents, date, note, currentOwnerId(), expectedKind) }.exceptionOrNull()?.message)
     }
-    fun deleteLoan(id: String) = viewModelScope.launch { settingsRepo.deleteLoan(id) }
+    fun deleteLoan(id: String, onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
+        onComplete(runCatching { loanLedger.deleteLoan(id, currentOwnerId()) }.exceptionOrNull()?.message)
+    }
     private val selfId: StateFlow<String?> = profileDao.observeSelf()
         .map { it?.id }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -79,11 +78,15 @@ class LedgerViewModel @Inject constructor(
     // Personal ledger: when a user is logged in, only that user's entries
     // are shown. Before login, local entries are shown (single-device use).
     val accounts: StateFlow<List<LedgerAccount>> = combine(dao.observeAccounts(), selfId) { list, self ->
-        list.filter { self == null || it.ownerId == self }.map { it.toModel() }
+        list.filter { it.ownerId == (self ?: "local") }.map { it.toModel() }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val entries: StateFlow<List<LedgerEntry>> = combine(dao.observeEntries(), selfId) { list, self ->
-        list.filter { self == null || it.ownerId == self }.map { it.toModel() }
+        list.filter { it.ownerId == (self ?: "local") }.map { it.toModel() }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val loans: StateFlow<List<LoanRecord>> = combine(dao.observeLoans(), selfId) { list, self ->
+        list.filter { it.ownerId == (self ?: "local") }.mapNotNull { LoanRecord.decode(it.payload) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     suspend fun currentOwnerId(): String = profileDao.self()?.id ?: "local"
@@ -104,14 +107,25 @@ class LedgerViewModel @Inject constructor(
         val error = runCatching {
             require(account.name.isNotBlank()) { "请填写账户名称" }
             val ownerId = currentOwnerId()
-            dao.upsertAccount(account.toEntity(ownerId, clock.nowMillis(), dao.accountById(account.id)))
+            val existing = dao.accountById(account.id)
+            require(existing == null || existing.ownerId == ownerId) { "不能修改其他用户的账户" }
+            require(existing == null || existing.type == account.type.name || !existing.toModel().type.isLoan && !account.type.isLoan) { "借贷账户不能改为资金账户，资金账户也不能改为借贷账户" }
+            require(!account.type.isLoan || account.initialBalanceCents == 0L) { "借贷余额来自明细，不填写期初余额" }
+            dao.upsertAccount(account.toEntity(ownerId, clock.nowMillis(), existing))
         }.exceptionOrNull()?.let { it.message ?: "账户保存失败" }
         onComplete(error)
     }
 
     fun saveEntry(entry: LedgerEntry, onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
         val error = runCatching {
-            val withOwner = entry.copy(ownerId = currentOwnerId())
+            require(entry.loanId == null && entry.loanAction == null) { "借贷还款请使用还钱流程" }
+            val ownerId = currentOwnerId()
+            val ids = if (entry.type == com.qimingnan.couple.data.ledger.LedgerEntryType.TRANSFER) listOf(entry.fromAccountId, entry.toAccountId) else listOf(entry.accountId)
+            ids.forEach { id ->
+                val account = dao.accountById(id ?: "")
+                require(account != null && !account.deleted && account.ownerId == ownerId && !account.toModel().type.isLoan) { "请选择有效的资金账户" }
+            }
+            val withOwner = entry.copy(ownerId = ownerId)
             val invalid = LedgerLogic.validate(withOwner)
             if (invalid != null) invalid else {
                 dao.upsertEntry(withOwner.toEntity(clock.nowMillis()))
@@ -122,13 +136,15 @@ class LedgerViewModel @Inject constructor(
     }
 
     fun deleteEntry(id: String) = viewModelScope.launch {
-        dao.softDeleteEntry(id, clock.nowMillis())
+        operationError.value = runCatching { loanLedger.deleteEntry(id, currentOwnerId()) }.exceptionOrNull()?.message
     }
 
     fun deleteAccount(id: String) = viewModelScope.launch {
-        dao.softDeleteAccount(id, clock.nowMillis())
+        operationError.value = runCatching {
+            loanLedger.deleteAccount(id, currentOwnerId())
+        }.exceptionOrNull()?.message
     }
 
     fun balance(account: LedgerAccount, entries: List<LedgerEntry>): Long =
-        LedgerLogic.balance(account, entries)
+        LedgerLogic.balance(account, entries, loans.value)
 }

@@ -1,5 +1,7 @@
 package com.qimingnan.couple.ui.ledger
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -16,136 +18,140 @@ import com.qimingnan.couple.ui.components.SectionCard
 import java.time.LocalDate
 import java.util.UUID
 
-/** 借贷是独立备忘；借入、借出及偿还不自动生成收支，也不重复增加账户资产。 */
+/** A loan account contains person/platform categories; each category keeps its own loans and repayments. */
 @Composable
-internal fun LoanSection(vm: LedgerViewModel, accounts: List<LedgerAccount>, loans: List<LoanRecord>, initialAccountId: String? = null) {
+internal fun LoanAccountDetail(
+    vm: LedgerViewModel, account: LedgerAccount, cashAccounts: List<LedgerAccount>,
+    allLoans: List<LoanRecord>, entries: List<LedgerEntry>, onBack: () -> Unit,
+) {
     val t = LocalCoupleTokens.current
-    val summary = LoanTotals.summarize(loans)
+    val loans = allLoans.filter { it.loanAccountId == account.id }
+    var selectedGroup by rememberSaveable(account.id) { mutableStateOf<String?>(null) }
+    var classification by rememberSaveable(account.id) { mutableStateOf("全部") }
     var editorOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<LoanRecord?>(null) }
-    var repay by remember { mutableStateOf<LoanRecord?>(null) }
+    var repayingId by remember { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf<LoanRecord?>(null) }
-    var filter by rememberSaveable { mutableStateOf("未结清") }
-    SectionCard("信用与负债") {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(t.spacing.md)) {
-            Column(Modifier.weight(1f)) {
-                Text("待还 · 借入", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                Text(centsText(summary.outstandingBorrowedCents), style = t.typography.title, color = t.colors.primary)
-            }
-            Column(Modifier.weight(1f)) {
-                Text("待收 · 借出", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                Text(centsText(summary.outstandingLentCents), style = t.typography.title, color = t.colors.secondary)
-            }
-        }
-        Text("本机借贷备忘，关联账户不改变余额。实际资金变动请另记收入、支出或转账。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-        Button(onClick = { editing = null; editorOpen = true }) { Text("新增借入 / 借出") }
+    var renaming by remember { mutableStateOf(false) }
+    var name by remember(account.name) { mutableStateOf(account.name) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val groups = loans.groupBy { it.counterpartyKey }
+    val groupLoans = selectedGroup?.let { groups[it] }.orEmpty()
+    val groupLabel = groupLoans.firstOrNull()?.counterpartyName
+    BackHandler(selectedGroup != null) { selectedGroup = null }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { if (selectedGroup != null) selectedGroup = null else onBack() }) { Text("返回") }
+        Text(groupLabel ?: account.name, style = t.typography.headline, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+        if (selectedGroup == null) TextButton(onClick = { renaming = !renaming }) { Text("改名") }
+    }
+    if (renaming) {
+        OutlinedTextField(name, { name = it }, label = { Text("账户名") }, modifier = Modifier.fillMaxWidth())
+        Button(onClick = { vm.saveAccount(account.copy(name = name.trim())) { problem -> error = problem; if (problem == null) renaming = false } }, enabled = name.isNotBlank()) { Text("保存名称") }
+    }
+    val shown = if (selectedGroup == null) loans else groupLoans
+    SectionCard(if (account.type == LedgerAccountType.LENT) "借出 · 待收回" else "借入 · 待归还") {
+        Text(centsText(shown.sumOf { it.remainingCents }), style = t.typography.display, color = t.colors.primary)
+        Text("借款总额 ${centsText(shown.sumOf { it.amountCents })} · 已还 ${centsText(shown.sumOf { it.repaidCents })}", style = t.typography.body, color = t.colors.onSurface)
+        Text("资金进出同步到实际收款/付款账户；借贷本金不计日常收入、消费与预算。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+        Button(onClick = { editing = null; editorOpen = true }) { Text(if (account.type == LedgerAccountType.LENT) "新增借出" else "新增借入") }
+    }
+    error?.let { Text(it, color = t.colors.error) }
+    if (selectedGroup == null) {
         Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-            listOf("未结清", "已结清", "全部").forEach { label -> FilterChip(filter == label, { filter = label }, label = { Text(label) }) }
+            listOf("全部", "个人", "平台").forEach { label -> FilterChip(classification == label, { classification = label }, label = { Text(label) }) }
         }
-        val shown = loans.filter { when (filter) { "未结清" -> !it.settled; "已结清" -> it.settled; else -> true } }
-            .sortedWith(compareBy<LoanRecord> { it.settled }.thenBy { it.dueOn ?: "9999-12-31" }.thenBy { it.id })
-        if (shown.isEmpty()) Text("这里没有" + filter.takeIf { it != "全部" }.orEmpty() + "的借贷记录。", style = t.typography.body, color = t.colors.onSurfaceVariant)
-        shown.forEach { loan -> key(loan.id) {
-            Surface(color = t.colors.surfaceContainer, shape = t.shapes.large) {
-                Column(Modifier.fillMaxWidth().padding(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (groups.isEmpty()) Text("还没有借贷明细，新增时按个人或平台分类。", color = t.colors.onSurfaceVariant)
+        groups.toSortedMap().forEach { (group, records) ->
+            val first = records.first()
+            if (classification == "全部" || first.counterpartyType.label == classification) {
+                Surface(color = t.colors.surfaceContainer, shape = t.shapes.large, modifier = Modifier.fillMaxWidth().clickable { selectedGroup = group }) {
+                    Row(Modifier.padding(t.spacing.lg), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(loan.kind.label + " · " + loan.counterparty.ifBlank { loan.label.ifBlank { "未写对方" } }, style = t.typography.title, color = t.colors.onSurface)
-                            if (loan.label.isNotBlank() && loan.counterparty.isNotBlank()) Text(loan.label, style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                            loan.accountId?.let { id -> Text("关联：" + (accounts.firstOrNull { it.id == id }?.name ?: "账户已删除"), style = t.typography.caption, color = t.colors.onSurfaceVariant) }
+                            Text(first.counterpartyName, style = t.typography.title, color = t.colors.onSurface)
+                            Text("${first.counterpartyType.label} · ${records.size} 笔借款 · ${records.sumOf { it.repayments.size }} 次还款", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                         }
-                        Text(centsText(loan.amountCents), style = t.typography.title, color = t.colors.onSurface)
+                        Text(centsText(records.sumOf { it.remainingCents }), style = t.typography.title, color = t.colors.primary)
                     }
-                    RatioBar(loan.repaidCents.toFloat() / loan.amountCents.toFloat())
-                    Text((if (loan.kind == LoanKind.BORROWED) "已还 " else "已收回 ") + centsText(loan.repaidCents) + " · 未结清 " + centsText(loan.remainingCents), style = t.typography.body, color = t.colors.onSurface)
-                    loan.dueOn?.let { due -> Text((if (loan.overdue(LocalDate.now())) "已逾期 · " else "约定日期 · ") + due, style = t.typography.caption, color = if (loan.overdue(LocalDate.now())) t.colors.error else t.colors.onSurfaceVariant) }
-                    if (loan.repayments.isNotEmpty()) {
-                        Text("偿还记录", style = t.typography.label, color = t.colors.onSurface)
-                        loan.repayments.asReversed().forEach { payment ->
-                            Text(payment.date + " · " + centsText(payment.amountCents) + if (payment.note.isBlank()) "" else " · " + payment.note, style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        }
-                    } else if (loan.repaidCents > 0) Text("历史已还金额已保留，旧记录没有逐笔日期。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
-                        if (loan.settled) Text("已结清", modifier = Modifier.padding(vertical = t.spacing.md), color = t.colors.secondary)
-                        else TextButton(onClick = { repay = loan }) { Text(if (loan.kind == LoanKind.BORROWED) "记还款" else "记收回") }
-                        TextButton(onClick = { editing = loan; editorOpen = true }) { Text("编辑") }
-                        TextButton(onClick = { deleting = loan }) { Text("删除") }
-                    }
+                }
+            }
+        }
+        if (loans.isEmpty()) TextButton(onClick = { vm.deleteAccount(account.id); onBack() }) { Text("删除空账户") }
+    } else {
+        shown.sortedWith(compareBy<LoanRecord> { it.settled }.thenByDescending { it.occurredOn ?: "" }).forEach { loan -> key(loan.id) {
+            SectionCard(loan.label.ifBlank { "借贷明细" }) {
+                Text("${loan.kind.label} ${centsText(loan.amountCents)} · 未结清 ${centsText(loan.remainingCents)}", style = t.typography.title, color = t.colors.onSurface)
+                Text("借款日期：${loan.occurredOn ?: "旧记录未填写"}", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                loan.accountId?.let { id -> Text("资金账户：" + (cashAccounts.firstOrNull { it.id == id }?.name ?: "已删除/历史账户"), style = t.typography.caption, color = t.colors.onSurfaceVariant) }
+                loan.dueOn?.let { due -> Text((if (loan.overdue(LocalDate.now())) "已逾期 · " else "约定还款日 · ") + due, color = if (loan.overdue(LocalDate.now())) t.colors.error else t.colors.onSurfaceVariant) }
+                RatioBar(loan.repaidCents.toFloat() / loan.amountCents.toFloat())
+                val historical = loan.repaidCents - loan.repayments.sumOf { it.amountCents }
+                if (historical > 0) Text("历史已还（旧记录/补录）：${centsText(historical)}", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                loan.repayments.sortedByDescending { it.date }.forEach { payment ->
+                    val cash = payment.cashAccountId?.let { id -> cashAccounts.firstOrNull { it.id == id }?.name ?: "资金账户已删除" }
+                    Text("${payment.date} · ${if (loan.kind == LoanKind.LENT) "收到还钱" else "归还借款"} ${centsText(payment.amountCents)}" + cash?.let { " · $it" }.orEmpty(), style = t.typography.body, color = t.colors.onSurface)
+                    if (payment.note.isNotBlank()) Text(payment.note, style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                    if (!loan.settled) TextButton(onClick = { repayingId = loan.id }) { Text(if (loan.kind == LoanKind.LENT) "收到还钱" else "归还借款") }
+                    TextButton(onClick = { editing = loan; editorOpen = true }) { Text("编辑") }
+                    TextButton(onClick = { deleting = loan }) { Text("删除") }
                 }
             }
         } }
     }
-    if (editorOpen) LoanEditor(vm, accounts, editing, initialAccountId, onDismiss = { editorOpen = false })
-    repay?.let { selected ->
-        val current = loans.firstOrNull { it.id == selected.id }
-        if (current != null) RepaymentDialog(vm, current, onDismiss = { repay = null })
-    }
+    if (editorOpen) LoanEditor(vm, account, cashAccounts, editing, groupLoans.firstOrNull(), { editorOpen = false })
+    repayingId?.let { id -> LedgerEntryWizard(vm, cashAccounts, entries, { repayingId = null }, initialLoanId = id) }
     deleting?.let { loan ->
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除借贷备忘？") },
-            text = { Text("这会删除本笔备忘和还款明细，不会删除或修改账本中的收支。") },
-            confirmButton = { TextButton(onClick = { vm.deleteLoan(loan.id); deleting = null }) { Text("删除") } },
+        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除借贷明细？") },
+            text = { Text("同步撤销本笔借入/借出本金的资金记录。已有还款账目时，须先在账目中删除相关还款，避免明细不一致。历史备忘没有关联资金记录时，只删除备忘。") },
+            confirmButton = { TextButton(onClick = { vm.deleteLoan(loan.id) { problem -> error = problem; if (problem == null) deleting = null } }) { Text("删除") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } })
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LoanEditor(vm: LedgerViewModel, accounts: List<LedgerAccount>, existing: LoanRecord?, initialAccountId: String?, onDismiss: () -> Unit) {
-    val recordId = remember(existing?.id) { existing?.id ?: UUID.randomUUID().toString() }
-    var kind by rememberSaveable { mutableStateOf(existing?.kind ?: LoanKind.BORROWED) }
+internal fun LoanEditor(vm: LedgerViewModel, account: LedgerAccount, cashAccounts: List<LedgerAccount>,
+    existing: LoanRecord? = null, group: LoanRecord? = null, onDismiss: () -> Unit) {
+    val t = LocalCoupleTokens.current
+    val recordId = rememberSaveable(existing?.id) { existing?.id ?: UUID.randomUUID().toString() }
+    val kind = requireNotNull(account.type.loanKind)
     var amount by rememberSaveable { mutableStateOf(existing?.amountCents?.let { java.math.BigDecimal(it).movePointLeft(2).toPlainString() } ?: "") }
     var repaid by rememberSaveable { mutableStateOf("") }
     var label by rememberSaveable { mutableStateOf(existing?.label ?: "") }
-    var person by rememberSaveable { mutableStateOf(existing?.counterparty ?: "") }
-    var accountId by rememberSaveable { mutableStateOf(existing?.accountId ?: initialAccountId) }
+    var person by rememberSaveable { mutableStateOf(existing?.counterparty ?: group?.counterpartyName ?: "") }
+    var counterpartyType by rememberSaveable { mutableStateOf(existing?.counterpartyType ?: group?.counterpartyType ?: CounterpartyType.PERSON) }
+    var cashId by rememberSaveable { mutableStateOf(existing?.accountId) }
     var due by rememberSaveable { mutableStateOf(existing?.dueOn) }
+    var date by rememberSaveable { mutableStateOf(existing?.occurredOn ?: LocalDate.now().toString()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val candidate = LoanRecord(recordId, kind, accountId, parseCents(amount), existing?.repaidCents ?: parseCents(repaid), label.trim(), person.trim(), due, existing?.repayments ?: emptyList())
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text(if (existing == null) "新增借贷" else "编辑借贷") }, text = {
+    val historicalRepaid = if (repaid.isBlank()) 0L else Money.parseCents(repaid) ?: -1L
+    val candidate = LoanRecord(recordId, kind, cashId, parseCents(amount), existing?.repaidCents ?: historicalRepaid,
+        label.trim(), person.trim(), due, existing?.repayments ?: emptyList(), account.id, counterpartyType, date)
+    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text((if (existing == null) "新增" else "编辑") + kind.label) }, text = {
         Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { LoanKind.entries.forEach { k -> FilterChip(kind == k, { kind = k }, label = { Text(k.label) }, enabled = existing == null) } }
-            OutlinedTextField(person, { person = it }, label = { Text("对方（选填）") }, singleLine = true)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { CounterpartyType.entries.forEach { type -> FilterChip(counterpartyType == type, { counterpartyType = type }, label = { Text(type.label) }) } }
+            OutlinedTextField(person, { person = it }, label = { Text(if (kind == LoanKind.LENT) "借款人 / 平台名称" else "还款对象 / 平台名称") }, singleLine = true)
             OutlinedTextField(label, { label = it }, label = { Text("用途 / 备注（选填）") }, maxLines = 2)
-            AmountField(amount, { amount = it }, "借贷总金额（元）")
-            if (existing == null) AmountField(repaid, { repaid = it }, "已经还了多少（选填，元）")
-            Text("关联账户（选填）")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                FilterChip(accountId == null, { accountId = null }, label = { Text("不关联") })
-                accounts.forEach { a -> FilterChip(accountId == a.id, { accountId = a.id }, label = { Text(a.name) }) }
+            AmountField(amount, { amount = it }, "借款金额（元）")
+            if (existing == null) {
+                AmountField(repaid, { repaid = it }, "历史已经归还（补录，元）")
+                Text("实际资金账户（选填）", style = t.typography.label)
+                Text("选中将同步记录本次${kind.label}资金。历史已记账的借贷选“不关联”，避免重复。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterChip(cashId == null, { cashId = null }, label = { Text("不关联 / 历史补录") })
+                    cashAccounts.filterNot { it.type.isLoan }.forEach { cash -> FilterChip(cashId == cash.id, { cashId = cash.id }, label = { Text(cash.name) }) }
+                }
+                LoanDateButton(date, { date = it ?: LocalDate.now().toString() }, "借款日期", allowClear = false)
             }
             LoanDateButton(due, { due = it }, "约定还款日")
-            error?.let { Text(it, color = LocalCoupleTokens.current.colors.error) }
+            error?.let { Text(it, color = t.colors.error) }
         }
     }, confirmButton = { TextButton(onClick = {
         busy = true
         vm.addLoan(candidate) { problem -> busy = false; error = problem; if (problem == null) onDismiss() }
-    }, enabled = !busy && candidate.validationError() == null) { Text(if (busy) "保存中…" else "保存") } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } })
-}
-
-@Composable
-private fun RepaymentDialog(vm: LedgerViewModel, loan: LoanRecord, onDismiss: () -> Unit) {
-    var amount by rememberSaveable(loan.id) { mutableStateOf("") }
-    var note by rememberSaveable(loan.id) { mutableStateOf("") }
-    var date by rememberSaveable(loan.id) { mutableStateOf<String?>(LocalDate.now().toString()) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val cents = parseCents(amount)
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text(if (loan.kind == LoanKind.BORROWED) "记录还款" else "记录收回") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("未结清 " + centsText(loan.remainingCents))
-            AmountField(amount, { amount = it }, "本次金额（元）")
-            TextButton(onClick = { amount = java.math.BigDecimal(loan.remainingCents).movePointLeft(2).toPlainString() }) { Text("全部结清") }
-            LoanDateButton(date, { date = it }, "偿还日期", allowClear = false)
-            OutlinedTextField(note, { note = it }, label = { Text("备注（选填）") })
-            if (cents > loan.remainingCents) Text("不能超过未结清金额", color = LocalCoupleTokens.current.colors.error)
-            error?.let { Text(it, color = LocalCoupleTokens.current.colors.error) }
-        }
-    }, confirmButton = { TextButton(onClick = {
-        busy = true
-        vm.repayLoan(loan.id, cents, date ?: LocalDate.now().toString(), note) { problem -> busy = false; error = problem; if (problem == null) onDismiss() }
-    }, enabled = !busy && cents > 0 && cents <= loan.remainingCents) { Text(if (busy) "保存中…" else "确认") } },
+    }, enabled = !busy && candidate.validationError() == null && (person.isNotBlank() || existing != null && existing.counterparty.isBlank())) { Text(if (busy) "保存中…" else "保存") } },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } })
 }
 

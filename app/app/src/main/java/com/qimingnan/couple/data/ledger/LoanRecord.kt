@@ -6,9 +6,20 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/** 个人借贷备忘，存本机 DataStore；关联账户只作归属，不重复改变账本余额。 */
+/** 个人借贷账户明细；旧 DataStore 记录兼容读取后迁入 Room，与资金账目事务化保存。 */
 @Serializable
 enum class LoanKind(val label: String) { BORROWED("借入"), LENT("借出") }
+
+@Serializable
+enum class CounterpartyType(val label: String) { PERSON("个人"), PLATFORM("平台") }
+
+@Serializable
+enum class LoanAction(val label: String, val entryType: LedgerEntryType) {
+    BORROW("借入到账", LedgerEntryType.INCOME),
+    LEND("借出付款", LedgerEntryType.EXPENSE),
+    REPAY_BORROWED("还钱", LedgerEntryType.EXPENSE),
+    COLLECT_LENT("收回借款", LedgerEntryType.INCOME),
+}
 
 @Serializable
 data class LoanRepayment(
@@ -16,6 +27,8 @@ data class LoanRepayment(
     val amountCents: Long,
     val date: String,
     val note: String = "",
+    val entryId: String? = null,
+    val cashAccountId: String? = null,
 )
 
 @Serializable
@@ -29,14 +42,21 @@ data class LoanRecord(
     val counterparty: String = "",
     val dueOn: String? = null,
     val repayments: List<LoanRepayment> = emptyList(),
+    /** 借出/借入账户；accountId 仍是实际资金账户，避免误解旧关联字段。 */
+    val loanAccountId: String? = null,
+    val counterpartyType: CounterpartyType = CounterpartyType.PERSON,
+    val occurredOn: String? = null,
 ) {
     val remainingCents: Long get() = (amountCents - repaidCents).coerceAtLeast(0)
     val settled: Boolean get() = remainingCents == 0L
+    val counterpartyName: String get() = counterparty.ifBlank { label.ifBlank { "未分类（旧记录）" } }
+    val counterpartyKey: String get() = "${counterpartyType.name}:${counterpartyName.trim()}"
 
     fun validationError(): String? = when {
         id.isBlank() -> "借贷编号不能为空"
         amountCents <= 0 -> "金额必须大于 0"
         repaidCents < 0 || repaidCents > amountCents -> "已还金额不能超过借贷金额"
+        occurredOn != null && runCatching { LocalDate.parse(occurredOn) }.isFailure -> "借款日期格式为 yyyy-MM-dd"
         dueOn != null && runCatching { LocalDate.parse(dueOn) }.isFailure -> "约定日期格式为 yyyy-MM-dd"
         repayments.any { it.amountCents <= 0 || runCatching { LocalDate.parse(it.date) }.isFailure } -> "还款记录无效"
         else -> null
@@ -47,12 +67,13 @@ data class LoanRecord(
     } == true
 
     /** 拒绝负数、零、超额与非法日期；加法上界先检查，不会 Long 溢出。 */
-    fun repay(cents: Long, date: String, note: String = ""): LoanRecord? {
+    fun repay(cents: Long, date: String, note: String = "", paymentId: String = UUID.randomUUID().toString(),
+        entryId: String? = null, cashAccountId: String? = null): LoanRecord? {
         if (validationError() != null || cents <= 0 || cents > remainingCents ||
             runCatching { LocalDate.parse(date) }.isFailure) return null
         return copy(
             repaidCents = repaidCents + cents,
-            repayments = repayments + LoanRepayment(UUID.randomUUID().toString(), cents, date, note.trim()),
+            repayments = repayments + LoanRepayment(paymentId, cents, date, note.trim(), entryId, cashAccountId),
         )
     }
 

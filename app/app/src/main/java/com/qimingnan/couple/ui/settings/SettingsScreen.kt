@@ -52,8 +52,8 @@ import com.qimingnan.couple.data.update.ShizukuState
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.theme.ThemeSeeds
 import com.qimingnan.couple.ui.components.SecondaryButton
+import com.qimingnan.couple.ui.components.LongPressReorderableColumn
 import com.qimingnan.couple.ui.components.SectionCard
-import androidx.compose.material3.TextButton
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -72,9 +72,12 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun setFontSize(f: FontSize) = viewModelScope.launch { repo.setFontSize(f) }
     fun setPluginEnabled(id: String, enabled: Boolean) = viewModelScope.launch { repo.setPluginEnabled(id, enabled) }
     fun setMonthlyBudget(cents: Long) = viewModelScope.launch { repo.setMonthlyBudget(cents) }
-    fun moveTab(id: String, delta: Int) = viewModelScope.launch { repo.moveTabOrder(id, delta) }
-    fun moveAccount(id: String, delta: Int, allIds: List<String>) =
-        viewModelScope.launch { repo.moveAccountOrder(id, delta, allIds) }
+    fun saveTabOrder(order: List<String>, onSaved: (Boolean) -> Unit) = viewModelScope.launch {
+        onSaved(runCatching { repo.setTabOrder(order) }.isSuccess)
+    }
+    fun saveAccountOrder(order: List<String>, allIds: List<String>, onSaved: (Boolean) -> Unit) = viewModelScope.launch {
+        onSaved(runCatching { repo.setAccountOrder(order, allIds) }.isSuccess)
+    }
 }
 
 /**
@@ -115,6 +118,7 @@ fun SettingsScreen(
     keepAliveVm: KeepAliveSettingsViewModel = hiltViewModel(),
 ) {
     val t = LocalCoupleTokens.current
+    val scrollState = rememberScrollState()
     val s by vm.settings.collectAsStateWithLifecycle()
     val upd by updateVm.state.collectAsStateWithLifecycle()
     val keepAliveOn by keepAliveVm.enabled.collectAsStateWithLifecycle()
@@ -129,7 +133,7 @@ fun SettingsScreen(
             Text("设置", style = t.typography.headline, color = t.colors.onSurface)
         }
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(t.spacing.lg),
+            Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
         ) {
             SectionCard("底部 Tab") {
@@ -140,13 +144,17 @@ fun SettingsScreen(
                 SwitchRow("显示「我的」（不可隐藏）", checked = true, enabled = false) {}
             }
             SectionCard("底部 Tab 顺序") {
-                Text("点 ↑ ↓ 调整底栏从左到右的顺序，改完立即保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text("长按一项，浮起后拖动调整底栏从左到右的顺序，松手保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 val orderLabels = mapOf("tab_feed" to "动态", "tab_ta" to "TA", "me_entry" to "我的", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
-                s.tabOrder.forEachIndexed { index, id ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                LongPressReorderableColumn(
+                    items = s.tabOrder,
+                    itemKey = { it },
+                    onOrderChange = { order, onSaved -> vm.saveTabOrder(order, onSaved) },
+                    scrollState = scrollState,
+                ) { id, index ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = t.spacing.md), verticalAlignment = Alignment.CenterVertically) {
                         Text("${index + 1}. ${orderLabels[id] ?: id}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { vm.moveTab(id, -1) }, enabled = index > 0) { Text("↑ 上移") }
-                        TextButton(onClick = { vm.moveTab(id, 1) }, enabled = index < s.tabOrder.lastIndex) { Text("↓ 下移") }
+                        Text("≡", style = t.typography.title, color = t.colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = t.spacing.md))
                     }
                 }
                 Text("实时预览", style = t.typography.caption, color = t.colors.onSurfaceVariant)

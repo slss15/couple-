@@ -56,6 +56,24 @@ class PersonalFeatureSettingsTest {
         repo.moveAccountOrder("d", -1, listOf("a", "c", "d"))
         assertEquals(listOf("c", "d", "a"), repo.initialSettings().accountOrder)
     }
+    @Test fun completedTabDropsPersistFullOrdersAndNormalizeIds() = runBlocking {
+        repo.setTabHidden("tab_ta", true)
+        repo.setHomeTab("tab_ledger")
+        repo.setTabOrder(listOf("tab_ledger", "tab_feed", "tab_ta", "me_entry", "tab_anniversary"))
+        repo.setTabOrder(listOf("tab_ta", "tab_ta", "unknown", "tab_ledger"))
+        val state = repo.initialSettings()
+        assertEquals(listOf("tab_ta", "tab_ledger", "tab_feed", "me_entry", "tab_anniversary"), state.tabOrder)
+        assertEquals("tab_ledger", state.homeTab)
+        assertTrue("tab_ta" in state.hiddenTabs)
+    }
+    @Test fun completedAccountDropsPreserveAllCurrentAccountsWithoutDuplicatesOrDeletedIds() = runBlocking {
+        repo.setAccountOrder(listOf("c", "a", "b"), listOf("a", "b", "c"))
+        assertEquals(listOf("c", "a", "b"), repo.initialSettings().accountOrder)
+        repo.setAccountOrder(listOf("d", "a", "a", "deleted"), listOf("a", "c", "d", "new"))
+        assertEquals(listOf("d", "a", "c", "new"), repo.initialSettings().accountOrder)
+        repo.setAccountOrder(emptyList(), emptyList())
+        assertTrue(repo.initialSettings().accountOrder.isEmpty())
+    }
     @Test fun taskVisibilityAndTravelPlanPersistAndCanBeCleared() = runBlocking {
         repo.setRetainRecentTask(false)
         repo.setTravel("a", 120000, "  去看海  ")
