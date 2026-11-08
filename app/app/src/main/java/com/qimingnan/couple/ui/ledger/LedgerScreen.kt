@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -626,11 +627,12 @@ private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved
 }
 
 /**
- * 金额输入框：点一下拉起内置数字键盘，不拉系统键盘。文字输入不用这个，
- * 仍用系统键盘。键盘在输入框下面展开，正在输的数字一直看得见。
- * 模块内共享：纪念日旅行计划的目标金额也用它。
+ * 金额输入框：点一下拉起内置数字键盘（贴屏幕底部的底部弹层，像系统键盘一样），
+ * 不拉系统键盘。文字输入仍用系统键盘。算式与结果预览在键盘面板顶部，一直看得见。
+ * 模块内共享：纪念日旅行计划的目标金额、借贷金额、预算、期初余额都用它。
  * AmountField 与分步向导复用同一个 AmountKeypad。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AmountField(value: String, onValueChange: (String) -> Unit, label: String, modifier: Modifier = Modifier) {
     var showKeypad by remember { mutableStateOf(false) }
@@ -643,7 +645,7 @@ fun AmountField(value: String, onValueChange: (String) -> Unit, label: String, m
             onValueChange = {},
             enabled = false,
             label = { Text(label) },
-            modifier = Modifier.fillMaxWidth().clickable { showKeypad = !showKeypad },
+            modifier = Modifier.fillMaxWidth().clickable { showKeypad = true },
             colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
                 disabledTextColor = t.colors.onSurface,
                 disabledBorderColor = t.colors.onSurfaceVariant,
@@ -651,7 +653,17 @@ fun AmountField(value: String, onValueChange: (String) -> Unit, label: String, m
                 disabledContainerColor = t.colors.surface,
             ),
         )
-        if (showKeypad) AmountKeypad(value = value, onValueChange = onValueChange, onDone = { showKeypad = false })
+    }
+    if (showKeypad) {
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { showKeypad = false },
+            containerColor = t.colors.surfaceContainer,
+        ) {
+            Column(Modifier.padding(horizontal = t.spacing.md)) {
+                AmountKeypad(value = value, onValueChange = onValueChange, onDone = { showKeypad = false })
+                Spacer(Modifier.height(t.spacing.md))
+            }
+        }
     }
 }
 
