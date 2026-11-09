@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -54,7 +56,12 @@ fun TaScreen(vm: TaViewModel, modifier: Modifier = Modifier) {
     var editingMe by rememberSaveable { mutableStateOf(false) }
     var addingDay by rememberSaveable { mutableStateOf(false) }
 
-    Scaffold(containerColor = t.colors.background, floatingActionButton = {
+    // 内层 Scaffold：外层 MainShell 的 Scaffold 已给过一次状态栏留白，这里只留底部
+    // 手势条 inset，不再重复加顶部留白，否则 TA 页最上方会多出一整段状态栏高度的空白。
+    Scaffold(
+        containerColor = t.colors.background,
+        contentWindowInsets = WindowInsets.navigationBars,
+        floatingActionButton = {
         if (state.summary != null) {
             androidx.compose.material3.ExtendedFloatingActionButton(
                 onClick = { addingDay = true },

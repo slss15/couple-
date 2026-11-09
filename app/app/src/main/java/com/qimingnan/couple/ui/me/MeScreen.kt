@@ -55,7 +55,8 @@ fun MeScreen(
     val dateFmt = DateFormat.getDateInstance(DateFormat.MEDIUM)
 
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(t.spacing.lg),
+        // 顶部留白从 lg(16dp) 减到 sm(8dp)：外层 Scaffold 已给过状态栏留白，这里不再叠一层大留白。
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = t.spacing.lg, vertical = t.spacing.sm),
         verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
     ) {
         SectionCard("设置") {

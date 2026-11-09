@@ -5,9 +5,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,9 +61,12 @@ fun PeriodScreen(vm: PeriodViewModel, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
     var adding by remember { mutableStateOf(false) }
 
+    // 内层 Scaffold：外层 MainShell 的 Scaffold 已给过一次状态栏留白，这里只留底部
+    // 手势条 inset，不再重复加顶部留白，否则经期页最上方会多出一整段状态栏高度的空白。
     Scaffold(
         containerColor = t.colors.background,
         contentColor = t.colors.onBackground,
+        contentWindowInsets = WindowInsets.navigationBars,
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { adding = true },
