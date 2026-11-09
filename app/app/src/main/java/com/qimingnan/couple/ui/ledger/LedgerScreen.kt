@@ -135,6 +135,12 @@ fun LedgerScreen(
         accounts.sortedBy { a -> order.indexOf(a.id).takeIf { it >= 0 } ?: Int.MAX_VALUE }
     }
     val accountById = remember(accounts) { accounts.associateBy { it.id } }
+    var selectedEntry by remember { mutableStateOf<LedgerEntry?>(null) }
+    // 点一行账目弹详情弹窗（看/改/删）：放在账户详情全屏 early return 之前，
+    // 记账子页和账户详情页点开的行都能弹出来。
+    selectedEntry?.let { e ->
+        EntryDetailDialog(entry = e, vm = vm, accountById = accountById, onDismiss = { selectedEntry = null })
+    }
 
     // 账户详情全屏呈现（自带唯一返回键）：此前它叠在记账页头下面，出现双返回键，
     // 外层大标题与间距又在详情上方留出一大块空白。详情现在占满整屏、可滚动，适配小屏。
@@ -149,7 +155,7 @@ fun LedgerScreen(
                 if (detail.type.isLoan) {
                     LoanAccountDetail(vm, detail, accounts.filterNot { it.type.isLoan }, loans, entries, { selectedAccountId = null })
                 } else {
-                    AccountDetail(vm = vm, account = detail, entries = entries, onBack = { selectedAccountId = null })
+                    AccountDetail(vm = vm, account = detail, entries = entries, onBack = { selectedAccountId = null }, onEntryClick = { selectedEntry = it })
                 }
             }
             return
@@ -181,6 +187,13 @@ fun LedgerScreen(
                         Button(onClick = { showQuick = true }, modifier = Modifier.fillMaxWidth()) { Text("立即记账 · 分步记账") }
                     }
                     SectionCard("账目") {
+                        // 统计与记账共用同一个 month：统计页翻了月份再切回来，这里也放
+                        // 同样的切换条，不然列表已是旧月份、页面上却看不出是几月。
+                        MonthSwitcher(
+                            label = "${month.year}年${month.monthValue}月",
+                            onPrev = { vm.setMonth(month.minusMonths(1)) },
+                            onNext = { vm.setMonth(month.plusMonths(1)) },
+                        )
                         val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
                             .sortedByDescending { it.occurredOn }
                         if (monthEntries.isEmpty()) {
@@ -199,6 +212,7 @@ fun LedgerScreen(
                             }
                             dayEntries.forEach { e ->
                                 LedgerEntryRow(
+                                    onClick = { selectedEntry = e },
                                     glyph = entryGlyph(e),
                                     title = when (e.type) {
                                         LedgerEntryType.EXPENSE -> "支出 · ${e.categoryId ?: "已删除分类"}"
@@ -486,6 +500,7 @@ private fun AccountDetail(
     account: LedgerAccount,
     entries: List<LedgerEntry>,
     onBack: () -> Unit,
+    onEntryClick: (LedgerEntry) -> Unit = {},
 ) {
     val t = LocalCoupleTokens.current
     var editing by remember { mutableStateOf(false) }
@@ -525,7 +540,7 @@ private fun AccountDetail(
     SectionCard("这个账户的账目（${myEntries.size} 笔）") {
         if (myEntries.isEmpty()) Text("这个账户还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
         myEntries.forEach { e ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable { onEntryClick(e) }, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         when (e.type) {
@@ -610,6 +625,97 @@ private fun accountTypeLabel(type: LedgerAccountType): String = when (type) {
     LedgerAccountType.OTHER -> "其他"
     LedgerAccountType.LENT -> "借出账户"
     LedgerAccountType.BORROWED -> "借入账户"
+}
+
+/**
+ * 账目详情弹窗：记账子页和账户详情页点一行账目弹出。看完整信息、改金额/
+ * 分类/备注、删账目（删除前再弹一次确认）。转账只改金额和备注，不改分类；
+ * 借贷还款记录不能在这里改（saveEntry 会拒，只能走还钱流程），只看信息、能删。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EntryDetailDialog(
+    entry: LedgerEntry,
+    vm: LedgerViewModel,
+    accountById: Map<String, LedgerAccount>,
+    onDismiss: () -> Unit,
+) {
+    val t = LocalCoupleTokens.current
+    var confirmDelete by remember { mutableStateOf(false) }
+    val isLoanEntry = entry.loanId != null
+    var amountText by remember(entry) { mutableStateOf(BigDecimal(entry.amountCents).divide(BigDecimal(100)).toPlainString()) }
+    var note by remember(entry) { mutableStateOf(entry.note) }
+    var category by remember(entry) { mutableStateOf(entry.categoryId?.substringBefore("·") ?: "") }
+    var detail by remember(entry) { mutableStateOf(entry.categoryId?.substringAfter("·", "") ?: "") }
+    var error by remember { mutableStateOf<String?>(null) }
+    val typeLabel = when (entry.type) {
+        LedgerEntryType.EXPENSE -> "支出"
+        LedgerEntryType.INCOME -> "收入"
+        LedgerEntryType.TRANSFER -> "转账"
+    }
+    val accountText = when (entry.type) {
+        LedgerEntryType.TRANSFER -> "${accountById[entry.fromAccountId]?.name ?: "?"} → ${accountById[entry.toAccountId]?.name ?: "?"}"
+        else -> accountById[entry.accountId]?.name ?: ""
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("账目详情") },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("$typeLabel · ${entry.occurredOn}", style = t.typography.body, color = t.colors.onSurface)
+                if (accountText.isNotBlank()) Text("账户：$accountText", style = t.typography.body, color = t.colors.onSurfaceVariant)
+                if (isLoanEntry) {
+                    Text("借贷还款记录请使用还钱流程修改，这里只能查看或删除。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    Text("金额 ${centsText(entry.amountCents)}", style = t.typography.body, color = t.colors.onSurface)
+                } else {
+                    AmountField(value = amountText, onValueChange = { amountText = it }, label = "金额（元）")
+                    if (entry.type != LedgerEntryType.TRANSFER) {
+                        Text("分类", style = t.typography.label, color = t.colors.onSurfaceVariant)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            (if (entry.type == LedgerEntryType.INCOME) LedgerCategories.INCOME else LedgerCategories.EXPENSE).forEach { c ->
+                                FilterChip(selected = category == c, onClick = { category = c; detail = "" }, label = { Text(c) })
+                            }
+                        }
+                        Text("详细类型", style = t.typography.label, color = t.colors.onSurfaceVariant)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LedgerSubcategories.forCategory(category.ifBlank { "其他" }).forEach { d ->
+                                FilterChip(selected = detail == d, onClick = { detail = d }, label = { Text(d) })
+                            }
+                        }
+                    }
+                    OutlinedTextField(value = note, onValueChange = { note = it }, label = { Text("备注") }, modifier = Modifier.fillMaxWidth())
+                }
+                error?.let { Text(it, style = t.typography.caption, color = t.colors.error) }
+                TextButton(onClick = { confirmDelete = true }) { Text("删除这条账目", color = t.colors.error) }
+            }
+        },
+        confirmButton = {
+            if (!isLoanEntry) {
+                TextButton(onClick = {
+                    val cents = Money.parseCents(amountText)
+                    if (cents == null || cents <= 0) { error = "金额必须大于 0"; return@TextButton }
+                    val categoryId = if (entry.type == LedgerEntryType.TRANSFER) null
+                        else if (category.isBlank()) entry.categoryId
+                        else if (detail.isBlank()) category else "$category·$detail"
+                    vm.saveEntry(entry.copy(amountCents = cents, categoryId = categoryId, note = note)) { problem ->
+                        if (problem == null) onDismiss() else error = problem
+                    }
+                }) { Text("保存") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("删除这条账目？") },
+            text = { Text("删除后不能恢复。", style = t.typography.body, color = t.colors.onSurface) },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteEntry(entry.id); confirmDelete = false; onDismiss() }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } },
+        )
+    }
 }
 
 /** 修改账户信息：改名、改类型、改期初余额，保存时用同一个 id 覆盖。 */

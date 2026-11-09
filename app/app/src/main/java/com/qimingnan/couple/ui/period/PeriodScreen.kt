@@ -60,6 +60,7 @@ fun PeriodScreen(vm: PeriodViewModel, modifier: Modifier = Modifier) {
     val t = LocalCoupleTokens.current
     val state by vm.state.collectAsStateWithLifecycle()
     var adding by remember { mutableStateOf(false) }
+    var deletingLog by remember { mutableStateOf<PeriodLog?>(null) }
 
     // 内层 Scaffold：外层 MainShell 的 Scaffold 已给过一次状态栏留白，这里只留底部
     // 手势条 inset，不再重复加顶部留白，否则经期页最上方会多出一整段状态栏高度的空白。
@@ -91,7 +92,7 @@ fun PeriodScreen(vm: PeriodViewModel, modifier: Modifier = Modifier) {
                     }
                 }
                 items(state.logs.asReversed(), key = { it.id }) { log ->
-                    LogRow(log, onDelete = { vm.deleteLog(log.id) })
+                    LogRow(log, onDelete = { deletingLog = log })
                 }
                 item {
                     Text(
@@ -105,6 +106,24 @@ fun PeriodScreen(vm: PeriodViewModel, modifier: Modifier = Modifier) {
     }
 
     if (adding) AddLogDialog(onSave = { s, e, note -> vm.addLog(s, e, note); adding = false }, onCancel = { adding = false })
+
+    // 删除经期记录先二次确认：本机私密记录，点一下垃圾桶就直接删太容易误触。
+    deletingLog?.let { log ->
+        AlertDialog(
+            onDismissRequest = { deletingLog = null },
+            title = { Text("删除这条记录？") },
+            text = {
+                Text(
+                    "确定删除 ${log.startDate} ~ ${log.endDate ?: "…"} 这条经期记录吗？删除后不能恢复。",
+                    style = t.typography.body, color = t.colors.onSurface,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteLog(log.id); deletingLog = null }) { Text("删除") }
+            },
+            dismissButton = { TextButton(onClick = { deletingLog = null }) { Text("取消") } },
+        )
+    }
 }
 
 @Composable
@@ -190,9 +209,9 @@ private fun AddLogDialog(onSave: (LocalDate, LocalDate?, String) -> Unit, onCanc
                 TextButton(
                     onClick = { millis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()) } },
                     enabled = millis != null,
-                ) { Text(stringResource(R.string.feed_send)) }
+                ) { Text("保存") }
             },
-            dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.back)) } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
         ) { DatePicker(state = state) }
     }
 
@@ -212,9 +231,9 @@ private fun AddLogDialog(onSave: (LocalDate, LocalDate?, String) -> Unit, onCanc
             Button(
                 onClick = { start?.let { s -> onSave(s, end, note) } },
                 enabled = start != null && error == null,
-            ) { Text(stringResource(R.string.feed_send)) }
+            ) { Text("保存") }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.back)) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text("取消") } },
     )
 
     when (picking) {

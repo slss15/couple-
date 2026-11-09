@@ -118,8 +118,11 @@ fun MainShell(
         when {
             showScheduled -> showScheduled = false
             showChat -> showChat = false
-            showSettings -> showSettings = false
+            // 纪念日全屏在设置页之上：先关纪念日回设置页，再按一次才关设置。
+            // 顺序不能反——showAnniversary 和 showSettings 同时为真时，先判设置会把
+            // 设置关掉、纪念日还盖在上面，得多按一次返回才回到设置页。
             showAnniversary -> showAnniversary = false
+            showSettings -> showSettings = false
             tab == MainTab.Ledger -> { tab = MainTab.Feed; openLedgerWizard = false }
             settings.homeTab == "home_page" -> showHome = true
             else -> tab = MainTab.Feed
@@ -161,7 +164,9 @@ fun MainShell(
         SettingsScreen(
             vm = settingsVm,
             onBack = { showSettings = false },
-            onOpenAnniversary = { showSettings = false; showAnniversary = true },
+            // 从设置页打开纪念日全屏时保留 showSettings：纪念日盖在设置页上面，
+            // 返回键先关纪念日回设置页（BackHandler 里纪念日优先于设置），而不是掉回底栏主页。
+            onOpenAnniversary = { showAnniversary = true },
             onOpenLedger = { showSettings = false; tab = MainTab.Ledger; ledgerSubTab = com.qimingnan.couple.ui.ledger.LedgerSubTab.Record },
             onOpenKeepAlive = onOpenKeepAlive,
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),

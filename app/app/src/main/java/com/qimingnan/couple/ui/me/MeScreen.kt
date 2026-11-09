@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,6 +53,7 @@ fun MeScreen(
     val s by vm.state.collectAsStateWithLifecycle()
     val upd by updateVm.state.collectAsStateWithLifecycle()
     var updateMsg by remember { mutableStateOf<String?>(null) }
+    var confirmLogout by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.refresh() }
     val dateFmt = DateFormat.getDateInstance(DateFormat.MEDIUM)
 
@@ -171,6 +174,23 @@ fun MeScreen(
             SecondaryButton(stringResource(R.string.me_unpair_confirm), onClick = vm::confirmUnpair, enabled = !u.busy, danger = true)
         }
 
-        SecondaryButton(stringResource(R.string.me_logout), onClick = vm::logout, danger = true)
+        // 退出登录先二次确认：logout 会清 token 并清空本地库，滑到底部误触就全没了。
+        SecondaryButton(stringResource(R.string.me_logout), onClick = { confirmLogout = true }, danger = true)
+        if (confirmLogout) {
+            AlertDialog(
+                onDismissRequest = { confirmLogout = false },
+                title = { Text("退出登录？") },
+                text = {
+                    Text(
+                        "退出登录会清除本地登录态和数据，之后需要重新登录。确定退出吗？",
+                        style = t.typography.body, color = t.colors.onSurface,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { confirmLogout = false; vm.logout() }) { Text("退出登录") }
+                },
+                dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("取消") } },
+            )
+        }
     }
 }
