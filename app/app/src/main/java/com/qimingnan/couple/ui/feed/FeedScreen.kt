@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -31,9 +33,11 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -51,6 +55,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -212,6 +219,7 @@ private fun EmptyFeed() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PostCard(
     row: PostRow,
@@ -308,7 +316,7 @@ private fun PostCard(
                 }
                 Text("${row.post.likeCount}", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 Spacer(Modifier.width(t.spacing.md))
-                TextButton(onClick = { commenting = !commenting }) {
+                TextButton(onClick = { commenting = true }) {
                     Text(stringResource(R.string.feed_comment_count, row.comments.size))
                 }
             }
@@ -319,21 +327,40 @@ private fun PostCard(
                     else -> "TA"
                 }, canDelete = c.authorId == selfId, onDelete = { onDeleteComment(c.id) })
             }
-            if (commenting && pending == null) {
+        }
+    }
+    // 评论输入改到底部弹层：贴底弹出、不遮住想评论的那条帖子；输入行离开卡片，评论列表仍常驻显示。
+    if (commenting && pending == null) {
+        ModalBottomSheet(
+            onDismissRequest = { commenting = false },
+            containerColor = t.colors.surfaceContainer,
+        ) {
+            val focusRequester = remember { FocusRequester() }
+            LaunchedEffect(Unit) { focusRequester.requestFocus() }
+            Column(Modifier.padding(horizontal = t.spacing.md).imePadding()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = input,
                         onValueChange = { input = it },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).focusRequester(focusRequester),
                         placeholder = { Text(stringResource(R.string.feed_comment_hint)) },
                         singleLine = true,
                         textStyle = t.typography.body,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = {
+                            if (input.isNotBlank()) {
+                                onComment(input)
+                                input = ""
+                                commenting = false
+                            }
+                        }),
                     )
                     IconButton(
                         onClick = {
                             if (input.isNotBlank()) {
                                 onComment(input)
                                 input = ""
+                                commenting = false
                             }
                         },
                         modifier = Modifier.size(t.spacing.minTouchTarget),
@@ -341,6 +368,7 @@ private fun PostCard(
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.feed_send), tint = t.colors.primary)
                     }
                 }
+                Spacer(Modifier.height(t.spacing.md))
             }
         }
     }

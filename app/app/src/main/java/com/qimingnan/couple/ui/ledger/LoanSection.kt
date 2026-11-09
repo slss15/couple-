@@ -42,11 +42,16 @@ internal fun LoanAccountDetail(
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = { if (selectedGroup != null) selectedGroup = null else onBack() }) { Text("返回") }
         Text(groupLabel ?: account.name, style = t.typography.headline, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-        if (selectedGroup == null) TextButton(onClick = { renaming = !renaming }) { Text("改名") }
+        if (selectedGroup == null) TextButton(onClick = { renaming = true }) { Text("改名") }
     }
     if (renaming) {
-        OutlinedTextField(name, { name = it }, label = { Text("账户名") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { vm.saveAccount(account.copy(name = name.trim())) { problem -> error = problem; if (problem == null) renaming = false } }, enabled = name.isNotBlank()) { Text("保存名称") }
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("改名") },
+            text = { OutlinedTextField(name, { name = it }, label = { Text("账户名") }, modifier = Modifier.fillMaxWidth(), singleLine = true) },
+            confirmButton = { TextButton(onClick = { vm.saveAccount(account.copy(name = name.trim())) { problem -> error = problem; if (problem == null) renaming = false } }, enabled = name.isNotBlank()) { Text("保存名称") } },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("取消") } },
+        )
     }
     val shown = if (selectedGroup == null) loans else groupLoans
     SectionCard(if (account.type == LedgerAccountType.LENT) "借出 · 待收回" else "借入 · 待归还") {

@@ -1,6 +1,8 @@
 package com.qimingnan.couple.ui.anniversary
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -28,22 +30,9 @@ internal fun TravelPlanCard(vm: AnniversaryViewModel, extras: AnniversaryExtras,
     var error by remember { mutableStateOf<String?>(null) }
     val configured = extras.travelAccountId != null && extras.travelTargetCents > 0
     SectionCard("旅行计划") {
-        if (!configured || editing) {
+        if (!configured) {
             Text("给下一次出发留一点期待", style = t.typography.title, color = t.colors.onSurface)
-            OutlinedTextField(name, { name = it }, label = { Text("目的地 / 计划名称（选填）") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            Text("旅行攒钱关联账户", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-            if (cashAccounts.isEmpty()) Text("先在记账 → 账户页新增一个账户。", style = t.typography.body, color = t.colors.onSurfaceVariant)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                cashAccounts.forEach { account -> FilterChip(selected == account.id, { selected = account.id }, label = { Text(account.name) }) }
-            }
-            AmountField(target, { target = it }, "攒钱目标（元）")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    busy = true
-                    vm.setTravel(selected, parseCents(target), name) { problem -> busy = false; error = problem; if (problem == null) editing = false }
-                }, enabled = !busy && cashAccounts.any { it.id == selected } && parseCents(target) > 0) { Text(if (busy) "保存中…" else "保存旅行计划") }
-                if (configured) TextButton(onClick = { editing = false }) { Text("取消") }
-            }
+            TextButton(onClick = { editing = true }) { Text("设置旅行计划") }
         } else {
             val account = cashAccounts.firstOrNull { it.id == extras.travelAccountId }
             Text(extras.travelName.ifBlank { "下一次出发" }, style = t.typography.title, color = t.colors.onSurface)
@@ -63,6 +52,31 @@ internal fun TravelPlanCard(vm: AnniversaryViewModel, extras: AnniversaryExtras,
             }
         }
         Text("储蓄进度读取个人账户真实余额，不另建小金库，也不会冻结或扣除资金。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-        error?.let { Text(it, color = t.colors.error) }
+    }
+    // 编辑表单改到弹窗里（仿借贷编辑弹窗）：AmountField 的内置数字键盘已在借贷编辑弹窗里这样用过。
+    if (editing) {
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text(if (configured) "编辑计划" else "设置旅行计划") },
+            text = {
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(name, { name = it }, label = { Text("目的地 / 计划名称（选填）") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    Text("旅行攒钱关联账户", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    if (cashAccounts.isEmpty()) Text("先在记账 → 账户页新增一个账户。", style = t.typography.body, color = t.colors.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        cashAccounts.forEach { account -> FilterChip(selected == account.id, { selected = account.id }, label = { Text(account.name) }) }
+                    }
+                    AmountField(target, { target = it }, "攒钱目标（元）")
+                    error?.let { Text(it, color = t.colors.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    busy = true
+                    vm.setTravel(selected, parseCents(target), name) { problem -> busy = false; error = problem; if (problem == null) editing = false }
+                }, enabled = !busy && cashAccounts.any { it.id == selected } && parseCents(target) > 0) { Text(if (busy) "保存中…" else "保存旅行计划") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("取消") } },
+        )
     }
 }

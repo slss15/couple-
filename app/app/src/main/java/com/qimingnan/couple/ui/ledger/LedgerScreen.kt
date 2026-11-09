@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -315,8 +317,21 @@ fun LedgerScreen(
                             }
                         }
                         if (accounts.isEmpty()) Text("还没有账户，先在下方添加一个账户。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        Button(onClick = { showAccounts = !showAccounts }) { Text(if (showAccounts) "收起账户" else "添加账户") }
-                        if (showAccounts) AccountForm(vm, onDone = { showAccounts = false })
+                        Button(onClick = { showAccounts = true }) { Text("添加账户") }
+                        if (showAccounts) {
+                            // 新建账户表单改到弹窗里（仿借贷编辑弹窗）：表单自带「保存账户」按钮，弹窗只补一个「取消」。
+                            AlertDialog(
+                                onDismissRequest = { showAccounts = false },
+                                title = { Text("添加账户") },
+                                text = {
+                                    Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        AccountForm(vm, onDone = { showAccounts = false })
+                                    }
+                                },
+                                confirmButton = {},
+                                dismissButton = { TextButton(onClick = { showAccounts = false }) { Text("取消") } },
+                            )
+                        }
                     }
                 }
             }
@@ -385,19 +400,7 @@ private fun BudgetCard(spentCents: Long, budgetCents: Long, onSaveBudget: (Long)
     SectionCard("本月个人预算") {
         if (budgetCents <= 0) {
             Text("设一个本月支出预算，超了会提醒你。", style = t.typography.body, color = t.colors.onSurfaceVariant)
-            if (!editing) {
-                Button(onClick = { editing = true }) { Text("设置预算") }
-            } else {
-                AmountField(value = text, onValueChange = { text = it }, label = "预算（元）")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
-                        val cents = Money.parseCents(text) ?: 0L
-                        if (cents > 0) onSaveBudget(cents)
-                        editing = false
-                    }) { Text("保存预算") }
-                    TextButton(onClick = { editing = false }) { Text("取消") }
-                }
-            }
+            Button(onClick = { editing = true }) { Text("设置预算") }
             return@SectionCard
         }
         val progress = LedgerLogic.budgetProgress(spentCents, budgetCents) ?: 0.0
@@ -412,17 +415,22 @@ private fun BudgetCard(spentCents: Long, budgetCents: Long, onSaveBudget: (Long)
             style = t.typography.caption, color = t.colors.onSurfaceVariant,
         )
         TextButton(onClick = { editing = true }) { Text("改预算") }
-        if (editing) {
-            AmountField(value = text, onValueChange = { text = it }, label = "预算（元）")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    val cents = runCatching { BigDecimal(text).multiply(BigDecimal(100)).toLong() }.getOrDefault(0L)
+    }
+    // 预算金额改到弹窗里填：AmountField 的内置数字键盘（底部弹层）已在借贷编辑弹窗里这样用过。
+    if (editing) {
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text(if (budgetCents > 0) "改预算" else "设置预算") },
+            text = { AmountField(value = text, onValueChange = { text = it }, label = "预算（元）") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val cents = Money.parseCents(text) ?: 0L
                     if (cents > 0) onSaveBudget(cents)
                     editing = false
                 }) { Text("保存预算") }
-                TextButton(onClick = { editing = false }) { Text("取消") }
-            }
-        }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("取消") } },
+        )
     }
 }
 
@@ -499,8 +507,21 @@ private fun AccountDetail(
             Text(centsTextStatic(balance), style = t.typography.headline, color = t.colors.primary)
         }
     }
-    Button(onClick = { editing = !editing }) { Text(if (editing) "收起修改" else "修改信息") }
-    if (editing) AccountEditForm(vm, account, onSaved = { editing = false })
+    Button(onClick = { editing = true }) { Text("修改信息") }
+    if (editing) {
+        // 修改表单改到弹窗里（仿借贷编辑弹窗）：表单自带「保存修改」按钮，弹窗只补一个「取消」。
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text("修改信息") },
+            text = {
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AccountEditForm(vm, account, onSaved = { editing = false })
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("取消") } },
+        )
+    }
     SectionCard("这个账户的账目（${myEntries.size} 笔）") {
         if (myEntries.isEmpty()) Text("这个账户还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
         myEntries.forEach { e ->
@@ -528,18 +549,21 @@ private fun AccountDetail(
             }
         }
     }
-    if (!confirmDelete) {
-        Button(onClick = { confirmDelete = true }) { Text("删除账户") }
-    } else {
-        Text(
-            if (myEntries.isEmpty()) "确定删除这个账户吗？删除后不能恢复。"
-            else "这个账户下还有 ${myEntries.size} 笔账，删除账户后这些账目仍保留在明细里。确定删除吗？",
-            style = t.typography.body, color = t.colors.onSurface,
+    Button(onClick = { confirmDelete = true }) { Text("删除账户") }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("删除账户？") },
+            text = {
+                Text(
+                    if (myEntries.isEmpty()) "确定删除这个账户吗？删除后不能恢复。"
+                    else "这个账户下还有 ${myEntries.size} 笔账，删除账户后这些账目仍保留在明细里。确定删除吗？",
+                    style = t.typography.body, color = t.colors.onSurface,
+                )
+            },
+            confirmButton = { TextButton(onClick = { vm.deleteAccount(account.id); onBack() }) { Text("确定删除") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } },
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { vm.deleteAccount(account.id); onBack() }) { Text("确定删除") }
-            Button(onClick = { confirmDelete = false }) { Text("取消") }
-        }
     }
 }
 
