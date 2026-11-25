@@ -15,6 +15,7 @@ import com.qimingnan.couple.data.mqtt.Presence
 import com.qimingnan.couple.data.mqtt.MqttState
 import com.qimingnan.couple.data.mqtt.MqttTarget
 import com.qimingnan.couple.data.update.UpdateRepository
+import com.qimingnan.couple.layout.AppearanceRepository
 import com.qimingnan.couple.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
@@ -38,6 +39,7 @@ class AppCoordinator @Inject constructor(
     private val couple: CoupleRepository,
     private val mqtt: MqttManager,
     private val updates: UpdateRepository,
+    private val appearance: AppearanceRepository,
     private val feed: FeedRepository,
     private val chat: ChatRepository,
     @ApplicationScope private val scope: CoroutineScope,
@@ -76,6 +78,14 @@ class AppCoordinator @Inject constructor(
             mqtt.pairEvents.collect { payload ->
                 val e = PairEvent.parse(payload) ?: return@collect
                 runCatching { couple.onPairEvent(e) }
+            }
+        }
+        scope.launch {
+            // 登录且配置生效后拉取 P5 外观；失败时仓库继续使用本地缓存。
+            combine(bootstrapStore.state, session.state) { b, s ->
+                b?.pendingSince == null && b?.current != null && s is SessionState.LoggedIn
+            }.distinctUntilChanged().collect { ready ->
+                if (ready) runCatching { appearance.refresh() }
             }
         }
         scope.launch {

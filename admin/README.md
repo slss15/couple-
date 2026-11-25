@@ -2,6 +2,8 @@
 
 情侣 App 的 Web 管理后台，仅供管理员（`role=admin`）使用。接口以仓库根目录的 [`contract.md`](../contract.md) 为准。
 
+> **产品取舍（2026-11-24）**：聊天冻结维护，P4 通话暂停；日常沟通使用微信。
+
 技术栈：Vue 3 + Vite + TypeScript + Element Plus + Pinia + Vue Router + axios，界面为简体中文。
 
 ## 功能（P0）
@@ -13,7 +15,8 @@
 | 服务器配置 | `GET/PUT /admin/config`：后端地址、MQTT（wss://）、TURN（Cloudflare / coturn）、对象存储（本地 / MinIO / R2）。密钥字段只写、回显为脱敏值 |
 | 引导二维码 | `POST /admin/bootstrap` 生成 `couple://bootstrap?d=…&s=…`，前端用 `qrcode` 渲染、显示解码后的 JSON、用服务器公钥在浏览器内校验 Ed25519 签名、下载 1024px PNG |
 | 审计日志 | `GET /admin/audit?limit&before` 游标分页（上一页 / 下一页 / 回到最新），展开查看 meta |
-| 主题 / 布局 / 插件 / 通话统计 | 侧边栏占位入口（禁用），分别在 P1–P5 实现 |
+| 主题与布局 | `GET/PUT /admin/appearance`：主题色/深浅色/字号/本地覆盖开关，底部导航与页面区块的显隐、顺序、尺寸编辑；P5 |
+| 插件 | 侧边栏占位入口（禁用），P2 实现 |
 
 ## 本地开发
 

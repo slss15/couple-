@@ -266,3 +266,31 @@ Scope: partner card (profile + presence), shared important days (anniversary/bir
 - TA Tab = 对方资料卡（头像/昵称/bio/生日/在线状态圆点——在线状态复用 MQTT presence，不进 /ta/summary）+ 在一起天数 + 重要日子列表（距下次周年/生日的天数升序）+ 「我的档案」编辑入口（bio/生日/showBirthday 开关）。
 - days 不进 Room（低频、实时拉取）；进入 Tab 时 GET /ta/summary，下拉刷新同路径。
 - Demo 后端在内存里实现同一组端点（TA 卡 + 两条示例日子）。
+
+## Appearance (P5: theme + layout) — authoritative for backend + admin + app
+
+Scope: server-managed theme defaults and bottom-navigation/section layout. Chat and call modules remain in the codebase; only their entry points can be hidden by layout. This section does not add call signaling or chat features.
+
+### Model
+- LayoutSpec = `{version: 1, zones: [LayoutZone]}`.
+- LayoutZone = `{id, items: [LayoutItem]}`; known editable zones are `bottomBar`, `feedHeader`, `taCards`, `meSections`. `topBar` and `taHeader` are reserved for locked items and are preserved by the editor.
+- LayoutItem = `{id, order, visible, size}`; `size` is `"S" | "M" | "L"` = 1/2/4 grid units. `order` is a non-negative integer, unique inside a zone.
+- Locked items: `back` (topBar order 0), `sharing_indicator` (topBar order 1), `privacy_toggle` (taHeader order 0), `me_entry` (bottomBar order 3). Locked items must exist, stay in their slot, and remain visible.
+- Theme = `{seed, darkMode, fontSize, allowUserOverride}`. Allowed seeds: `rose`, `blue`, `green`, `purple`, `orange`, `teal`, `linepuppy`. `darkMode`: `system | light | dark`. `fontSize`: `small | standard | large | xlarge`.
+- Default layout: bottom bar = 动态, TA, 纪念日, 我的 (locked), 记账; 经期 is present but hidden. Chat entry is present in `meSections` but hidden by default.
+- Chat and call modules are retained. The chat entry can be re-enabled through the layout; calls have no entry in the current App.
+
+### REST (under `/api/v1`)
+- `GET /app/appearance` (Bearer, any signed-in user) -> AppAppearance. This is the endpoint the App uses on login and caches locally for offline startup.
+- `GET /admin/appearance` (admin only) -> AppAppearance; audit action `admin.appearance.view`.
+- `PUT /admin/appearance` (admin only) body `{layout?, theme?}` -> updated AppAppearance; omitted fields keep their stored value. Every successful update increments `appearanceVersion`; audit action `admin.appearance.update`.
+- AppAppearance = `{layout: LayoutSpec, theme: Theme, catalog: [LayoutZoneCatalog], themeCatalog: ThemeCatalog, appearanceVersion, updatedAt}`. `catalog` and `themeCatalog` drive the Admin editor; the App ignores them.
+- Errors: invalid layout/theme -> 400 `VALIDATION_ERROR`; non-admin -> 403 `FORBIDDEN`.
+
+### Validation and rendering rules
+- Backend and App use the same layout rules: schema version, known zones, unique zones/items/orders, non-negative orders, zone capacity, visible grid width, locked slots, and locked visibility.
+- Invalid stored/remote layout falls back to the default layout on the App. Invalid Admin updates are rejected and never replace the stored config.
+- Server-visible bottom-bar items are authoritative. A locally hidden Tab stays hidden; a Tab removed from the server layout cannot be restored by local settings.
+- If the user has not manually reordered the bottom bar, the server order is used. If the user has manually reordered it, local order is applied only inside the server-visible set.
+- Server theme is the default when the user has not customized theme settings. Local theme wins only when `allowUserOverride=true`; turning it off makes the server theme authoritative for every device.
+- Offline: App keeps the last successful `GET /app/appearance` response in DataStore and renders it until a newer response arrives.

@@ -1,11 +1,11 @@
 package com.qimingnan.couple.ui.me
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +15,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -24,10 +27,6 @@ import com.qimingnan.couple.R
 import com.qimingnan.couple.data.mqtt.MqttState
 import com.qimingnan.couple.data.update.ShizukuState
 import com.qimingnan.couple.data.update.UpdatePhase
-import com.qimingnan.couple.ui.update.UpdateViewModel
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.components.BannerKind
 import com.qimingnan.couple.ui.components.CoupleTextField
@@ -36,8 +35,11 @@ import com.qimingnan.couple.ui.components.SectionCard
 import com.qimingnan.couple.ui.components.SecondaryButton
 import com.qimingnan.couple.ui.components.StatusBanner
 import com.qimingnan.couple.ui.components.StatusDot
+import com.qimingnan.couple.ui.update.UpdateViewModel
 import java.text.DateFormat
 import java.util.Date
+
+private val DEFAULT_SECTIONS = listOf("settings", "profile", "couple", "mqtt", "server", "updates")
 
 @Composable
 fun MeScreen(
@@ -46,6 +48,7 @@ fun MeScreen(
     onOpenKeepAlive: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onOpenChat: () -> Unit = {},
+    sectionOrder: List<String> = DEFAULT_SECTIONS,
     vm: MeViewModel = hiltViewModel(),
     updateVm: UpdateViewModel = hiltViewModel(),
 ) {
@@ -56,112 +59,116 @@ fun MeScreen(
     var confirmLogout by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.refresh() }
     val dateFmt = DateFormat.getDateInstance(DateFormat.MEDIUM)
+    val sections = sectionOrder.ifEmpty { DEFAULT_SECTIONS }
 
     Column(
         // 顶部留白从 lg(16dp) 减到 sm(8dp)：外层 Scaffold 已给过状态栏留白，这里不再叠一层大留白。
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = t.spacing.lg, vertical = t.spacing.sm),
         verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
     ) {
-        SectionCard("设置") {
-            Row(
-                Modifier.fillMaxWidth().clickable(onClick = onOpenSettings).padding(vertical = t.spacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("底部 Tab、主题色、深浅色、字号", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-                Text("›", style = t.typography.title, color = t.colors.onSurfaceVariant)
-            }
-            Row(
-                Modifier.fillMaxWidth().clickable(onClick = onOpenChat).padding(vertical = t.spacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("聊天（不在 Tab 栏，从这里进入）", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-                Text("›", style = t.typography.title, color = t.colors.onSurfaceVariant)
-            }
-        }
-        SectionCard(stringResource(R.string.me_profile)) {
-            val me = s.me
-            if (me != null) {
-                Text(me.displayName, style = t.typography.headline, color = t.colors.onSurface)
-                KeyValueRow(stringResource(R.string.auth_username), me.username)
-                KeyValueRow("ID", me.id)
-            }
-        }
-
-        SectionCard(stringResource(R.string.me_couple)) {
-            val couple = s.couple
-            val partner = s.partner
-            if (couple != null && partner != null) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                    val online = s.partnerPresence?.online == true
-                    StatusDot(if (online) t.colors.success else t.colors.outline)
-                    Text(
-                        "${stringResource(R.string.me_partner)}：${partner.displayName} · " +
-                            stringResource(if (online) R.string.online else R.string.offline),
-                        style = t.typography.title,
-                        color = t.colors.onSurface,
-                    )
+        sections.forEach { section ->
+            when (section) {
+                "settings" -> SectionCard("设置") {
+                    Row(
+                        Modifier.fillMaxWidth().clickable(onClick = onOpenSettings).padding(vertical = t.spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("底部 Tab、主题色、深浅色、字号", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                        Text("›", style = t.typography.title, color = t.colors.onSurfaceVariant)
+                    }
                 }
-                KeyValueRow("", stringResource(R.string.me_paired_at, dateFmt.format(Date(couple.pairedAt))))
-                KeyValueRow("Couple ID", couple.id)
-                if (s.coupleFromCache) StatusBanner("离线缓存数据", BannerKind.Warning)
+                "chat_entry" -> SectionCard("聊天") {
+                    Row(
+                        Modifier.fillMaxWidth().clickable(onClick = onOpenChat).padding(vertical = t.spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("进入聊天", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                        Text("›", style = t.typography.title, color = t.colors.onSurfaceVariant)
+                    }
+                }
+                "profile" -> SectionCard(stringResource(R.string.me_profile)) {
+                    val me = s.me
+                    if (me != null) {
+                        Text(me.displayName, style = t.typography.headline, color = t.colors.onSurface)
+                        KeyValueRow(stringResource(R.string.auth_username), me.username)
+                        KeyValueRow("ID", me.id)
+                    }
+                }
+                "couple" -> SectionCard(stringResource(R.string.me_couple)) {
+                    val couple = s.couple
+                    val partner = s.partner
+                    if (couple != null && partner != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                            val online = s.partnerPresence?.online == true
+                            StatusDot(if (online) t.colors.success else t.colors.outline)
+                            Text(
+                                "${stringResource(R.string.me_partner)}：${partner.displayName} · " +
+                                    stringResource(if (online) R.string.online else R.string.offline),
+                                style = t.typography.title,
+                                color = t.colors.onSurface,
+                            )
+                        }
+                        KeyValueRow("", stringResource(R.string.me_paired_at, dateFmt.format(Date(couple.pairedAt))))
+                        KeyValueRow("Couple ID", couple.id)
+                        if (s.coupleFromCache) StatusBanner("离线缓存数据", BannerKind.Warning)
+                    }
+                }
+                "mqtt" -> SectionCard(stringResource(R.string.me_mqtt)) {
+                    val (label, color) = when (val m = s.mqtt) {
+                        MqttState.Idle -> "未连接" to t.colors.outline
+                        MqttState.Connecting -> "连接中…" to t.colors.warning
+                        is MqttState.Connected -> "已连接" to t.colors.success
+                        is MqttState.Failed -> ("失败：${m.reason}" + (m.retryInMillis?.let { "（${it / 1000} 秒后重试）" } ?: "")) to t.colors.error
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                        StatusDot(color)
+                        Text(label, style = t.typography.body, color = t.colors.onSurface)
+                    }
+                    SecondaryButton("重新连接", onClick = vm::reconnectMqtt)
+                    SecondaryButton("后台保活 · 连接诊断", onClick = onOpenKeepAlive)
+                }
+                "server" -> SectionCard(stringResource(R.string.me_server)) {
+                    val c = s.config
+                    if (c != null) {
+                        KeyValueRow("API", c.baseUrl)
+                        KeyValueRow("MQTT", c.mqttUrl)
+                        KeyValueRow("版本", c.configVersion.toString())
+                        KeyValueRow("签名", if (c.signed) "已校验" else "调试配置（未签名）")
+                        s.pinFingerprint?.let { KeyValueRow("公钥指纹", it) }
+                    }
+                    SecondaryButton(stringResource(R.string.me_rescan), onClick = onRescan)
+                }
+                "updates" -> SectionCard("应用更新") {
+                    KeyValueRow("当前版本", "${upd.currentVersionName}（${upd.currentVersionCode}）")
+                    if (upd.lastCheckAt > 0) KeyValueRow("上次检查", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(upd.lastCheckAt)))
+                    KeyValueRow(
+                        "静默安装",
+                        when (upd.shizuku) {
+                            ShizukuState.AUTHORIZED -> "Shizuku 已授权"
+                            ShizukuState.NOT_AUTHORIZED -> "Shizuku 未授权"
+                            ShizukuState.UNSUPPORTED -> "Shizuku 版本过旧"
+                            ShizukuState.NOT_RUNNING -> "未检测到 Shizuku（将使用系统安装确认）"
+                        },
+                    )
+                    upd.available?.let { a ->
+                        StatusBanner("可更新到 ${a.versionName}" + if (upd.force) "（必须更新）" else "", if (upd.force) BannerKind.Warning else BannerKind.Info)
+                    }
+                    (upd.phase as? UpdatePhase.Downloading)?.let { p ->
+                        Text("正在下载 ${p.done * 100 / maxOf(p.total, 1)}%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    }
+                    updateMsg?.let { Text(it, style = t.typography.caption, color = t.colors.onSurfaceVariant) }
+                    SecondaryButton(
+                        if (upd.checking) "检查中…" else "检查更新",
+                        onClick = { updateVm.checkNow { updateMsg = it } },
+                        enabled = !upd.checking,
+                    )
+                    if (upd.available != null) SecondaryButton("查看更新", onClick = updateVm::reopen)
+                    if (upd.shizuku == ShizukuState.NOT_AUTHORIZED) SecondaryButton("授权 Shizuku 静默安装", onClick = updateVm::requestShizukuPermission)
+                }
             }
         }
 
-        SectionCard(stringResource(R.string.me_mqtt)) {
-            val (label, color) = when (val m = s.mqtt) {
-                MqttState.Idle -> "未连接" to t.colors.outline
-                MqttState.Connecting -> "连接中…" to t.colors.warning
-                is MqttState.Connected -> "已连接" to t.colors.success
-                is MqttState.Failed -> ("失败：${m.reason}" + (m.retryInMillis?.let { "（${it / 1000} 秒后重试）" } ?: "")) to t.colors.error
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                StatusDot(color)
-                Text(label, style = t.typography.body, color = t.colors.onSurface)
-            }
-            SecondaryButton("重新连接", onClick = vm::reconnectMqtt)
-            SecondaryButton("后台保活 · 连接诊断", onClick = onOpenKeepAlive)
-        }
-
-        SectionCard(stringResource(R.string.me_server)) {
-            val c = s.config
-            if (c != null) {
-                KeyValueRow("API", c.baseUrl)
-                KeyValueRow("MQTT", c.mqttUrl)
-                KeyValueRow("版本", c.configVersion.toString())
-                KeyValueRow("签名", if (c.signed) "已校验" else "调试配置（未签名）")
-                s.pinFingerprint?.let { KeyValueRow("公钥指纹", it) }
-            }
-            SecondaryButton(stringResource(R.string.me_rescan), onClick = onRescan)
-        }
-
-        SectionCard("应用更新") {
-            KeyValueRow("当前版本", "${upd.currentVersionName}（${upd.currentVersionCode}）")
-            if (upd.lastCheckAt > 0) KeyValueRow("上次检查", DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(upd.lastCheckAt)))
-            KeyValueRow(
-                "静默安装",
-                when (upd.shizuku) {
-                    ShizukuState.AUTHORIZED -> "Shizuku 已授权"
-                    ShizukuState.NOT_AUTHORIZED -> "Shizuku 未授权"
-                    ShizukuState.UNSUPPORTED -> "Shizuku 版本过旧"
-                    ShizukuState.NOT_RUNNING -> "未检测到 Shizuku（将使用系统安装确认）"
-                },
-            )
-            upd.available?.let { a ->
-                StatusBanner("可更新到 ${a.versionName}" + if (upd.force) "（必须更新）" else "", if (upd.force) BannerKind.Warning else BannerKind.Info)
-            }
-            (upd.phase as? UpdatePhase.Downloading)?.let { p ->
-                Text("正在下载 ${p.done * 100 / maxOf(p.total, 1)}%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-            }
-            updateMsg?.let { Text(it, style = t.typography.caption, color = t.colors.onSurfaceVariant) }
-            SecondaryButton(
-                if (upd.checking) "检查中…" else "检查更新",
-                onClick = { updateVm.checkNow { updateMsg = it } },
-                enabled = !upd.checking,
-            )
-            if (upd.available != null) SecondaryButton("查看更新", onClick = updateVm::reopen)
-            if (upd.shizuku == ShizukuState.NOT_AUTHORIZED) SecondaryButton("授权 Shizuku 静默安装", onClick = updateVm::requestShizukuPermission)
-        }
-
+        // 解绑与退出始终保留，不能被后台布局隐藏，避免用户失去恢复入口。
         SectionCard(stringResource(R.string.me_unpair)) {
             val u = s.unpair
             u.error?.let { StatusBanner(it, BannerKind.Error) }

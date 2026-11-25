@@ -1,6 +1,9 @@
 package com.qimingnan.couple.backend
 
 import com.qimingnan.couple.backend.admin.AdminConfigService
+import com.qimingnan.couple.backend.layout.AppearanceService
+import com.qimingnan.couple.backend.layout.adminAppearanceRoutes
+import com.qimingnan.couple.backend.layout.appearanceRoutes
 import com.qimingnan.couple.backend.admin.adminRoutes
 import com.qimingnan.couple.backend.audit.AuditService
 import com.qimingnan.couple.backend.auth.AUTH_RATE_LIMIT
@@ -122,6 +125,7 @@ fun Application.module(config: AppConfig) {
     val serverPush = com.qimingnan.couple.backend.mqtt.serverPushFor(config, embeddedBroker)
     val pairingService = PairingService(db, config, audit, serverPush)
     val adminConfigService = AdminConfigService(db, config)
+    val appearanceService = AppearanceService(db, config)
     val setupService = SetupService(config, authService, adminConfigService, audit)
     runBlocking { setupService.init() }
     attributes.put(SetupServiceKey, setupService)
@@ -239,6 +243,8 @@ fun Application.module(config: AppConfig) {
             authenticate(JWT_AUTH) {
                 pairingRoutes(pairingService)
                 adminRoutes(db, audit, adminConfigService, bootstrapService, config.mqttWsPath)
+                appearanceRoutes(appearanceService)
+                adminAppearanceRoutes(db, audit, appearanceService)
                 appUpdateRoutes(releaseService)
                 adminReleaseRoutes(db, audit, releaseService, releaseMirror, releaseSettings, this@module)
                 mediaRoutes(mediaService)

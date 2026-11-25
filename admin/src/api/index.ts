@@ -1,6 +1,8 @@
 import type {
   AdminConfig,
   AdminConfigView,
+  AppearanceUpdate,
+  AppearanceView,
   AppReleaseView,
   AuditEntry,
   BootstrapPubkey,
@@ -62,6 +64,8 @@ export const api = {
   couple: () => http.get<Couple>('/couple').then((r) => r.data),
 
   getConfig: () => http.get<AdminConfigView>('/admin/config').then((r) => r.data),
+  getAppearance: () => http.get<AppearanceView>('/admin/appearance').then((r) => r.data),
+  putAppearance: (body: AppearanceUpdate) => http.put<AppearanceView>('/admin/appearance', body).then((r) => r.data),
   putConfig: (cfg: AdminConfig) => http.put<AdminConfigView>('/admin/config', cfg).then((r) => r.data),
   bootstrap: () => http.post<BootstrapResponse>('/admin/bootstrap').then((r) => r.data),
   audit: (params: { limit: number; before?: number }) =>

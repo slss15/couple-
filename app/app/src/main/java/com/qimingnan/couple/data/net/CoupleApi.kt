@@ -13,6 +13,7 @@ import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.Streaming
+import com.qimingnan.couple.layout.AppAppearance
 import com.qimingnan.couple.data.update.HealthReport
 import com.qimingnan.couple.data.update.UpdateResponse
 
@@ -137,6 +138,10 @@ interface CoupleApi {
 
     @DELETE("chat/scheduled/{id}")
     suspend fun deleteScheduled(@Path("id") id: String): Response<Unit>
+
+    /** P5 外观：服务端布局与主题默认值。 */
+    @GET("app/appearance")
+    suspend fun appearance(): AppAppearance
 
     /** Also reports this device's app/partner-protocol versions to the server (OTA v2 partner gate). */
     @GET("app/update")

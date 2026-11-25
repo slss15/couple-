@@ -20,6 +20,7 @@ const routes: RouteRecordRaw[] = [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue'), meta: { title: '仪表盘' } },
       { path: 'config', name: 'config', component: () => import('@/views/ServerConfigView.vue'), meta: { title: '服务器配置' } },
+      { path: 'appearance', name: 'appearance', component: () => import('@/views/AppearanceView.vue'), meta: { title: '主题与布局' } },
       { path: 'releases', name: 'releases', component: () => import('@/views/ReleasesView.vue'), meta: { title: '版本发布' } },
       { path: 'devices', name: 'devices', component: () => import('@/views/DevicesView.vue'), meta: { title: '设备' } },
       { path: 'bootstrap', name: 'bootstrap', component: () => import('@/views/BootstrapView.vue'), meta: { title: '引导二维码' } },

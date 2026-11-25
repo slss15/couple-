@@ -49,6 +49,7 @@ import com.qimingnan.couple.data.settings.FontSize
 import com.qimingnan.couple.data.settings.SettingsRepository
 import com.qimingnan.couple.data.settings.TabVisibility
 import com.qimingnan.couple.data.update.ShizukuState
+import com.qimingnan.couple.layout.AppearanceRepository
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.theme.ThemeSeeds
 import com.qimingnan.couple.ui.components.SecondaryButton
@@ -60,8 +61,12 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
-class SettingsViewModel @Inject constructor(private val repo: SettingsRepository) : ViewModel() {
+class SettingsViewModel @Inject constructor(
+    private val repo: SettingsRepository,
+    private val appearanceRepo: AppearanceRepository,
+) : ViewModel() {
     val settings: StateFlow<AppSettings> = repo.settings
+    val appearance = appearanceRepo.state
     fun setTabHidden(id: String, hidden: Boolean) = viewModelScope.launch { repo.setTabHidden(id, hidden) }
     fun setHomeTab(id: String) = viewModelScope.launch { repo.setHomeTab(id) }
     suspend fun initialSettings(): AppSettings = repo.initialSettings()
@@ -70,6 +75,7 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun setDynamic(on: Boolean) = viewModelScope.launch { repo.setDynamicColor(on) }
     fun setDarkMode(m: DarkMode) = viewModelScope.launch { repo.setDarkMode(m) }
     fun setFontSize(f: FontSize) = viewModelScope.launch { repo.setFontSize(f) }
+    fun useServerTheme() = viewModelScope.launch { repo.useServerTheme() }
     fun setPluginEnabled(id: String, enabled: Boolean) = viewModelScope.launch { repo.setPluginEnabled(id, enabled) }
     fun setMonthlyBudget(cents: Long) = viewModelScope.launch { repo.setMonthlyBudget(cents) }
     fun saveTabOrder(order: List<String>, onSaved: (Boolean) -> Unit) = viewModelScope.launch {
@@ -120,6 +126,8 @@ fun SettingsScreen(
     val t = LocalCoupleTokens.current
     val scrollState = rememberScrollState()
     val s by vm.settings.collectAsStateWithLifecycle()
+    val appearance by vm.appearance.collectAsStateWithLifecycle()
+    val remoteTheme = appearance.appearance.theme
     val upd by updateVm.state.collectAsStateWithLifecycle()
     val keepAliveOn by keepAliveVm.enabled.collectAsStateWithLifecycle()
     var notificationDenied by remember { mutableStateOf(false) }
@@ -137,7 +145,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
         ) {
             SectionCard("底部 Tab") {
-                Text("最多显示 5 个，隐藏的 Tab 不在主底栏出现。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text("最多显示 5 个，隐藏的 Tab 不在主底栏出现；管理员在布局中关闭的入口不会显示。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 TabVisibility.HIDEABLE.forEach { id ->
                     SwitchRow("显示「${TAB_LABELS[id]}」", checked = id !in s.hiddenTabs) { vm.setTabHidden(id, !it) }
                 }
@@ -192,6 +200,14 @@ fun SettingsScreen(
                 }
             }
             SectionCard("主题色") {
+                if (!remoteTheme.allowUserOverride) {
+                    Text("管理员已锁定服务器主题，本地主题选择不会生效。", style = t.typography.caption, color = t.colors.warning)
+                } else if (!s.themeCustomized) {
+                    Text("当前使用服务器主题；手动选择后改为本地主题。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                } else {
+                    Text("当前使用本地主题。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    SecondaryButton("恢复服务器主题", onClick = vm::useServerTheme)
+                }
                 val dynAvail = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
                     ThemeSeeds.all.forEach { seed ->

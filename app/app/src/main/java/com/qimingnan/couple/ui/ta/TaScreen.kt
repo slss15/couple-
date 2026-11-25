@@ -50,7 +50,11 @@ import com.qimingnan.couple.data.net.ImportantDay
 import com.qimingnan.couple.theme.LocalCoupleTokens
 
 @Composable
-fun TaScreen(vm: TaViewModel, modifier: Modifier = Modifier) {
+fun TaScreen(
+    vm: TaViewModel,
+    cardOrder: List<String> = listOf("partner_card", "anniversary", "days"),
+    modifier: Modifier = Modifier,
+) {
     val t = LocalCoupleTokens.current
     val state by vm.state.collectAsStateWithLifecycle()
     var editingMe by rememberSaveable { mutableStateOf(false) }
@@ -62,16 +66,17 @@ fun TaScreen(vm: TaViewModel, modifier: Modifier = Modifier) {
         containerColor = t.colors.background,
         contentWindowInsets = WindowInsets.navigationBars,
         floatingActionButton = {
-        if (state.summary != null) {
-            androidx.compose.material3.ExtendedFloatingActionButton(
-                onClick = { addingDay = true },
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text(stringResource(R.string.ta_add_day)) },
-                containerColor = t.colors.primaryContainer,
-                contentColor = t.colors.onPrimaryContainer,
-            )
-        }
-    }) { padding ->
+            if (state.summary != null && "days" in cardOrder) {
+                androidx.compose.material3.ExtendedFloatingActionButton(
+                    onClick = { addingDay = true },
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    text = { Text(stringResource(R.string.ta_add_day)) },
+                    containerColor = t.colors.primaryContainer,
+                    contentColor = t.colors.onPrimaryContainer,
+                )
+            }
+        },
+    ) { padding ->
         Box(modifier.padding(padding).fillMaxSize()) {
             when {
                 state.loading && state.summary == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -87,30 +92,41 @@ fun TaScreen(vm: TaViewModel, modifier: Modifier = Modifier) {
                 }
                 else -> {
                     val s = state.summary!!
+                    val cards = cardOrder.ifEmpty { listOf("partner_card", "anniversary", "days") }
                     LazyColumn(
                         Modifier.fillMaxSize(),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(t.spacing.md),
                         verticalArrangement = Arrangement.spacedBy(t.spacing.md),
                     ) {
-                        item { PartnerCard(s.partner, state.partnerOnline, vm) }
-                        s.anniversary?.let { ann ->
-                            item { AnniversaryRow(days = (System.currentTimeMillis() - ann) / 86_400_000L) }
-                        }
-                        item {
-                            Text(stringResource(R.string.ta_days_title), style = t.typography.headline, color = t.colors.onBackground)
-                        }
-                        if (s.days.isEmpty()) {
-                            item {
-                                Text(
-                                    stringResource(R.string.ta_days_empty),
-                                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
-                                )
+                        cards.forEach { card ->
+                            when (card) {
+                                "partner_card" -> item(key = "partner_card") {
+                                    PartnerCard(s.partner, state.partnerOnline, vm)
+                                }
+                                "anniversary" -> s.anniversary?.let { ann ->
+                                    item(key = "anniversary") {
+                                        AnniversaryRow(days = (System.currentTimeMillis() - ann) / 86_400_000L)
+                                    }
+                                }
+                                "days" -> {
+                                    item(key = "days_title") {
+                                        Text(stringResource(R.string.ta_days_title), style = t.typography.headline, color = t.colors.onBackground)
+                                    }
+                                    if (s.days.isEmpty()) {
+                                        item(key = "days_empty") {
+                                            Text(
+                                                stringResource(R.string.ta_days_empty),
+                                                style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                    items(s.days, key = { it.id }) { day ->
+                                        DayRow(day, canDelete = true, onDelete = { vm.deleteDay(day.id) })
+                                    }
+                                }
                             }
                         }
-                        items(s.days, key = { it.id }) { day ->
-                            DayRow(day, canDelete = true, onDelete = { vm.deleteDay(day.id) })
-                        }
-                        item {
+                        item(key = "edit_me") {
                             TextButton(onClick = { editingMe = true }) { Text(stringResource(R.string.ta_edit_me)) }
                         }
                     }

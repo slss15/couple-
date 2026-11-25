@@ -91,7 +91,11 @@ fun relativeTime(now: Long, ts: Long): String {
 fun daysTogether(from: Long, now: Long): Long = TimeUnit.MILLISECONDS.toDays(now - from).coerceAtLeast(0)
 
 @Composable
-fun FeedScreen(vm: FeedViewModel, modifier: Modifier = Modifier) {
+fun FeedScreen(
+    vm: FeedViewModel,
+    showAnniversaryCard: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
     val t = LocalCoupleTokens.current
     val state by vm.state.collectAsStateWithLifecycle()
     var publishing by rememberSaveable { mutableStateOf(false) }
@@ -122,8 +126,10 @@ fun FeedScreen(vm: FeedViewModel, modifier: Modifier = Modifier) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = t.spacing.sm, horizontal = t.spacing.md),
                 verticalArrangement = Arrangement.spacedBy(t.spacing.md),
             ) {
-                state.anniversary?.let { ann ->
-                    item { AnniversaryCard(days = daysTogether(ann, System.currentTimeMillis())) }
+                if (showAnniversaryCard) {
+                    state.anniversary?.let { ann ->
+                        item { AnniversaryCard(days = daysTogether(ann, System.currentTimeMillis())) }
+                    }
                 }
                 items(state.rows, key = { it.post.id }) { row ->
                     PostCard(

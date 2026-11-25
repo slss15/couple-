@@ -45,6 +45,8 @@ object AuditActions {
     const val UNPAIR_CONFIRM_FAILED = "couple.unpair_confirm_failed"
     const val ADMIN_CONFIG_VIEW = "admin.config.view"
     const val ADMIN_CONFIG_UPDATE = "admin.config.update"
+    const val ADMIN_APPEARANCE_VIEW = "admin.appearance.view"
+    const val ADMIN_APPEARANCE_UPDATE = "admin.appearance.update"
     const val ADMIN_BOOTSTRAP = "admin.bootstrap.issue"
     const val ADMIN_AUDIT_VIEW = "admin.audit.view"
     const val ADMIN_DENIED = "admin.denied"

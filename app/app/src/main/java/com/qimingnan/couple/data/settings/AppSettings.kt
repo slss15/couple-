@@ -19,10 +19,14 @@ data class AppSettings(
     val dynamicColor: Boolean = false,
     val darkMode: DarkMode = DarkMode.System,
     val fontSize: FontSize = FontSize.Standard,
+    /** 用户是否手动改过主题；没改过时使用服务端主题默认值。 */
+    val themeCustomized: Boolean = false,
     /** 本月个人支出预算（分），0 = 没设；统计页显示已用/剩余，80%/100% 时提醒。 */
     val monthlyBudgetCents: Long = 0,
     /** 底部 Tab 栏顺序（layoutId 列表），设置里长按拖拽、松手保存；默认见 DEFAULT_TAB_ORDER。 */
     val tabOrder: List<String> = DEFAULT_TAB_ORDER,
+    /** 用户是否手动排过底部 Tab；没排过时使用服务端布局顺序。 */
+    val tabOrderCustomized: Boolean = false,
     /** 账户顺序（账户 id 列表），账户页长按拖拽、松手保存；空 = 按添加顺序。 */
     val accountOrder: List<String> = emptyList(),
     /** 在系统最近任务列表显示本应用；不能阻止用户划掉或系统回收。 */
@@ -38,6 +42,8 @@ data class AppSettings(
     val travelName: String = "",
     /** 借贷记录：LoanRecord 编码后的字符串集合，存在 DataStore 里，不动数据库版本。 */
     val loans: Set<String> = emptySet(),
+    /** 服务端外观响应原文，离线时用于恢复布局和主题。 */
+    val serverAppearanceJson: String? = null,
 ) {
     companion object {
         const val DEFAULT_SEED = "linepuppy"

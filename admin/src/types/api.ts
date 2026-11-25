@@ -263,3 +263,70 @@ export interface DeviceReportView {
   sdkInt: number | null
   reportedAt: number
 }
+
+// ---- P5 主题与布局 ----
+
+export type LayoutItemSize = 'S' | 'M' | 'L'
+
+export interface LayoutItem {
+  id: string
+  order: number
+  visible: boolean
+  size: LayoutItemSize
+}
+
+export interface LayoutZone {
+  id: string
+  items: LayoutItem[]
+}
+
+export interface LayoutSpec {
+  version: number
+  zones: LayoutZone[]
+}
+
+export interface RemoteTheme {
+  seed: string
+  darkMode: string
+  fontSize: string
+  allowUserOverride: boolean
+}
+
+export interface LayoutItemCatalog {
+  id: string
+  label: string
+  locked: boolean
+}
+
+export interface LayoutZoneCatalog {
+  id: string
+  label: string
+  capacity: number
+  gridWidth: number
+  items: LayoutItemCatalog[]
+}
+
+export interface ThemeOption {
+  id: string
+  label: string
+}
+
+export interface ThemeCatalog {
+  seeds: ThemeOption[]
+  darkModes: ThemeOption[]
+  fontSizes: ThemeOption[]
+}
+
+export interface AppearanceView {
+  layout: LayoutSpec
+  theme: RemoteTheme
+  catalog: LayoutZoneCatalog[]
+  themeCatalog: ThemeCatalog
+  appearanceVersion: number
+  updatedAt: number | null
+}
+
+export interface AppearanceUpdate {
+  layout?: LayoutSpec
+  theme?: RemoteTheme
+}

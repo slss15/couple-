@@ -43,10 +43,14 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
         store.edit { it[HOME_TAB] = id }
     }
     suspend fun setRetainRecentTask(on: Boolean) = store.edit { it[RETAIN_RECENT] = on }
-    suspend fun setThemeSeed(id: String) = store.edit { it[SEED] = id; it[DYNAMIC] = false }
-    suspend fun setDynamicColor(on: Boolean) = store.edit { it[DYNAMIC] = on }
-    suspend fun setDarkMode(m: DarkMode) = store.edit { it[DARK] = m.name }
-    suspend fun setFontSize(f: FontSize) = store.edit { it[FONT] = f.name }
+    suspend fun setThemeSeed(id: String) = store.edit { it[SEED] = id; it[DYNAMIC] = false; it[THEME_CUSTOMIZED] = true }
+    suspend fun setDynamicColor(on: Boolean) = store.edit { it[DYNAMIC] = on; it[THEME_CUSTOMIZED] = true }
+    suspend fun setDarkMode(m: DarkMode) = store.edit { it[DARK] = m.name; it[THEME_CUSTOMIZED] = true }
+    suspend fun setFontSize(f: FontSize) = store.edit { it[FONT] = f.name; it[THEME_CUSTOMIZED] = true }
+    /** 缓存服务端外观响应，断网时仍能按上次布局/主题启动。 */
+    suspend fun cacheServerAppearance(json: String) = store.edit { it[SERVER_APPEARANCE] = json }
+    /** 恢复使用服务端主题默认值；本地颜色偏好保留，重新手动选择时继续生效。 */
+    suspend fun useServerTheme() = store.edit { it[THEME_CUSTOMIZED] = false }
     suspend fun setPluginEnabled(id: String, enabled: Boolean) = store.edit { p ->
         val cur = p[DISABLED_PLUGINS] ?: emptySet()
         p[DISABLED_PLUGINS] = if (enabled) cur - id else cur + id
@@ -58,6 +62,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
     /** 长按拖拽松手后一次保存完整顺序；缺失、重复或未知的 Tab 仍按原规则归一化。 */
     suspend fun setTabOrder(order: List<String>) = store.edit { p ->
         p[TAB_ORDER] = effectiveTabOrder(order).joinToString(",")
+        p[TAB_ORDER_CUSTOMIZED] = true
     }
 
     /** 只保存当前账户；删除的 id 去掉，新建或未拖动的账户补齐，沿用原 preference。 */
@@ -76,6 +81,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
             if (index >= 0 && target in order.indices) {
                 order[index] = order[target].also { order[target] = order[index] }
                 p[TAB_ORDER] = order.joinToString(",")
+                p[TAB_ORDER_CUSTOMIZED] = true
             }
         }
     }
@@ -167,9 +173,11 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
         private val DYNAMIC = booleanPreferencesKey("dynamic_color")
         private val DARK = stringPreferencesKey("dark_mode")
         private val FONT = stringPreferencesKey("font_size")
+        private val THEME_CUSTOMIZED = booleanPreferencesKey("theme_customized")
         private val DISABLED_PLUGINS = stringSetPreferencesKey("disabled_plugins")
         private val MONTHLY_BUDGET = longPreferencesKey("monthly_budget_cents")
         private val TAB_ORDER = stringPreferencesKey("tab_order")
+        private val TAB_ORDER_CUSTOMIZED = booleanPreferencesKey("tab_order_customized")
         private val ACCOUNT_ORDER = stringPreferencesKey("account_order")
         private val RETAIN_RECENT = booleanPreferencesKey("retain_recent_task")
         private val CHECKINS = stringSetPreferencesKey("anniversary_checkins")
@@ -179,6 +187,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
         private val TRAVEL_NAME = stringPreferencesKey("travel_name")
         private val LOANS_IMPORTED = booleanPreferencesKey("loan_records_imported_to_room")
         private val LOANS = stringSetPreferencesKey("loan_records")
+        private val SERVER_APPEARANCE = stringPreferencesKey("server_appearance_json")
 
         /** 顺序里补齐缺失的 Tab、去掉多余的，保证 5 个都在。 */
         fun effectiveTabOrder(stored: List<String>): List<String> =
@@ -192,10 +201,12 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
             dynamicColor = p[DYNAMIC] ?: false,
             darkMode = DarkMode.entries.firstOrNull { it.name == p[DARK] } ?: DarkMode.System,
             fontSize = FontSize.entries.firstOrNull { it.name == p[FONT] } ?: FontSize.Standard,
+            themeCustomized = p[THEME_CUSTOMIZED] ?: listOf(SEED, DYNAMIC, DARK, FONT).any { it in p },
             disabledPlugins = p[DISABLED_PLUGINS] ?: emptySet(),
             monthlyBudgetCents = p[MONTHLY_BUDGET] ?: 0,
             tabOrder = (p[TAB_ORDER]?.split(",")?.filter { it.isNotBlank() } ?: emptyList())
                 .let(::effectiveTabOrder),
+            tabOrderCustomized = p[TAB_ORDER_CUSTOMIZED] ?: (p[TAB_ORDER] != null),
             accountOrder = p[ACCOUNT_ORDER]?.split(",")?.filter { it.isNotBlank() }?.distinct() ?: emptyList(),
             retainRecentTask = p[RETAIN_RECENT] ?: true,
             checkins = p[CHECKINS] ?: emptySet(),
@@ -204,6 +215,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
             travelTargetCents = p[TRAVEL_TARGET] ?: 0,
             travelName = p[TRAVEL_NAME] ?: "",
             loans = p[LOANS] ?: emptySet(),
+            serverAppearanceJson = p[SERVER_APPEARANCE],
         )
     }
 }

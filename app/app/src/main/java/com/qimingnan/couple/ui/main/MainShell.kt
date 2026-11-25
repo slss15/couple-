@@ -34,11 +34,13 @@ import com.qimingnan.couple.ui.me.MeScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.qimingnan.couple.data.settings.AppSettings
 import com.qimingnan.couple.data.settings.TabVisibility
+import com.qimingnan.couple.layout.LayoutResolver
 import com.qimingnan.couple.ui.settings.SettingsScreen
 import com.qimingnan.couple.ui.settings.SettingsViewModel
 
-/** 底部 Tab：聊天已不在 Tab 栏（从「我的」进入），TA 先保留原样，插件各为独立 Tab。 */
+/** 底部 Tab：聊天模块保留，入口默认隐藏；P5 后顺序与显隐由服务端布局下发。 */
 enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: ImageVector, val pluginId: String? = null) {
     Feed("tab_feed", R.string.tab_feed, Icons.Filled.Home),
     Ta("tab_ta", R.string.tab_ta, Icons.Filled.Favorite),
@@ -56,6 +58,8 @@ fun MainShell(
 ) {
     val t = LocalCoupleTokens.current
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
+    val appearance by settingsVm.appearance.collectAsStateWithLifecycle()
+    val layout = appearance.appearance.layout
     var tab by rememberSaveable { mutableStateOf(MainTab.Feed) }
     var showHome by rememberSaveable { mutableStateOf(false) }
     var openLedgerWizard by rememberSaveable { mutableStateOf(false) }
@@ -66,10 +70,11 @@ fun MainShell(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showAnniversary by rememberSaveable { mutableStateOf(false) }
     val allIds = MainTab.entries.map { it.layoutId }
-    val visibleIds = TabVisibility.visible(allIds, settings.hiddenTabs)
-    // 底部 Tab 按设置里保存的顺序排（默认 动态、TA、我的、纪念日、记账）。
-    val orderedIds = com.qimingnan.couple.data.settings.SettingsRepository
-        .effectiveTabOrder(settings.tabOrder)
+    val defaultTabOrder = AppSettings.DEFAULT_TAB_ORDER
+    val orderedIds = LayoutResolver.resolveTabOrder(
+        layout, settings.tabOrder, settings.tabOrderCustomized, allIds, defaultTabOrder,
+    )
+    val visibleIds = TabVisibility.visible(allIds, settings.hiddenTabs).filter { it in orderedIds }
     val visibleTabs = MainTab.entries.filter { item ->
         item.layoutId in visibleIds &&
             (item.pluginId == null || com.qimingnan.couple.data.plugin.PluginRegistry.isEnabled(item.pluginId, settings.disabledPlugins))
@@ -78,8 +83,12 @@ fun MainShell(
     LaunchedEffect(Unit) {
         if (!homeApplied) {
             val initial = settingsVm.initialSettings()
+            val initialOrder = LayoutResolver.resolveTabOrder(
+                layout, initial.tabOrder, initial.tabOrderCustomized, allIds, defaultTabOrder,
+            )
             val initialVisible = MainTab.entries.filter { item ->
                 item.layoutId in TabVisibility.visible(allIds, initial.hiddenTabs) &&
+                    item.layoutId in initialOrder &&
                     (item.pluginId == null || item.pluginId !in initial.disabledPlugins)
             }.map { it.layoutId }
             val destination = com.qimingnan.couple.data.settings.StartupPage.resolve(initial.homeTab, initialVisible)
@@ -94,7 +103,7 @@ fun MainShell(
         }
         return
     }
-    LaunchedEffect(settings.hiddenTabs, settings.disabledPlugins, tab) {
+    LaunchedEffect(settings.hiddenTabs, settings.disabledPlugins, layout, tab) {
         val resolved = TabVisibility.resolveSelected(tab.layoutId, allIds, settings.hiddenTabs)
         val resolvedTab = MainTab.entries.first { it.layoutId == resolved }
         val pluginOk = resolvedTab.pluginId == null ||
@@ -231,9 +240,27 @@ fun MainShell(
         },
     ) { padding ->
         when (tab) {
-            MainTab.Me -> MeScreen(onRescan = onRescan, onOpenKeepAlive = onOpenKeepAlive, onOpenSettings = { showSettings = true }, onOpenChat = { showChat = true }, modifier = Modifier.padding(padding))
-            MainTab.Feed -> FeedScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
-            MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
+            MainTab.Me -> MeScreen(
+                onRescan = onRescan,
+                onOpenKeepAlive = onOpenKeepAlive,
+                onOpenSettings = { showSettings = true },
+                onOpenChat = { showChat = true },
+                sectionOrder = LayoutResolver.visibleIds(
+                    layout, "meSections",
+                    listOf("settings", "profile", "couple", "mqtt", "server", "updates"),
+                ),
+                modifier = Modifier.padding(padding),
+            )
+            MainTab.Feed -> FeedScreen(
+                vm = hiltViewModel(),
+                showAnniversaryCard = LayoutResolver.isVisible(layout, "feedHeader", "plugin:anniversary"),
+                modifier = Modifier.padding(padding),
+            )
+            MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(
+                vm = hiltViewModel(),
+                cardOrder = LayoutResolver.visibleIds(layout, "taCards", listOf("partner_card", "anniversary", "days")),
+                modifier = Modifier.padding(padding),
+            )
             MainTab.Anniversary -> {
                 com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
                     anniversaryVm = hiltViewModel(),

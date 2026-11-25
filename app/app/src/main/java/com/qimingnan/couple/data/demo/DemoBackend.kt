@@ -16,6 +16,7 @@ import com.qimingnan.couple.data.net.ScheduleCalc
 import com.qimingnan.couple.data.net.ScheduledList
 import com.qimingnan.couple.data.net.ScheduledMessage
 import com.qimingnan.couple.data.net.TokenPair
+import com.qimingnan.couple.layout.AppAppearance
 import com.qimingnan.couple.data.net.User
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -403,6 +404,7 @@ object DemoBackend {
                 val list = posts.sortedByDescending { it.createdAt }.joinToString(",") { postJson(it) }
                 200 to """{"posts":[$list],"hasMore":false}"""
             }
+            "GET app/appearance" -> ok(AppAppearance.serializer(), AppAppearance())
             "GET app/update" -> 200 to NO_UPDATE
             "POST app/health-report" -> 204 to ""
             "GET ta/summary" -> {

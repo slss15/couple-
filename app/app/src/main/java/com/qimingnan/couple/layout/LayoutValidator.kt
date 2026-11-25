@@ -11,7 +11,7 @@ sealed interface LayoutValidation {
 }
 
 /**
- * 布局校验器（P0 stub，规则见 [LayoutRules]）：
+ * 布局校验器（P5，规则见 [LayoutRules]）：
  * - schema 版本、区 id、条目 id 格式
  * - 区不重复、条目全局不重复、区内 order 非负且不重复
  * - 区容量上限与网格宽度（S/M/L 占 1/2/4 格）

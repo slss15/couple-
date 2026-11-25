@@ -23,7 +23,7 @@ class LayoutValidatorTest {
     }
 
     @Test fun lockedIdsMatchPlan() {
-        assertEquals(setOf("send", "back", "hangup", "sharing_indicator", "privacy_toggle", "me_entry"), LayoutRules.LOCKED_IDS)
+        assertEquals(setOf("back", "sharing_indicator", "privacy_toggle", "me_entry"), LayoutRules.LOCKED_IDS)
     }
 
     @Test fun lockedItemCannotBeHidden() {
@@ -32,7 +32,7 @@ class LayoutValidatorTest {
     }
 
     @Test fun lockedItemCannotBeRemoved() {
-        val spec = LayoutRules.DEFAULT.mapZone("chatToolbar") { items -> items.filterNot { it.id == "send" } }
+        val spec = LayoutRules.DEFAULT.mapZone("topBar") { items -> items.filterNot { it.id == "back" } }
         assertEquals(listOf("LOCKED_MISSING"), codes(spec))
     }
 
@@ -43,13 +43,13 @@ class LayoutValidatorTest {
         assertTrue(codes(moved).contains("LOCKED_MOVED"))
 
         val reordered = LayoutRules.DEFAULT.mapZone("bottomBar") { items ->
-            items.map { when (it.id) { "me_entry" -> it.copy(order = 0); "tab_chat" -> it.copy(order = 3); else -> it } }
+            items.map { when (it.id) { "me_entry" -> it.copy(order = 0); "tab_feed" -> it.copy(order = 3); else -> it } }
         }
         assertEquals(listOf("LOCKED_MOVED"), codes(reordered))
     }
 
     @Test fun duplicateOrderAndItemDetected() {
-        val spec = LayoutRules.DEFAULT.mapZone("bottomBar") { items -> items + LayoutItem("tab_chat", 1) }
+        val spec = LayoutRules.DEFAULT.mapZone("bottomBar") { items -> items + LayoutItem("tab_feed", 1) }
         val c = codes(spec)
         assertTrue(c.contains("DUPLICATE_ORDER"))
         assertTrue(c.contains("DUPLICATE_ITEM"))
@@ -61,7 +61,7 @@ class LayoutValidatorTest {
         val tooWide = LayoutRules.DEFAULT.mapZone("bottomBar") { items -> items + LayoutItem("big", 4, size = ItemSize.L) }
         assertTrue(codes(tooWide).contains("ZONE_OVER_WIDTH"))
         // 隐藏的条目不占网格宽度
-        val hidden = LayoutRules.DEFAULT.mapZone("bottomBar") { items -> items + LayoutItem("big", 4, visible = false, size = ItemSize.L) }
+        val hidden = LayoutRules.DEFAULT.mapZone("feedHeader") { items -> items + LayoutItem("big", 99, visible = false, size = ItemSize.L) }
         assertTrue(LayoutValidator.validate(hidden) is LayoutValidation.Valid)
     }
 

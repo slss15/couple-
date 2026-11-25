@@ -17,17 +17,21 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.qimingnan.couple.theme.CoupleTheme
 import com.qimingnan.couple.ui.CoupleRoot
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.data.settings.SettingsRepository
+import com.qimingnan.couple.layout.AppearanceRepository
+import com.qimingnan.couple.layout.withServerAppearance
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     @Inject lateinit var settingsRepo: SettingsRepository
+    @Inject lateinit var appearanceRepo: AppearanceRepository
     @Inject lateinit var keepAliveController: KeepAliveController
     private var deepLink by mutableStateOf<String?>(null)
 
@@ -52,7 +56,9 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val settings by settingsRepo.settings.collectAsStateWithLifecycle()
-            CoupleTheme(settings) {
+            val appearance by appearanceRepo.state.collectAsStateWithLifecycle()
+            val effectiveSettings = remember(settings, appearance) { settings.withServerAppearance(appearance) }
+            CoupleTheme(effectiveSettings) {
                 CoupleRoot(deepLinkUri = deepLink, onDeepLinkConsumed = { deepLink = null })
             }
         }

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { Brush, DataLine, Document, Grid, Monitor, Odometer, Setting, Connection, Iphone, Upload } from '@element-plus/icons-vue'
+import { Brush, Document, Monitor, Odometer, Setting, Connection, Iphone, Upload } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -13,10 +13,7 @@ const active = computed(() => route.path)
 
 /** 后续阶段的入口，P0 仅占位且禁用 */
 const upcoming = [
-  { key: 'theme', label: '主题', icon: Brush, phase: 'P1 主题 token / P5 编辑器' },
-  { key: 'layout', label: '布局', icon: Grid, phase: 'P5' },
-  { key: 'plugins', label: '插件', icon: Connection, phase: 'P2 / P5' },
-  { key: 'calls', label: '通话统计', icon: DataLine, phase: 'P4' },
+  { key: 'plugins', label: '插件', icon: Connection, phase: 'P2' },
 ]
 
 async function onLogout() {
@@ -33,6 +30,7 @@ async function onLogout() {
       <el-menu :default-active="active" router class="menu">
         <el-menu-item index="/dashboard"><el-icon><Odometer /></el-icon><span>仪表盘</span></el-menu-item>
         <el-menu-item index="/config"><el-icon><Setting /></el-icon><span>服务器配置</span></el-menu-item>
+        <el-menu-item index="/appearance"><el-icon><Brush /></el-icon><span>主题与布局</span></el-menu-item>
         <el-menu-item index="/releases"><el-icon><Upload /></el-icon><span>版本发布</span></el-menu-item>
         <el-menu-item index="/devices"><el-icon><Monitor /></el-icon><span>设备</span></el-menu-item>
         <el-menu-item index="/bootstrap"><el-icon><Iphone /></el-icon><span>引导二维码</span></el-menu-item>
