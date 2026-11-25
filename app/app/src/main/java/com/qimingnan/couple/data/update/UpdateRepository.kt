@@ -78,6 +78,21 @@ data class UpdateState(
     val showDialog: Boolean get() = available != null && (force || dismissedVersionCode != available.versionCode)
 }
 
+/** Server result of GET /app/update. */
+internal sealed interface ServerOutcome {
+    val message: String
+
+    /** ApiResult.Ok: definitive result (including "up to date"), use it directly. */
+    data class Definitive(override val message: String) : ServerOutcome
+
+    /** ApiResult.Err: server path failed, let GitHub take over. */
+    data class Fallback(override val message: String) : ServerOutcome
+}
+
+/** runCatching returns Result<ServerOutcome>; unwrap it before branching on Definitive/Fallback. */
+internal fun unwrapServerOutcome(result: Result<ServerOutcome>): ServerOutcome =
+    result.getOrElse { ServerOutcome.Fallback("服务器检查异常：${it.message ?: it.javaClass.simpleName}") }
+
 /**
  * App self-update: checks GET /app/update (on start, at most every 6 h, or manually), downloads the APK through
  * [UpdateDownloadWorker] and installs it with [ApkInstaller]. The last response is cached so a forced update keeps
@@ -205,7 +220,7 @@ class UpdateRepository @Inject constructor(
             val githubDeferred = scope.async {
                 runCatching { checkGithub(current0, manual) }.getOrElse { GithubResult.Failed("GitHub 检查异常") }
             }
-            val server = serverDeferred.await()
+            val server = unwrapServerOutcome(serverDeferred.await())
             if (server is ServerOutcome.Definitive) {
                 githubDeferred.cancel()
                 return server.message
@@ -217,21 +232,10 @@ class UpdateRepository @Inject constructor(
                     "发现新版本 ${github.info.versionName}"
                 }
                 GithubResult.UpToDate -> "已是最新版本"
-                is GithubResult.Failed ->
-                    (server as? ServerOutcome.Fallback)?.message ?: github.message
+                is GithubResult.Failed -> server.message
             }
         }
         checkServer(current0, manual).message
-    }
-
-    private sealed interface ServerOutcome {
-        val message: String
-
-        /** ApiResult.Ok：结果确定（含「已是最新版本」），直接采用。 */
-        data class Definitive(override val message: String) : ServerOutcome
-
-        /** ApiResult.Err：服务器路径失败，让位给 GitHub 直连结果。 */
-        data class Fallback(override val message: String) : ServerOutcome
     }
 
     /** 服务器路径：GET /app/update（附带设备上报与伴侣协议信息）。 */

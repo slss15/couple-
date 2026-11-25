@@ -110,6 +110,7 @@ fun LedgerScreen(
     showBack: Boolean = true,
     subTab: LedgerSubTab = LedgerSubTab.Record,
     autoOpenWizard: Boolean = false,
+    onWizardDismissed: () -> Unit = {},
 ) {
     val t = LocalCoupleTokens.current
     val scrollState = rememberScrollState()
@@ -167,16 +168,40 @@ fun LedgerScreen(
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
             Text("记账", style = t.typography.headline, color = t.colors.onSurface)
             Spacer(Modifier.weight(1f))
-            if (subTab == LedgerSubTab.Record) Button(onClick = { showQuick = !showQuick }) { Text(if (showQuick) "收起" else "立即记账") }
+            if (subTab == LedgerSubTab.Record) Button(onClick = {
+                showQuick = !showQuick
+                if (!showQuick) onWizardDismissed()
+            }) { Text(if (showQuick) "收起" else "立即记账") }
         }
         Column(
             Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
         ) {
             operationError?.let { Text(it, color = t.colors.error) }
+            if (subTab == LedgerSubTab.Record && !showQuick) {
+                Surface(
+                    onClick = { showQuick = true },
+                    color = t.colors.surfaceContainer,
+                    shape = t.shapes.medium,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(t.spacing.md),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
+                    ) {
+                        Icon(Icons.Filled.AddCircle, contentDescription = null, tint = t.colors.primary)
+                        Column(Modifier.weight(1f)) {
+                            Text("快速记账", style = t.typography.title, color = t.colors.onSurface)
+                            Text("双击底部「记账」开始，或点这里", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                        }
+                        Text("→", style = t.typography.title, color = t.colors.primary)
+                    }
+                }
+            }
             when (subTab) {
                 LedgerSubTab.Record -> {
-                    if (showQuick) LedgerEntryWizard(vm, orderedAccounts, entries, onDismiss = { showQuick = false })
+                    if (showQuick) LedgerEntryWizard(vm, orderedAccounts, entries, onDismiss = { showQuick = false; onWizardDismissed() })
                     // 本月一眼：结余大字 + 收入/支出两个小格（单人，不分摊）。
                     SectionCard("本月 · ${month.year}年${month.monthValue}月") {
                         Text("结余 ${centsText(totals.netCents)}", style = t.typography.headline, color = t.colors.primary)

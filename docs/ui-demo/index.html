@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f4eee4" />
+  <title>Couple — UI/UX Demo</title>
+  <style>
+    :root {
+      --cream-50:#fffaf2; --cream-100:#f4eee4; --ink-900:#2c2723; --ink-600:#756b61; --ink-400:#a59a8e;
+      --terracotta-500:#d66c4f; --terracotta-600:#b94f35; --terracotta-100:#f3d7c9;
+      --sage-500:#708a73; --sage-100:#dce7db;
+      --color-bg:var(--cream-100); --color-surface:var(--cream-50); --color-ink:var(--ink-900); --color-muted:var(--ink-600); --color-faint:var(--ink-400);
+      --color-accent:var(--terracotta-500); --color-accent-deep:var(--terracotta-600); --color-accent-soft:var(--terracotta-100);
+      --color-success:var(--sage-500); --color-success-soft:var(--sage-100);
+      --color-line:rgba(44,39,35,.11); --color-line-strong:rgba(44,39,35,.18); --color-overlay:rgba(33,27,23,.46);
+      --color-nav:rgba(255,250,242,.88); --shadow-phone:0 42px 110px rgba(76,55,38,.24),0 2px 0 rgba(255,255,255,.65) inset;
+      --shadow-nav:0 14px 38px rgba(76,55,38,.14); --shadow-sheet:0 -20px 60px rgba(44,39,35,.18);
+      --radius-sm:10px; --radius-md:16px; --radius-lg:24px; --radius-xl:32px;
+      --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px;
+      --nav-height:68px; --phone-width:390px; --phone-height:844px;
+      --font-ui:"Inter","PingFang SC","Microsoft YaHei",system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+      --font-display:Georgia,"Songti SC","Noto Serif SC",serif; --ease-out:cubic-bezier(.2,.8,.2,1);
+    }
+    :root[data-theme="dark"] {
+      --color-bg:#1c1916; --color-surface:#26211d; --color-ink:#f8f0e6; --color-muted:#bcae9f; --color-faint:#8c7f72;
+      --color-accent:#e58a6c; --color-accent-deep:#f2a083; --color-accent-soft:#3c2a24;
+      --color-success:#9eb59d; --color-success-soft:#253328;
+      --color-line:rgba(248,240,230,.12); --color-line-strong:rgba(248,240,230,.2); --color-overlay:rgba(0,0,0,.62);
+      --color-nav:rgba(38,33,29,.9); --shadow-phone:0 42px 110px rgba(0,0,0,.5),0 2px 0 rgba(255,255,255,.05) inset;
+      --shadow-nav:0 14px 38px rgba(0,0,0,.32); --shadow-sheet:0 -20px 60px rgba(0,0,0,.4);
+    }
+    *{box-sizing:border-box} html{background:#e8dfd2}
+    body{margin:0;min-height:100svh;color:var(--color-ink);font-family:var(--font-ui);-webkit-font-smoothing:antialiased;background:radial-gradient(circle at 12% 8%,rgba(255,250,242,.9),transparent 34%),radial-gradient(circle at 82% 18%,rgba(214,108,79,.12),transparent 28%),#e8dfd2}
+    body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.14;z-index:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E")}
+    button{font:inherit;color:inherit} button:focus-visible{outline:2px solid var(--color-accent);outline-offset:3px}
+    .stage{position:relative;z-index:1;width:min(1180px,calc(100% - 48px));min-height:100svh;margin:0 auto;padding:48px 0;display:grid;grid-template-columns:minmax(300px,.9fr) minmax(390px,1.1fr);align-items:center;gap:clamp(48px,8vw,118px)}
+    .intro{max-width:440px}.brand{display:flex;align-items:center;gap:10px;margin-bottom:clamp(42px,8vh,86px);font-size:15px;font-weight:650;letter-spacing:-.02em}
+    .brand-mark{width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--color-ink);border-radius:50%;font-family:var(--font-display);font-size:15px;font-style:italic;font-weight:700}
+    .brand-meta{margin-left:auto;color:var(--color-muted);font-size:9px;letter-spacing:.16em;text-transform:uppercase}
+    .kicker{margin:0 0 14px;color:var(--color-accent-deep);font-size:10px;font-weight:750;letter-spacing:.2em;text-transform:uppercase}
+    h1{margin:0;max-width:390px;font-size:clamp(48px,6.6vw,84px);line-height:.94;letter-spacing:-.065em;font-weight:700}
+    h1 em{display:block;color:var(--color-accent);font-family:var(--font-display);font-size:.91em;font-weight:400;letter-spacing:-.07em}
+    .lede{max-width:360px;margin:26px 0 0;color:var(--color-muted);font-size:15px;line-height:1.75}
+    .metrics{display:flex;gap:26px;margin-top:36px;padding-top:20px;border-top:1px solid var(--color-line-strong)}
+    .metric strong{display:block;color:var(--color-ink);font-family:var(--font-display);font-size:27px;font-weight:400;line-height:1}
+    .metric span{display:block;margin-top:7px;color:var(--color-muted);font-size:10px;letter-spacing:.08em}
+    .intro-actions{display:flex;align-items:center;gap:14px;margin-top:34px}
+    .theme-toggle{min-height:42px;padding:0 15px;border:1px solid var(--color-line-strong);border-radius:999px;background:transparent;cursor:pointer;transition:background .2s,transform .2s}
+    .theme-toggle:hover{background:var(--color-surface);transform:translateY(-1px)}.hint{color:var(--color-muted);font-size:11px;line-height:1.5}
+    .phone-shell{position:relative;justify-self:center;animation:phone-in .9s var(--ease-out) both}
+    .phone-shell::after{content:"UI / UX 01";position:absolute;right:-18px;bottom:44px;color:rgba(44,39,35,.36);font-size:9px;letter-spacing:.2em;writing-mode:vertical-rl}
+    .phone{position:relative;width:var(--phone-width);height:min(var(--phone-height),calc(100svh - 48px));min-height:620px;overflow:hidden;border:7px solid #211d1a;border-radius:48px;background:var(--color-bg);box-shadow:var(--shadow-phone);isolation:isolate;transition:background .3s,border-color .3s}
+    .phone::before{content:"";position:absolute;top:9px;left:50%;z-index:40;width:86px;height:23px;transform:translateX(-50%);border-radius:999px;background:#171411}
+    .statusbar{position:relative;z-index:30;height:48px;padding:12px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;font-weight:750;letter-spacing:.02em}
+    .status-icons{display:flex;align-items:center;gap:5px;opacity:.85}.status-icons svg{width:13px;height:13px}
+    .app{position:relative;height:calc(100% - 48px)}.screen-stack{position:relative;height:100%;overflow:hidden}
+    .screen{position:absolute;inset:0;display:none;overflow-y:auto;padding:4px 20px 112px;scrollbar-width:none}.screen::-webkit-scrollbar{display:none}
+    .screen.active{display:block;animation:screen-in .34s var(--ease-out) both}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0 20px}
+    .eyebrow{margin:0 0 7px;color:var(--color-muted);font-size:9px;font-weight:750;letter-spacing:.15em;text-transform:uppercase}
+    .page-title{margin:0;font-size:25px;line-height:1.15;letter-spacing:-.045em;font-weight:700}
+    .avatar{width:42px;height:42px;flex:0 0 auto;display:grid;place-items:center;border:1px solid rgba(44,39,35,.08);border-radius:50%;background:var(--color-accent-soft);color:var(--color-accent-deep);font-family:var(--font-display);font-size:18px;font-style:italic}
+    .icon-button{width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--color-line);border-radius:50%;background:var(--color-surface);cursor:pointer}.icon-button svg{width:18px;height:18px}
+    .hero{position:relative;height:254px;overflow:hidden;border-radius:var(--radius-xl);background:#b78169;color:var(--cream-50);isolation:isolate}
+    .hero-art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scale(1.03);transition:transform 1.2s var(--ease-out)}.hero:hover .hero-art{transform:scale(1.07)}
+    .hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(28,20,17,.02) 18%,rgba(28,20,17,.74) 100%)}
+    .hero-content{position:absolute;inset:auto 18px 17px;z-index:2}.hero-kicker{margin:0 0 4px;color:rgba(255,250,242,.72);font-size:10px;font-weight:650;letter-spacing:.14em}
+    .hero-number{margin:0;font-family:var(--font-display);font-size:66px;font-weight:400;line-height:.88;letter-spacing:-.08em}.hero-number small{margin-left:5px;font-family:var(--font-ui);font-size:13px;font-weight:500;letter-spacing:0}
+    .hero-caption{margin:10px 0 0;color:rgba(255,250,242,.78);font-size:11px}
+    .presence{position:absolute;top:14px;right:14px;z-index:3;display:flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid rgba(255,250,242,.2);border-radius:999px;background:rgba(28,20,17,.2);color:rgba(255,250,242,.9);font-size:10px;backdrop-filter:blur(12px)}
+    .dot{width:6px;height:6px;flex:0 0 auto;border-radius:50%;background:#a9c8a1;box-shadow:0 0 0 3px rgba(169,200,161,.16)}
+    .quick-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:18px 0 2px}.quick-item{display:flex;flex-direction:column;align-items:center;gap:7px;min-height:66px;padding:7px 4px;border:0;background:transparent;color:var(--color-muted);cursor:pointer}
+    .quick-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:var(--color-surface);color:var(--color-accent-deep);box-shadow:0 0 0 1px var(--color-line)}.quick-icon svg{width:16px;height:16px}.quick-item span:last-child{font-size:10px}
+    .record-cta{width:100%;min-height:72px;display:flex;align-items:center;gap:13px;margin-top:9px;padding:14px 15px;border:0;border-radius:var(--radius-lg);background:var(--color-accent);color:#fffaf2;text-align:left;cursor:pointer;box-shadow:0 12px 28px rgba(185,79,53,.22);transition:transform .2s,box-shadow .2s}
+    .record-cta:hover{transform:translateY(-2px);box-shadow:0 16px 32px rgba(185,79,53,.28)}.record-plus{width:38px;height:38px;display:grid;place-items:center;flex:0 0 auto;border:1px solid rgba(255,250,242,.35);border-radius:50%}.record-plus svg{width:17px;height:17px}
+    .record-copy{flex:1}.record-copy strong{display:block;font-size:14px;font-weight:700}.record-copy small{display:block;margin-top:3px;color:rgba(255,250,242,.68);font-size:10px}.record-arrow{font-size:20px;font-weight:300;opacity:.8}
+    .section{margin-top:27px}.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:8px}.section-head h3{margin:0;font-size:13px;font-weight:700;letter-spacing:-.01em}.text-button{padding:4px 0;border:0;background:transparent;color:var(--color-accent-deep);font-size:10px;cursor:pointer}
+    .anniversary-line{display:flex;align-items:center;gap:13px;padding:13px 0;border-top:1px solid var(--color-line);border-bottom:1px solid var(--color-line)}
+    .date-badge{width:46px;height:52px;flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:14px;background:var(--color-accent-soft);color:var(--color-accent-deep)}
+    .date-badge strong{font-family:var(--font-display);font-size:20px;font-weight:400;line-height:1}.date-badge span{margin-top:2px;font-size:8px;letter-spacing:.12em}
+    .anniversary-copy{min-width:0;flex:1}.anniversary-copy strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.anniversary-copy span{display:block;margin-top:4px;color:var(--color-muted);font-size:10px}
+    .countdown{color:var(--color-accent-deep);font-family:var(--font-display);font-size:22px;white-space:nowrap}.countdown small{font-family:var(--font-ui);font-size:9px}
+    .month-grid{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px;padding:15px 0 12px;border-top:1px solid var(--color-line)}
+    .month-cell span{display:block;color:var(--color-muted);font-size:9px}.month-cell strong{display:block;margin-top:7px;font-family:var(--font-display);font-size:21px;font-weight:400;letter-spacing:-.04em;white-space:nowrap}.month-cell:first-child strong{color:var(--color-accent-deep);font-size:27px}.month-cell em{margin-left:2px;font-family:var(--font-ui);font-size:9px;font-style:normal;color:var(--color-muted)}
+    .memory-row{display:flex;align-items:center;gap:13px;padding-top:13px;border-top:1px solid var(--color-line)}.memory-thumb{width:82px;height:66px;flex:0 0 auto;overflow:hidden;border-radius:15px;background:var(--color-surface)}.memory-thumb svg{width:100%;height:100%;display:block}
+    .memory-copy{flex:1;min-width:0}.memory-copy strong{display:block;font-size:12px}.memory-copy span{display:block;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-muted);font-size:10px}.chevron{color:var(--color-faint);font-size:20px;font-weight:300}
+    @keyframes phone-in{from{opacity:0;transform:translateY(22px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes screen-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes panel-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+  </style>
+<style>
+  .date-divider{display:flex;align-items:center;gap:10px;margin:5px 0 12px;color:var(--color-muted);font-size:9px;letter-spacing:.08em}.date-divider::after{content:"";height:1px;flex:1;background:var(--color-line)}
+  .post{padding:0 0 20px;border-bottom:1px solid var(--color-line);margin-bottom:20px}.post-head{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+  .mini-avatar{width:30px;height:30px;display:grid;place-items:center;border-radius:50%;background:var(--color-success-soft);color:var(--color-success);font-family:var(--font-display);font-size:13px;font-style:italic}
+  .post-name{flex:1}.post-name strong{display:block;font-size:11px}.post-name span{display:block;margin-top:2px;color:var(--color-muted);font-size:9px}
+  .post-body{margin:0 0 12px;font-size:13px;line-height:1.7}.post-media{height:218px;overflow:hidden;border-radius:22px;background:#d9c2a9}.post-media svg{width:100%;height:100%;display:block}
+  .post-actions{display:flex;align-items:center;gap:18px;margin-top:11px;color:var(--color-muted);font-size:10px}.post-action{display:flex;align-items:center;gap:5px;padding:4px 0;border:0;background:transparent;color:inherit;cursor:pointer}.post-action svg{width:14px;height:14px}.post-action.liked{color:var(--color-accent-deep)}
+  .segmented{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;margin:2px 0 23px;border-radius:15px;background:var(--color-surface);box-shadow:0 0 0 1px var(--color-line)}
+  .segment{min-height:36px;border:0;border-radius:11px;background:transparent;color:var(--color-muted);font-size:11px;cursor:pointer;transition:background .2s,color .2s}.segment.active{background:var(--color-accent-soft);color:var(--color-accent-deep);box-shadow:0 1px 3px rgba(44,39,35,.06)}
+  .ledger-tip{width:100%;display:flex;align-items:center;gap:10px;margin:-11px 0 20px;padding:10px 12px;border:1px solid var(--color-line);border-radius:14px;background:var(--color-surface);text-align:left;cursor:pointer;transition:border-color .2s,transform .2s}.ledger-tip:hover{border-color:var(--color-accent);transform:translateY(-1px)}.ledger-tip-icon{width:28px;height:28px;display:grid;place-items:center;flex:0 0 auto;border-radius:10px;background:var(--color-accent-soft);color:var(--color-accent-deep);font-size:18px;font-weight:300}.ledger-tip-copy{flex:1}.ledger-tip-copy strong{display:block;font-size:11px}.ledger-tip-copy small{display:block;margin-top:3px;color:var(--color-muted);font-size:9px}.ledger-tip-arrow{color:var(--color-accent-deep);font-size:18px}
+  .ledger-panel{display:none;animation:panel-in .25s var(--ease-out) both}.ledger-panel.active{display:block}.balance-label{margin:0;color:var(--color-muted);font-size:10px}.balance-value{margin:7px 0 0;font-family:var(--font-display);font-size:45px;font-weight:400;letter-spacing:-.07em;line-height:1}.balance-value small{font-family:var(--font-ui);font-size:12px;letter-spacing:0;color:var(--color-muted)}
+  .balance-sub{display:flex;gap:22px;margin-top:14px;color:var(--color-muted);font-size:10px}.balance-sub strong{margin-left:5px;color:var(--color-ink);font-weight:600}
+  .chart{display:flex;align-items:flex-end;gap:9px;height:128px;margin-top:25px;padding:0 2px;border-bottom:1px solid var(--color-line)}.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px;height:100%}.bar{width:100%;max-width:22px;border-radius:7px 7px 2px 2px;background:var(--color-accent-soft)}.bar.highlight{background:var(--color-accent)}.bar-label{color:var(--color-faint);font-size:8px}
+  .transaction{display:flex;align-items:center;gap:11px;padding:13px 0;border-bottom:1px solid var(--color-line)}.transaction-icon{width:32px;height:32px;display:grid;place-items:center;border-radius:11px;background:var(--color-surface);color:var(--color-accent-deep);font-size:11px}.transaction-copy{flex:1;min-width:0}.transaction-copy strong{display:block;font-size:11px}.transaction-copy span{display:block;margin-top:3px;color:var(--color-muted);font-size:9px}.transaction-amount{font-size:11px;font-weight:650;white-space:nowrap}.transaction-amount.income{color:var(--color-success)}
+  .form-block{margin-top:18px}.form-label{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;color:var(--color-muted);font-size:10px}.form-label span{color:var(--color-accent-deep)}.form-input{width:100%;min-height:48px;padding:0 14px;border:1px solid var(--color-line);border-radius:14px;background:var(--color-surface);color:var(--color-ink);font-size:12px;outline:0}.form-input:focus{border-color:var(--color-accent);box-shadow:0 0 0 3px var(--color-accent-soft)}
+  .chip-row{display:flex;flex-wrap:wrap;gap:7px}.chip{min-height:34px;padding:0 12px;border:1px solid var(--color-line);border-radius:999px;background:transparent;color:var(--color-muted);font-size:10px;cursor:pointer}.chip.active{border-color:var(--color-accent);background:var(--color-accent-soft);color:var(--color-accent-deep)}
+  .primary-button{width:100%;min-height:50px;margin-top:20px;border:0;border-radius:15px;background:var(--color-accent);color:#fffaf2;font-size:12px;font-weight:700;cursor:pointer;transition:transform .2s}.primary-button:hover{transform:translateY(-1px)}.primary-button:active{transform:translateY(0)}
+  .account-row{display:flex;align-items:center;gap:11px;padding:14px 0;border-bottom:1px solid var(--color-line)}.account-mark{width:34px;height:34px;display:grid;place-items:center;border-radius:12px;background:var(--color-success-soft);color:var(--color-success);font-size:11px}.account-copy{flex:1}.account-copy strong{display:block;font-size:11px}.account-copy span{display:block;margin-top:3px;color:var(--color-muted);font-size:9px}.account-balance{font-family:var(--font-display);font-size:16px}
+  .profile-head{display:flex;align-items:center;gap:13px;padding:9px 0 23px}.profile-avatar{width:58px;height:58px;display:grid;place-items:center;border-radius:50%;background:var(--color-accent-soft);color:var(--color-accent-deep);font-family:var(--font-display);font-size:24px;font-style:italic}.profile-head h2{margin:0;font-size:20px;letter-spacing:-.04em}.profile-head p{margin:5px 0 0;color:var(--color-muted);font-size:10px}
+  .couple-strip{display:flex;align-items:center;gap:10px;padding:14px 0;border-top:1px solid var(--color-line);border-bottom:1px solid var(--color-line)}.couple-strip strong{font-size:11px}.couple-strip span:last-child{margin-left:auto;color:var(--color-muted);font-family:var(--font-display);font-size:17px}
+  .settings-group{margin-top:24px}.settings-group h3{margin:0 0 7px;color:var(--color-muted);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}.setting-row{display:flex;align-items:center;gap:10px;min-height:49px;border-bottom:1px solid var(--color-line);font-size:11px}.setting-row .row-icon{width:25px;height:25px;display:grid;place-items:center;border-radius:8px;background:var(--color-surface);color:var(--color-accent-deep)}.setting-row .row-icon svg{width:13px;height:13px}.setting-row .row-copy{flex:1}.setting-row .row-copy small{display:block;margin-top:3px;color:var(--color-muted);font-size:9px}.setting-row .row-value{color:var(--color-muted);font-size:10px}.setting-row .row-value.accent{color:var(--color-accent-deep)}
+  .accordion-trigger{width:100%;border:0;background:transparent;text-align:left;cursor:pointer}.accordion-body{display:none;padding:0 0 10px 35px;color:var(--color-muted);font-size:9px;line-height:1.8}.accordion-body.open{display:block;animation:panel-in .2s ease both}.danger-row{color:var(--color-accent-deep)}.danger-row .row-icon{background:var(--color-accent-soft);color:var(--color-accent-deep)}
+  .bottom-nav{position:absolute;left:16px;right:16px;bottom:14px;z-index:25;height:var(--nav-height);display:grid;grid-template-columns:repeat(4,1fr);align-items:center;padding:6px;border:1px solid var(--color-line);border-radius:23px;background:var(--color-nav);box-shadow:var(--shadow-nav);backdrop-filter:blur(18px)}
+  .nav-item{min-height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:0;border-radius:17px;background:transparent;color:var(--color-faint);font-size:9px;cursor:pointer;transition:color .2s,background .2s}.nav-item.active{color:var(--color-accent-deep)}.nav-icon-wrap{width:34px;height:25px;display:grid;place-items:center;border-radius:999px;transition:background .2s,transform .2s}.nav-item.active .nav-icon-wrap{background:var(--color-accent-soft);transform:translateY(-1px)}.nav-icon-wrap svg{width:17px;height:17px}
+  .sheet-backdrop{position:absolute;inset:0;z-index:30;display:none;background:var(--color-overlay);opacity:0;transition:opacity .25s}.sheet-backdrop.open{display:block;opacity:1}.sheet{position:absolute;left:0;right:0;bottom:0;z-index:31;max-height:88%;padding:11px 20px calc(20px + env(safe-area-inset-bottom));overflow-y:auto;border-radius:28px 28px 0 0;background:var(--color-surface);box-shadow:var(--shadow-sheet);transform:translateY(105%);transition:transform .36s var(--ease-out)}.sheet.open{transform:translateY(0)}
+  .sheet-handle{width:34px;height:4px;margin:0 auto 14px;border-radius:999px;background:var(--color-line-strong)}.sheet-head{display:flex;align-items:flex-start;justify-content:space-between}.sheet-head h3{margin:0;font-size:20px;letter-spacing:-.04em}.sheet-step-label{margin:4px 0 0;color:var(--color-muted);font-size:9px;letter-spacing:.08em}.sheet-close{width:30px;height:30px;display:grid;place-items:center;border:0;border-radius:50%;background:var(--color-bg);color:var(--color-muted);font-size:18px;cursor:pointer}
+  .sheet-progress{display:flex;gap:5px;margin:13px 0 17px}.sheet-progress span{height:3px;flex:1;border-radius:999px;background:var(--color-line)}.sheet-progress span.active{background:var(--color-accent)}.sheet-step{display:none}.sheet-step.active{display:block;animation:panel-in .2s var(--ease-out) both}
+  .type-switch{display:flex;gap:5px;padding:4px;margin-bottom:12px;border-radius:14px;background:var(--color-bg)}.type-button{flex:1;min-height:34px;border:0;border-radius:10px;background:transparent;color:var(--color-muted);font-size:10px;cursor:pointer}.type-button.active{background:var(--color-surface);color:var(--color-accent-deep);box-shadow:0 1px 3px rgba(44,39,35,.08)}
+  .account-pick{display:flex;align-items:center;gap:9px;padding:10px 11px;border:1px solid var(--color-line);border-radius:14px;background:var(--color-surface);font-size:10px}.account-pick .account-mark{width:27px;height:27px;border-radius:9px;font-size:9px}.account-pick .account-change{margin-left:auto;color:var(--color-accent-deep);font-size:9px}
+  .amount-display{margin:18px 0 12px;font-family:var(--font-display);font-size:46px;letter-spacing:-.06em;line-height:1}.amount-display span{color:var(--color-accent-deep)}
+  .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:14px}.key{min-height:43px;border:1px solid var(--color-line);border-radius:12px;background:var(--color-bg);color:var(--color-ink);font-family:var(--font-display);font-size:20px;cursor:pointer;transition:background .15s,transform .15s}.key:hover{background:var(--color-accent-soft)}.key:active{transform:scale(.97)}.sheet .primary-button{margin-top:14px}
+  .recent-label{margin:2px 0 7px;color:var(--color-muted);font-size:9px;letter-spacing:.1em;text-transform:uppercase}.recent-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:14px}.recent-item{min-height:48px;padding:7px 6px;border:1px solid var(--color-line);border-radius:12px;background:var(--color-bg);text-align:left;font-size:9px;cursor:pointer}.recent-item strong{display:block;color:var(--color-ink);font-size:10px}.recent-item span{display:block;margin-top:3px;color:var(--color-muted);font-size:8px}
+  .category-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}.category-item{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 9px;border:1px solid var(--color-line);border-radius:12px;background:transparent;color:var(--color-muted);font-size:10px;text-align:left;cursor:pointer}.category-glyph{width:27px;height:27px;display:grid;place-items:center;flex:0 0 auto;border-radius:9px;background:var(--color-bg);color:var(--color-muted);font-size:10px}.category-item.active{border-color:var(--color-accent);background:var(--color-accent-soft);color:var(--color-accent-deep)}.category-item.active .category-glyph{background:var(--color-surface);color:var(--color-accent-deep)}
+  .note-input{min-height:78px;padding:12px 14px;resize:none;line-height:1.6}.note-photos{display:flex;flex-wrap:wrap;gap:8px}.photo-add{width:72px;height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:1px dashed var(--color-line-strong);border-radius:14px;background:var(--color-bg);color:var(--color-muted);cursor:pointer}.photo-add span{color:var(--color-accent-deep);font-size:24px;font-weight:300;line-height:1}.photo-add small{font-size:8px}.photo-thumb{position:relative;width:72px;height:72px;overflow:hidden;border-radius:14px;background:var(--color-bg)}.photo-thumb img{width:100%;height:100%;display:block;object-fit:cover}.photo-remove{position:absolute;top:4px;right:4px;width:20px;height:20px;display:grid;place-items:center;border:0;border-radius:50%;background:rgba(28,25,22,.7);color:#fff;font-size:13px;cursor:pointer}.photo-hint{display:block;margin-top:6px;color:var(--color-muted);font-size:8px}.photo-input{display:none}
+  .sheet-footer{display:flex;gap:7px;margin-top:14px}.sheet-footer .primary-button{margin-top:0}.secondary-button{min-height:50px;padding:0 14px;border:1px solid var(--color-line);border-radius:15px;background:transparent;color:var(--color-muted);font-size:11px;cursor:pointer}.secondary-button:hover{background:var(--color-bg)}
+  .summary-card{padding:12px 13px;border:1px solid var(--color-line);border-radius:16px;background:var(--color-bg)}.summary-line{display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:10px}.summary-line span{color:var(--color-muted)}.summary-line strong{font-size:11px;font-weight:600}.summary-line:first-child strong{font-family:var(--font-display);font-size:19px;font-weight:400;color:var(--color-accent-deep)}
+  .toast{position:absolute;left:50%;bottom:102px;z-index:50;padding:9px 14px;border-radius:999px;background:var(--color-ink);color:var(--color-bg);font-size:10px;opacity:0;pointer-events:none;transform:translate(-50%,8px);transition:opacity .2s,transform .2s}.toast.show{opacity:1;transform:translate(-50%,0)}
+  @media(max-width:900px){body{background:var(--color-bg)}.stage{width:100%;min-height:100svh;padding:0;display:block}.intro{display:none}.phone-shell{width:100%;height:100svh;animation:none}.phone-shell::after{display:none}.phone{width:100%;height:100svh;min-height:0;border:0;border-radius:0;box-shadow:none}.phone::before{display:none}.statusbar{padding-top:max(12px,env(safe-area-inset-top))}.bottom-nav{bottom:max(10px,env(safe-area-inset-bottom))}}
+  @media(max-height:760px) and (min-width:901px){.phone{min-height:0}.hero{height:220px}}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body><main class="stage">
+  <section class="intro" aria-label="设计说明">
+    <div class="brand"><span class="brand-mark">c</span><span>couple</span><span class="brand-meta">UI / UX concept</span></div>
+    <p class="kicker">A quieter place for the two of you</p>
+    <h1>把日子，<em>过成我们。</em></h1>
+    <p class="lede">一个围绕关系、纪念日和日常账本的原型。少一点功能堆叠，多一点真正会被打开的理由。</p>
+    <div class="metrics"><div class="metric"><strong>4</strong><span>主 Tab</span></div><div class="metric"><strong>1</strong><span>主视觉 / 屏</span></div><div class="metric"><strong>0</strong><span>嵌套底栏</span></div></div>
+    <div class="intro-actions"><button class="theme-toggle" type="button" data-theme-toggle>切换深色</button><span class="hint">点击底部导航体验<br />点「记一笔」打开底部抽屉</span></div>
+  </section>
+  <div class="phone-shell">
+    <div class="phone" aria-label="Couple App 原型">
+      <div class="statusbar"><span>9:41</span><span class="status-icons" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17v-3M9 17v-6M14 17V8M19 17V5"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9a13 13 0 0 1 18 0M6 12a9 9 0 0 1 12 0M9 15a5 5 0 0 1 6 0M12 18h.01"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4"/></svg></span></div>
+      <div class="app"><div class="screen-stack">
+        <section class="screen active" data-screen="home" aria-label="首页">
+          <header class="topbar"><div><p class="eyebrow">MON, 24 NOV</p><h2 class="page-title">早安，小满</h2></div><div class="avatar" aria-label="小满头像">满</div></header>
+          <div class="hero">
+            <svg class="hero-art" viewBox="0 0 400 280" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c68d73"/><stop offset="1" stop-color="#e9c19c"/></linearGradient><linearGradient id="ground" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9b6c5b"/><stop offset="1" stop-color="#5f4740"/></linearGradient><filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".7" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .08"/></feComponentTransfer></filter></defs><rect width="400" height="280" fill="url(#sky)"/><circle cx="310" cy="72" r="42" fill="#f8d8aa" opacity=".82"/><path d="M0 186c70-24 125 15 202-5 75-20 127 10 198-7v106H0Z" fill="#a9755d" opacity=".8"/><path d="M0 218c72-21 126 18 204-2 76-20 125 17 196-2v66H0Z" fill="url(#ground)"/><g fill="#2e2522" opacity=".9"><circle cx="153" cy="151" r="13"/><path d="M145 168c4-8 12-8 16 0l5 52h-26Z"/><circle cx="198" cy="146" r="14"/><path d="M189 164c5-9 14-9 19 0l6 56h-31Z"/><path d="M160 181c13-10 26-10 38 0" fill="none" stroke="#2e2522" stroke-width="6" stroke-linecap="round"/></g><rect width="400" height="280" filter="url(#grain)" opacity=".7"/></svg>
+            <div class="presence"><span class="dot"></span>阿哲在线</div>
+            <div class="hero-content"><p class="hero-kicker">TOGETHER</p><p class="hero-number">365<small>天</small></p><p class="hero-caption">今天也在一起。</p></div>
+          </div>
+          <div class="quick-row" aria-label="快捷入口">
+            <button class="quick-item" type="button" data-goto="me"><span class="quick-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"/></svg></span><span>TA</span></button>
+            <button class="quick-item" type="button" data-goto="feed"><span class="quick-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01"/></svg></span><span>纪念日</span></button>
+            <button class="quick-item" type="button" data-goto="me"><span class="quick-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3c2.8 0 5 2.3 5 5.2 0 4.7-5 9.8-5 9.8S7 12.9 7 8.2C7 5.3 9.2 3 12 3Z"/><circle cx="12" cy="8.2" r="1.6"/><path d="M5 21h14"/></svg></span><span>经期</span></button>
+          </div>
+          <button class="record-cta" type="button" data-open-sheet><span class="record-plus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span><span class="record-copy"><strong>记一笔</strong><small>金额 → 分类 → 账户</small></span><span class="record-arrow">→</span></button>
+          <section class="section"><div class="section-head"><h3>下一个纪念日</h3><button class="text-button" type="button" data-goto="feed">全部</button></div><div class="anniversary-line"><div class="date-badge"><strong>06</strong><span>DEC</span></div><div class="anniversary-copy"><strong>第一次见面</strong><span>阳历 · 每年</span></div><div class="countdown">12<small> 天</small></div></div></section>
+          <section class="section"><div class="section-head"><h3>本月</h3><button class="text-button" type="button" data-goto="ledger">查看账本</button></div><div class="month-grid"><div class="month-cell"><span>结余</span><strong>¥3,240<em>.00</em></strong></div><div class="month-cell"><span>收入</span><strong>8,600</strong></div><div class="month-cell"><span>支出</span><strong>5,360</strong></div></div></section>
+          <section class="section"><div class="section-head"><h3>最近</h3><button class="text-button" type="button" data-goto="feed">动态</button></div><div class="memory-row"><div class="memory-thumb"><svg viewBox="0 0 120 96" aria-hidden="true"><rect width="120" height="96" fill="#e4cdb9"/><circle cx="92" cy="22" r="14" fill="#f5d8aa"/><path d="M0 67c25-9 41 7 66-2 22-8 39 5 54-1v32H0Z" fill="#b4836b"/><path d="M0 78c28-5 43 7 68 1 20-5 36 3 52 0v17H0Z" fill="#7f5c4d"/><circle cx="49" cy="48" r="5" fill="#332925"/><circle cx="70" cy="46" r="5" fill="#332925"/><path d="M52 58c5-4 12-4 17 0" stroke="#332925" stroke-width="2" stroke-linecap="round" fill="none"/></svg></div><div class="memory-copy"><strong>第一次一起做饭</strong><span>番茄牛腩和一碗没吃完的面</span></div><span class="chevron">›</span></div></section>
+        </section>        <section class="screen" data-screen="feed" aria-label="动态">
+          <header class="topbar"><div><p class="eyebrow">OUR MEMORIES</p><h2 class="page-title">共同回忆</h2></div><button class="icon-button" type="button" aria-label="筛选"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M7 12h10M10 17h4"/></svg></button></header>
+          <div class="date-divider">今天 · 11 月 24 日</div>
+          <article class="post"><div class="post-head"><div class="mini-avatar">哲</div><div class="post-name"><strong>阿哲</strong><span>刚刚 · 一起的第 365 天</span></div><button class="post-action" type="button" aria-label="更多"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></button></div><p class="post-body">下班路上买了你上次说想吃的栗子。冬天好像就是从这一袋开始的。</p><div class="post-media"><svg viewBox="0 0 400 230" preserveAspectRatio="xMidYMid slice" aria-label="桌边的两杯热饮插画"><rect width="400" height="230" fill="#d9c1aa"/><circle cx="315" cy="47" r="34" fill="#f4d6a9" opacity=".7"/><path d="M0 160c60-18 97 5 159-9 76-17 133 9 241-8v87H0Z" fill="#b3846b"/><path d="M0 180c77-10 118 12 183 0 70-13 121 8 217-3v53H0Z" fill="#8e6858"/><rect x="86" y="128" width="74" height="49" rx="12" fill="#f2e7d9"/><path d="M160 139h10c14 0 14 23 0 23h-10" fill="none" stroke="#f2e7d9" stroke-width="8"/><path d="M103 112c-7-10 8-12 1-22M124 112c-7-10 8-12 1-22M145 112c-7-10 8-12 1-22" stroke="#f6efe5" stroke-width="4" stroke-linecap="round" fill="none" opacity=".75"/><rect x="228" y="145" width="60" height="34" rx="8" fill="#b95f47"/><circle cx="258" cy="145" r="5" fill="#f2e7d9"/><path d="M246 140c-5-7 6-9 1-16M263 140c-5-7 6-9 1-16" stroke="#f6efe5" stroke-width="3" stroke-linecap="round" fill="none" opacity=".65"/></svg></div><div class="post-actions"><button class="post-action liked" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.6-9.4-9.1C1.2 8.3 3.2 5 6.7 5c2.1 0 3.6 1.2 4.3 2.3C11.7 6.2 13.2 5 15.3 5c3.5 0 5.5 3.3 4.1 6.9C19.5 16.4 12 21 12 21Z"/></svg>2</button><button class="post-action" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.8-.9L3 21l1.5-4.4A8.4 8.4 0 1 1 21 11.5Z"/></svg>4</button><span style="margin-left:auto">收藏</span></div></article>
+          <div class="date-divider">上周 · 11 月 18 日</div>
+          <article class="post" style="border-bottom:0"><div class="post-head"><div class="mini-avatar" style="background:var(--color-accent-soft);color:var(--color-accent-deep)">满</div><div class="post-name"><strong>小满</strong><span>6 天前 · 纪念日</span></div></div><p class="post-body">把第一次见面的车票夹进了手账。原来已经过去一年了。</p><div class="post-actions"><button class="post-action" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s-7.5-4.6-9.4-9.1C1.2 8.3 3.2 5 6.7 5c2.1 0 3.6 1.2 4.3 2.3C11.7 6.2 13.2 5 15.3 5c3.5 0 5.5 3.3 4.1 6.9C19.5 16.4 12 21 12 21Z"/></svg>3</button><button class="post-action" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.8-.9L3 21l1.5-4.4A8.4 8.4 0 1 1 21 11.5Z"/></svg>1</button></div></article>
+        </section>
+
+        <section class="screen" data-screen="ledger" aria-label="记账">
+          <header class="topbar"><div><p class="eyebrow">NOVEMBER 2026</p><h2 class="page-title">记账</h2></div><button class="icon-button" type="button" aria-label="选择月份"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 10h18"/></svg></button></header>
+          <div class="segmented" role="tablist" aria-label="记账视图"><button class="segment active" type="button" data-ledger="stats">统计</button><button class="segment" type="button" data-ledger="record">记一笔</button><button class="segment" type="button" data-ledger="accounts">账户</button></div><button class="ledger-tip" type="button" data-open-sheet aria-label="快速记账，双击底部记账 Tab 开始"><span class="ledger-tip-icon">+</span><span class="ledger-tip-copy"><strong>快速记账</strong><small>双击底部「记账」开始</small></span><span class="ledger-tip-arrow">→</span></button>
+          <div class="ledger-panel active" data-ledger-panel="stats"><p class="balance-label">本月结余</p><p class="balance-value">¥3,240<small>.00</small></p><div class="balance-sub"><span>收入<strong>¥8,600</strong></span><span>支出<strong>¥5,360</strong></span></div><div class="chart" aria-label="近六个月支出趋势"><div class="bar-wrap"><div class="bar" style="height:36%"></div><span class="bar-label">6月</span></div><div class="bar-wrap"><div class="bar" style="height:54%"></div><span class="bar-label">7月</span></div><div class="bar-wrap"><div class="bar" style="height:42%"></div><span class="bar-label">8月</span></div><div class="bar-wrap"><div class="bar" style="height:71%"></div><span class="bar-label">9月</span></div><div class="bar-wrap"><div class="bar" style="height:58%"></div><span class="bar-label">10月</span></div><div class="bar-wrap"><div class="bar highlight" style="height:84%"></div><span class="bar-label">11月</span></div></div><div class="section"><div class="section-head"><h3>最近账目</h3><button class="text-button" type="button" data-ledger-jump="record">记一笔</button></div><div class="transaction"><div class="transaction-icon">食</div><div class="transaction-copy"><strong>午餐 · 面馆</strong><span>现金 · 今天 12:20</span></div><span class="transaction-amount">-¥42.00</span></div><div class="transaction"><div class="transaction-icon" style="background:var(--color-success-soft);color:var(--color-success)">薪</div><div class="transaction-copy"><strong>工资</strong><span>招商银行 · 11月10日</span></div><span class="transaction-amount income">+¥8,600</span></div><div class="transaction"><div class="transaction-icon">行</div><div class="transaction-copy"><strong>地铁</strong><span>微信 · 11月09日</span></div><span class="transaction-amount">-¥6.00</span></div></div></div>
+          <div class="ledger-panel" data-ledger-panel="record"><p class="balance-label">快速记录</p><p class="balance-value">¥0<small>.00</small></p><div class="form-block"><div class="form-label">分类 <span>支出</span></div><div class="chip-row"><button class="chip active" type="button">餐饮</button><button class="chip" type="button">交通</button><button class="chip" type="button">购物</button><button class="chip" type="button">其他</button></div></div><div class="form-block"><div class="form-label">账户 <span>默认</span></div><input class="form-input" value="微信钱包" readonly /></div><button class="primary-button" type="button" data-open-sheet>继续输入金额</button></div>
+          <div class="ledger-panel" data-ledger-panel="accounts"><p class="balance-label">总资产</p><p class="balance-value">¥18,420<small>.00</small></p><div class="section"><div class="section-head"><h3>账户</h3><button class="text-button" type="button">管理</button></div><div class="account-row"><div class="account-mark">微</div><div class="account-copy"><strong>微信钱包</strong><span>日常支出</span></div><span class="account-balance">¥2,180</span></div><div class="account-row"><div class="account-mark" style="background:var(--color-accent-soft);color:var(--color-accent-deep)">招</div><div class="account-copy"><strong>招商银行</strong><span>储蓄卡</span></div><span class="account-balance">¥16,240</span></div><div class="account-row"><div class="account-mark">现</div><div class="account-copy"><strong>现金</strong><span>零钱</span></div><span class="account-balance">¥0</span></div></div></div>
+        </section>
+
+        <section class="screen" data-screen="me" aria-label="我的">
+          <header class="profile-head"><div class="profile-avatar">满</div><div><h2>小满</h2><p>和阿哲在一起的第 365 天</p></div></header>
+          <div class="couple-strip"><span class="dot"></span><strong>阿哲在线</strong><span>365 天</span></div>
+          <div class="settings-group"><h3>关系</h3><div class="setting-row"><span class="row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"/></svg></span><span class="row-copy">纪念日<small>下一次：12 月 6 日</small></span><span class="row-value accent">12 天</span></div><div class="setting-row"><span class="row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3c2.8 0 5 2.3 5 5.2 0 4.7-5 9.8-5 9.8S7 12.9 7 8.2C7 5.3 9.2 3 12 3Z"/><circle cx="12" cy="8.2" r="1.6"/><path d="M5 21h14"/></svg></span><span class="row-copy">经期记录<small>仅保存在本机</small></span><span class="row-value">›</span></div></div>
+          <div class="settings-group"><h3>偏好</h3><div class="setting-row"><span class="row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span><span class="row-copy">主题与字号<small>奶油 · 跟随系统</small></span><span class="row-value">›</span></div><div class="setting-row"><span class="row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5M8 17h8"/></svg></span><span class="row-copy">底部导航<small>首页 / 动态 / 记账 / 我的</small></span><span class="row-value">›</span></div><div class="setting-row"><span class="row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span><span class="row-copy">提醒<small>纪念日与经期提醒</small></span><span class="row-value accent">开启</span></div></div>
+          <div class="settings-group"><h3>高级</h3><button class="setting-row accordion-trigger" type="button" aria-expanded="false"><span class="row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M7 12h10M10 17h4"/></svg></span><span class="row-copy">诊断信息<small>API、MQTT、公钥指纹</small></span><span class="row-value">⌄</span></button><div class="accordion-body">API · https://couple.example.com<br />MQTT · 已连接<br />公钥指纹 · ab12 cd34 ef56 7890</div><div class="setting-row danger-row"><span class="row-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.8 2.2 18a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/></svg></span><span class="row-copy">解除配对<small>需要对方确认</small></span><span class="row-value">›</span></div></div>
+        </section>
+      </div>
+      <nav class="bottom-nav" aria-label="主导航">
+        <button class="nav-item active" type="button" data-target="home" aria-current="page"><span class="nav-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg></span><span>首页</span></button>
+        <button class="nav-item" type="button" data-target="feed"><span class="nav-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"/></svg></span><span>动态</span></button>
+        <button class="nav-item" type="button" data-target="ledger" aria-label="记账，双击开始记一笔"><span class="nav-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h14v18H5z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg></span><span>记账</span></button>
+        <button class="nav-item" type="button" data-target="me"><span class="nav-icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></span><span>我的</span></button>
+      </nav>
+      <div class="sheet-backdrop" data-sheet-close></div>
+      <aside class="sheet" id="recordSheet" aria-label="记一笔" aria-hidden="true">
+        <div class="sheet-handle"></div>
+        <div class="sheet-head"><div><p class="eyebrow">QUICK ENTRY</p><h3>记一笔</h3><p class="sheet-step-label" id="sheetStepLabel">1 / 3 · 金额</p></div><button class="sheet-close" type="button" data-sheet-close aria-label="关闭">×</button></div>
+        <div class="sheet-progress" aria-hidden="true"><span class="active"></span><span></span><span></span></div>
+
+        <div class="sheet-step active" data-record-step="1">
+          <div class="type-switch"><button class="type-button active" type="button" data-record-type="expense">支出</button><button class="type-button" type="button" data-record-type="income">收入</button></div>
+          <div class="account-pick"><div class="account-mark">微</div><span>微信钱包</span><span class="account-change">更换 ›</span></div>
+          <div class="amount-display">¥<span id="amountValue">0.00</span></div>
+          <div class="keypad" aria-label="金额键盘"><button class="key" type="button" data-key="1">1</button><button class="key" type="button" data-key="2">2</button><button class="key" type="button" data-key="3">3</button><button class="key" type="button" data-key="4">4</button><button class="key" type="button" data-key="5">5</button><button class="key" type="button" data-key="6">6</button><button class="key" type="button" data-key="7">7</button><button class="key" type="button" data-key="8">8</button><button class="key" type="button" data-key="9">9</button><button class="key" type="button" data-key=".">.</button><button class="key" type="button" data-key="0">0</button><button class="key" type="button" data-key="back">⌫</button></div>
+          <button class="primary-button" type="button" data-next-record>下一步：选分类</button>
+        </div>
+
+        <div class="sheet-step" data-record-step="2">
+          <p class="recent-label">最近使用</p>
+          <div class="recent-grid"><button class="recent-item" type="button" data-recent-category="餐饮" data-recent-detail="午餐"><strong>午餐</strong><span>餐饮 · 常用</span></button><button class="recent-item" type="button" data-recent-category="交通" data-recent-detail="地铁"><strong>地铁</strong><span>交通 · 常用</span></button><button class="recent-item" type="button" data-recent-category="购物" data-recent-detail="日用"><strong>日用</strong><span>购物 · 常用</span></button></div>
+          <p class="recent-label">分类</p>
+          <div class="category-grid"><button class="category-item active" type="button" data-category="餐饮"><span class="category-glyph">食</span><span>餐饮</span></button><button class="category-item" type="button" data-category="交通"><span class="category-glyph">行</span><span>交通</span></button><button class="category-item" type="button" data-category="购物"><span class="category-glyph">购</span><span>购物</span></button><button class="category-item" type="button" data-category="居家"><span class="category-glyph">家</span><span>居家</span></button><button class="category-item" type="button" data-category="娱乐"><span class="category-glyph">娱</span><span>娱乐</span></button><button class="category-item" type="button" data-category="其他"><span class="category-glyph">其</span><span>其他</span></button></div>
+          <div class="form-block"><div class="form-label">细分类 <span>可选</span></div><div class="chip-row" id="detailChips"><button class="chip active" type="button" data-detail="午餐">午餐</button><button class="chip" type="button" data-detail="晚餐">晚餐</button><button class="chip" type="button" data-detail="咖啡">咖啡</button><button class="chip" type="button" data-skip-detail>不细分</button></div></div>
+          <div class="sheet-footer"><button class="secondary-button" type="button" data-prev-record>上一步</button><button class="primary-button" type="button" data-next-record>下一步：确认</button></div>
+        </div>
+
+        <div class="sheet-step" data-record-step="3">
+          <div class="summary-card"><div class="summary-line"><span>金额</span><strong id="summaryAmount">¥0.00</strong></div><div class="summary-line"><span>分类</span><strong id="summaryCategory">餐饮 · 午餐</strong></div><div class="summary-line"><span>账户</span><strong>微信钱包</strong></div><div class="summary-line"><span>日期</span><strong>今天</strong></div></div>
+          <div class="form-block"><div class="form-label">备注 <span>选填</span></div><textarea class="form-input note-input" id="noteText" placeholder="例如：和阿哲的午饭"></textarea></div><div class="form-block"><div class="form-label">照片 <span>可选</span></div><div class="note-photos" id="notePhotos"><button class="photo-add" type="button" id="addPhoto"><span>＋</span><small>添加照片</small></button></div><input class="photo-input" id="photoInput" type="file" accept="image/*" multiple /><small class="photo-hint">支持从相册选择，最多 9 张</small></div>
+          <div class="sheet-footer"><button class="secondary-button" type="button" data-prev-record>上一步</button><button class="primary-button" type="button" data-save-record>保存</button></div>
+          <button class="secondary-button" type="button" data-save-next style="width:100%;margin-top:8px">保存并再记一笔</button>
+        </div>
+      </aside>
+      <div class="toast" id="toast">已记一笔</div>
+    </div>
+  </div>
+</main><script>
+  const screens = [...document.querySelectorAll('.screen')];
+  const navItems = [...document.querySelectorAll('.nav-item')];
+  function showScreen(name) {
+    screens.forEach((screen) => screen.classList.toggle('active', screen.dataset.screen === name));
+    navItems.forEach((item) => {
+      const active = item.dataset.target === name;
+      item.classList.toggle('active', active);
+      if (active) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    });
+  }
+  navItems.forEach((item) => {
+    if (item.dataset.target === 'ledger') return;
+    item.addEventListener('click', () => showScreen(item.dataset.target));
+  });
+  document.querySelectorAll('[data-goto]').forEach((item) => item.addEventListener('click', () => showScreen(item.dataset.goto)));
+
+  const ledgerNavItem = document.querySelector('.nav-item[data-target="ledger"]');
+  let ledgerTapTimer = null;
+  ledgerNavItem.addEventListener('click', () => {
+    showScreen('ledger');
+    if (ledgerTapTimer) {
+      window.clearTimeout(ledgerTapTimer);
+      ledgerTapTimer = null;
+      openSheet();
+      return;
+    }
+    ledgerTapTimer = window.setTimeout(() => { ledgerTapTimer = null; }, 320);
+  });
+
+  const ledgerButtons = [...document.querySelectorAll('[data-ledger]')];
+  const ledgerPanels = [...document.querySelectorAll('[data-ledger-panel]')];
+  function showLedger(name) {
+    ledgerButtons.forEach((button) => button.classList.toggle('active', button.dataset.ledger === name));
+    ledgerPanels.forEach((panel) => panel.classList.toggle('active', panel.dataset.ledgerPanel === name));
+  }
+  ledgerButtons.forEach((button) => button.addEventListener('click', () => showLedger(button.dataset.ledger)));
+  document.querySelectorAll('[data-ledger-jump]').forEach((button) => button.addEventListener('click', () => showLedger(button.dataset.ledgerJump)));
+
+  document.addEventListener('click', (event) => {
+    const chip = event.target.closest('.chip');
+    if (!chip) return;
+    chip.parentElement.querySelectorAll('.chip').forEach((item) => item.classList.remove('active'));
+    chip.classList.add('active');
+  });
+
+  const sheet = document.getElementById('recordSheet');
+  const backdrop = document.querySelector('.sheet-backdrop');
+  function openSheet() {
+    resetRecord();
+    backdrop.classList.add('open');
+    sheet.classList.add('open');
+    sheet.setAttribute('aria-hidden', 'false');
+  }
+  function closeSheet() {
+    backdrop.classList.remove('open');
+    sheet.classList.remove('open');
+    sheet.setAttribute('aria-hidden', 'true');
+  }
+  document.querySelectorAll('[data-open-sheet]').forEach((button) => button.addEventListener('click', openSheet));
+  document.querySelectorAll('[data-sheet-close]').forEach((button) => button.addEventListener('click', closeSheet));
+
+  let recordStep = 1;
+  let amount = '0';
+  let recordCategory = '餐饮';
+  let recordDetail = '午餐';
+  const amountValue = document.getElementById('amountValue');
+  const sheetStepLabel = document.getElementById('sheetStepLabel');
+  const summaryAmount = document.getElementById('summaryAmount');
+  const summaryCategory = document.getElementById('summaryCategory');
+  const recordSteps = [...document.querySelectorAll('[data-record-step]')];
+  const recordProgress = [...document.querySelectorAll('.sheet-progress span')];
+  const detailChips = document.getElementById('detailChips');
+  const noteText = document.getElementById('noteText');
+  const notePhotos = document.getElementById('notePhotos');
+  const photoInput = document.getElementById('photoInput');
+  const addPhoto = document.getElementById('addPhoto');
+  const categoryDetails = {
+    '餐饮': ['午餐', '晚餐', '咖啡', '外卖'],
+    '交通': ['地铁', '公交', '打车', '加油'],
+    '购物': ['日用', '服饰', '数码', '礼物'],
+    '居家': ['房租', '水电', '维修', '家居'],
+    '娱乐': ['电影', '游戏', '旅行', '演出'],
+    '其他': ['其他', '临时', '人情'],
+  };
+
+  function formatAmount() {
+    const [whole, decimal] = amount.split('.');
+    return `${whole || '0'}${amount.includes('.') ? '.' + (decimal || '').padEnd(2, '0').slice(0, 2) : '.00'}`;
+  }
+  function renderAmount() {
+    amountValue.textContent = formatAmount();
+    summaryAmount.textContent = `¥${formatAmount()}`;
+  }
+  function updateSummary() {
+    summaryCategory.textContent = recordDetail ? `${recordCategory} · ${recordDetail}` : recordCategory;
+    renderAmount();
+  }
+  function renderDetails(category) {
+    const details = categoryDetails[category] || [];
+    detailChips.innerHTML = details.map((detail, index) => `<button class="chip${index === 0 ? ' active' : ''}" type="button" data-detail="${detail}">${detail}</button>`).join('') + '<button class="chip" type="button" data-skip-detail>不细分</button>';
+    recordDetail = details[0] || '';
+    updateSummary();
+  }
+  function clearPhotos() {
+    notePhotos.querySelectorAll('.photo-thumb').forEach((thumb) => {
+      if (thumb.dataset.url) URL.revokeObjectURL(thumb.dataset.url);
+      thumb.remove();
+    });
+  }
+  function setRecordStep(step) {
+    recordStep = Math.min(3, Math.max(1, step));
+    recordSteps.forEach((panel) => panel.classList.toggle('active', Number(panel.dataset.recordStep) === recordStep));
+    recordProgress.forEach((bar, index) => bar.classList.toggle('active', index < recordStep));
+    sheetStepLabel.textContent = `${recordStep} / 3 · ${['金额', '分类', '确认'][recordStep - 1]}${recordStep > 1 ? ` · ¥${formatAmount()}` : ''}`;
+    if (recordStep === 3) updateSummary();
+  }
+  function resetRecord() {
+    amount = '0';
+    recordCategory = '餐饮';
+    recordDetail = '午餐';
+    document.querySelectorAll('[data-record-type]').forEach((button) => button.classList.toggle('active', button.dataset.recordType === 'expense'));
+    document.querySelectorAll('[data-category]').forEach((button) => button.classList.toggle('active', button.dataset.category === '餐饮'));
+    renderDetails('餐饮');
+    noteText.value = '';
+    clearPhotos();
+    renderAmount();
+    setRecordStep(1);
+  }
+  function showToast(text) {
+    const toast = document.getElementById('toast');
+    toast.textContent = text;
+    toast.classList.add('show');
+    window.setTimeout(() => toast.classList.remove('show'), 1700);
+  }
+  document.querySelectorAll('[data-key]').forEach((key) => key.addEventListener('click', () => {
+    const value = key.dataset.key;
+    if (value === 'back') amount = amount.length > 1 ? amount.slice(0, -1) : '0';
+    else if (value === '.') { if (!amount.includes('.')) amount += '.'; }
+    else if (amount === '0') amount = value;
+    else { const decimals = amount.split('.')[1]; if (!decimals || decimals.length < 2) amount += value; }
+    renderAmount();
+  }));
+  document.querySelectorAll('[data-record-type]').forEach((button) => button.addEventListener('click', () => {
+    document.querySelectorAll('[data-record-type]').forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+  }));
+  document.querySelectorAll('[data-category]').forEach((button) => button.addEventListener('click', () => {
+    document.querySelectorAll('[data-category]').forEach((item) => item.classList.remove('active'));
+    button.classList.add('active');
+    recordCategory = button.dataset.category;
+    renderDetails(recordCategory);
+  }));
+  detailChips.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.dataset.detail) {
+      recordDetail = button.dataset.detail;
+      updateSummary();
+    }
+    if (button.hasAttribute('data-skip-detail')) {
+      recordDetail = '';
+      updateSummary();
+      setRecordStep(3);
+    }
+  });
+  document.querySelectorAll('[data-recent-category]').forEach((button) => button.addEventListener('click', () => {
+    recordCategory = button.dataset.recentCategory;
+    renderDetails(recordCategory);
+    recordDetail = button.dataset.recentDetail;
+    document.querySelectorAll('[data-detail]').forEach((item) => item.classList.toggle('active', item.dataset.detail === recordDetail));
+    document.querySelectorAll('[data-category]').forEach((item) => item.classList.toggle('active', item.dataset.category === recordCategory));
+    updateSummary();
+    setRecordStep(3);
+  }));
+  document.querySelectorAll('[data-next-record]').forEach((button) => button.addEventListener('click', () => {
+    if (recordStep === 1 && Number(formatAmount()) <= 0) { showToast('先输入金额'); return; }
+    setRecordStep(recordStep + 1);
+  }));
+  document.querySelectorAll('[data-prev-record]').forEach((button) => button.addEventListener('click', () => setRecordStep(recordStep - 1)));
+  addPhoto.addEventListener('click', () => photoInput.click());
+  photoInput.addEventListener('change', () => {
+    const existing = notePhotos.querySelectorAll('.photo-thumb').length;
+    [...photoInput.files].slice(0, Math.max(0, 9 - existing)).forEach((file) => {
+      const url = URL.createObjectURL(file);
+      const thumb = document.createElement('div');
+      thumb.className = 'photo-thumb';
+      thumb.dataset.url = url;
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = '备注照片';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'photo-remove';
+      remove.textContent = '×';
+      remove.addEventListener('click', () => { URL.revokeObjectURL(url); thumb.remove(); });
+      thumb.append(img, remove);
+      notePhotos.insertBefore(thumb, addPhoto);
+    });
+    photoInput.value = '';
+  });
+  document.querySelectorAll('[data-save-record]').forEach((button) => button.addEventListener('click', () => { closeSheet(); showToast('已记一笔'); }));
+  document.querySelectorAll('[data-save-next]').forEach((button) => button.addEventListener('click', () => { resetRecord(); showToast('已保存，继续记下一笔'); }));
+
+  document.querySelectorAll('.accordion-trigger').forEach((trigger) => trigger.addEventListener('click', () => {
+    const body = trigger.nextElementSibling;
+    const open = body.classList.toggle('open');
+    trigger.setAttribute('aria-expanded', String(open));
+    trigger.querySelector('.row-value').textContent = open ? '⌃' : '⌄';
+  }));
+
+  const themeButton = document.querySelector('[data-theme-toggle]');
+  themeButton.addEventListener('click', () => {
+    const dark = document.documentElement.dataset.theme === 'dark';
+    document.documentElement.dataset.theme = dark ? '' : 'dark';
+    themeButton.textContent = dark ? '切换深色' : '切换浅色';
+  });
+
+  document.querySelectorAll('.post-action').forEach((action) => action.addEventListener('click', () => {
+    if (action.classList.contains('liked')) action.classList.remove('liked');
+    else if (action.querySelector('svg path')) action.classList.add('liked');
+  }));
+
+  const initialScreen = location.hash.slice(1);
+  if (['home', 'feed', 'ledger', 'me'].includes(initialScreen)) showScreen(initialScreen);
+  const demoParams = new URLSearchParams(location.search);
+  if (demoParams.get('sheet') === '1') {
+    openSheet();
+    if (demoParams.get('amount')) { amount = demoParams.get('amount'); renderAmount(); }
+    const demoStep = Number(demoParams.get('step') || '1');
+    if (demoStep >= 1 && demoStep <= 3) setRecordStep(demoStep);
+  }
+</script>
+</body>
+</html>

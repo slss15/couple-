@@ -103,7 +103,7 @@ interface ProfileDao {
         ChatMessageEntity::class, AnniversaryEventEntity::class, LedgerAccountEntity::class, LedgerEntryEntity::class,
         PeriodLogEntity::class, LedgerLoanEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -191,6 +191,13 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `ledger_entries` ADD COLUMN `note` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** v10 → v11：账本备注照片的本机 URI，旧账目默认为空。 */
+        val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `ledger_entries` ADD COLUMN `photoUris` TEXT NOT NULL DEFAULT ''")
             }
         }
 

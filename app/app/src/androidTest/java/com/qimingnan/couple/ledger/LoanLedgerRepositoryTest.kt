@@ -149,11 +149,14 @@ class LoanLedgerRepositoryTest {
             sqlite.execSQL("INSERT INTO ledger_entries (id,ownerId,accountId,type,categoryId,amountCents,fromAccountId,toAccountId,occurredOn,createdAt,updatedAt,deleted,pendingSync,note) VALUES ('entry', 'test-owner', 'old', 'INCOME', '工资', 1000, NULL, NULL, '2026-11-07', 1, 1, 0, 0, '旧备注')")
             sqlite.version = 8
         }
-        val migrated = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(AppDatabase.MIGRATION_8_9).build()
+        val migrated = Room.databaseBuilder(context, AppDatabase::class.java, name)
+            .addMigrations(AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11)
+            .build()
         try {
             assertEquals(5000L, migrated.ledgerDao().accountById("old")!!.initialBalanceCents)
             val entry = migrated.ledgerDao().entryById("entry")!!
             assertEquals("旧备注", entry.note)
+            assertEquals("", entry.photoUris)
             assertNull(entry.loanId)
             assertNull(entry.loanAction)
         } finally { migrated.close(); context.deleteDatabase(name) }

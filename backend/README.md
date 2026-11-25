@@ -4,9 +4,11 @@
 
 两人自用情侣 App 的后端。接口以仓库根目录的 `../contract.md` 为准（权威契约）。
 
+> **产品取舍（2026-11-24）**：日常聊天和通话使用微信；聊天功能冻结维护，只修复安全、稳定性和数据丢失问题，P4 通话暂停、不排期。
+
 - 技术栈：Kotlin 2.1 + Ktor 3（Netty）、Exposed + HikariCP + MySQL 8（Flyway 迁移）、kotlinx.serialization、JWT（HS256，java-jwt）、Argon2id（Bouncy Castle 纯 Java 实现）、Ed25519（JDK）、ULID。
 - JDK：21（Gradle toolchain）。
-- 模块：`config` / `auth`（注册、登录、refresh 轮换 + 家族吊销、登出）/ `pairing`（配对码、加入、解绑申请+对方确认）/ `bootstrap`（公钥、二维码签名）/ `admin`（配置、密钥脱敏、审计日志）/ `mqtt`（`MqttAccessService` 统一认证/ACL：内置 Moquette broker 或 EMQX HTTP 钩子）/ `media`（私有桶存储、EXIF 剥离、缩略图）/ `feed`（动态/点赞/评论）/ `ta`（资料卡/重要日子）/ `chat`（P1a 文本消息/引用/撤回/已读）/ `health`；`updater/` 子工程是 Windows 的 couple-updater 服务。
+- 模块：`config` / `auth`（注册、登录、refresh 轮换 + 家族吊销、登出）/ `pairing`（配对码、加入、解绑申请+对方确认）/ `bootstrap`（公钥、二维码签名）/ `admin`（配置、密钥脱敏、审计日志）/ `mqtt`（`MqttAccessService` 统一认证/ACL：内置 Moquette broker 或 EMQX HTTP 钩子）/ `media`（私有桶存储、EXIF 剥离、缩略图）/ `feed`（动态/点赞/评论）/ `ta`（资料卡/重要日子）/ `chat`（文本/图片/表情包/定时消息/导出；已冻结维护，不再追加语音/通话）/ `health`；`updater/` 子工程是 Windows 的 couple-updater 服务。
 - 每个 auth / pair / admin 操作都会写一条审计日志（`audit_log` 表，`GET /api/v1/admin/audit` 查看）。
 
 ## 目录
@@ -21,7 +23,7 @@ backend/
 │   ├── db/                       # Exposed 表定义、Hikari + Flyway、server_settings
 │   ├── audit/                    # 审计
 │   ├── auth/ pairing/ bootstrap/ admin/ mqtt/ media/ feed/ ta/ chat/ health/
-├── src/main/resources/db/migration/V1..V7.sql
+├── src/main/resources/db/migration/V1..V10.sql
 ├── src/test/kotlin/...           # Ktor testApplication + H2（MySQL 模式）
 ├── updater/                      # Windows server-updater（Gradle 子工程，JDK-only）
 ├── Dockerfile, docker-compose.yml, .env.example

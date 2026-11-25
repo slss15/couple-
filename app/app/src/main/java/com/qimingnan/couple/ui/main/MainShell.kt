@@ -63,6 +63,7 @@ fun MainShell(
     var tab by rememberSaveable { mutableStateOf(MainTab.Feed) }
     var showHome by rememberSaveable { mutableStateOf(false) }
     var openLedgerWizard by rememberSaveable { mutableStateOf(false) }
+    var lastLedgerRecordTapAt by rememberSaveable { mutableStateOf(0L) }
     var ledgerSubTab by rememberSaveable { mutableStateOf(com.qimingnan.couple.ui.ledger.LedgerSubTab.Record) }
     var homeApplied by rememberSaveable { mutableStateOf(false) }
     var showChat by rememberSaveable { mutableStateOf(false) }
@@ -205,7 +206,22 @@ fun MainShell(
                     ledgerTabs.forEach { (sub, icon) ->
                         NavigationBarItem(
                             selected = ledgerSubTab == sub,
-                            onClick = { ledgerSubTab = sub },
+                            onClick = {
+                                if (sub == com.qimingnan.couple.ui.ledger.LedgerSubTab.Record) {
+                                    val now = android.os.SystemClock.elapsedRealtime()
+                                    val doubleTap = now - lastLedgerRecordTapAt in 1..350
+                                    ledgerSubTab = sub
+                                    if (doubleTap) {
+                                        openLedgerWizard = true
+                                        lastLedgerRecordTapAt = 0L
+                                    } else {
+                                        lastLedgerRecordTapAt = now
+                                    }
+                                } else {
+                                    ledgerSubTab = sub
+                                    lastLedgerRecordTapAt = 0L
+                                }
+                            },
                             icon = { Icon(icon, contentDescription = null) },
                             label = { Text(sub.label, style = t.typography.caption) },
                             colors = NavigationBarItemDefaults.colors(
@@ -277,6 +293,7 @@ fun MainShell(
                 showBack = true,
                 subTab = ledgerSubTab,
                 autoOpenWizard = openLedgerWizard,
+                onWizardDismissed = { openLedgerWizard = false },
                 modifier = Modifier.padding(padding),
             )
             MainTab.Period -> com.qimingnan.couple.ui.period.PeriodScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))

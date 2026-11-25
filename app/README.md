@@ -77,11 +77,11 @@ CI：`../.github/workflows/app.yml`，只在 `app/**` 变更时运行 `assembleD
 
 ### 4. 主界面
 
-底部四个 Tab：**聊天 / 动态 / TA / 我的**。
+主界面默认底部 Tab 为 **动态 / TA / 我的**；纪念日、记账、经期等插件可单独启用。聊天入口在「我的」。
 
-- 聊天（P1a）：文本、引用回复、120 秒撤回、已读回执；Room 缓存 + `after`/`before` 分页；
+- 聊天：文本、图片、表情包、引用回复、120 秒撤回、已读回执、定时消息、JSON/TXT 导出；Room 缓存 + `after`/`before` 分页；
   发送走本地 PENDING → WorkManager outbox（离线退避重试、进程死亡后续跑，服务端按消息 id 幂等）；
-  `couple/{cid}/chat` MQTT 推送与重连/进入页面补拉合并。
+  `couple/{cid}/chat` MQTT 推送与重连/进入页面补拉合并。**聊天已冻结维护，不再追加语音/通话等新功能；日常沟通使用微信。**
 - 动态（P1）：文字+图片帖、点赞、评论、分页、离线发布 outbox、纪念日倒数卡。
 - TA（P1b）：对方资料卡（生日隐私开关）、在一起天数、重要日子 CRUD、我的档案编辑。
 - 我的：资料、配对信息与 TA 在线状态、MQTT 连接状态、服务器配置（地址、版本、签名状态、公钥指纹、重新扫码）、解绑、退出登录。
@@ -125,7 +125,7 @@ CI：`../.github/workflows/app.yml`，只在 `app/**` 变更时运行 `assembleD
 {"version":1,"zones":[{"id":"bottomBar","items":[{"id":"me_entry","order":3,"visible":true,"size":"M"}]}]}
 ```
 
-- 区（zone）：`topBar / bottomBar / feedHeader / chatToolbar / callControls / taHeader / taCards / meSections`，各有数量上限和网格宽度；
+- 区（zone）：`topBar / bottomBar / feedHeader / chatToolbar / callControls / taHeader / taCards / meSections`，各有数量上限和网格宽度；`callControls` 仅为历史布局字段保留，P4 通话暂停不启用。
 - 尺寸：`S / M / L` 分别占 1 / 2 / 4 格；
 - 锁定项（不可删除、隐藏、移动）：`send`、`back`、`hangup`、`sharing_indicator`、`privacy_toggle`、`me_entry`；
 - 校验失败时 `LayoutValidator.orDefault()` 回退默认布局（安全模式）。
@@ -143,7 +143,7 @@ app/src/main/java/com/qimingnan/couple/
 │   ├── couple/      配对 / 解绑
 │   ├── feed/        动态仓库 + 发布 outbox worker
 │   ├── chat/        聊天仓库 + 发送 outbox worker + 已读回执逻辑
-│   ├── db/          Room（users/couples/posts/comments/chat_messages）
+│   ├── db/          Room（用户/配对/动态/聊天/纪念日/记账/经期）
 │   ├── mqtt/        MQTT over WSS + presence/feed/chat
 │   └── AppCoordinator.kt  进程级编排（何时连 MQTT、换服务器后清会话）
 ├── di/              Hilt 模块
@@ -169,13 +169,14 @@ app/src/main/java/com/qimingnan/couple/
 | `ChatEventTest` | 聊天 MQTT 载荷解析与坏载荷丢弃 |
 | `DemoBackendTest` | 调试后端：登录/配对/动态/TA/聊天幂等、撤回、已读、分页 |
 
-## 已知限制（P1）
+## 产品取舍与已知限制
 
-- 聊天仅文本（P2 加图片/语音/表情包）；`couple/{cid}/typing`（正在输入）尚未接入。
-- 没有 FCM；MQTT 只在进程存活时连接（可在“后台保活”中开启常驻连接前台服务）；App 被杀时的 WxPusher 候补推送待做。
-- 发码方仍通过轮询 `GET /couple` 发现配对成功（待改 MQTT 通知）。
-- 解绑申请编号仍需口头告诉对方（待改 MQTT 推送）。
-- 聊天记录导出、双机 e2e 脚本未做。
+- **聊天**：现有文本、图片、表情包、定时消息和记录导出保留，进入冻结维护；只修复安全、稳定性和数据丢失问题，不再追加语音消息等增强。日常沟通使用微信。
+- **通话**：P4 暂停，不排期；不投入 WebRTC、TURN、来电通知和通话统计。
+- **账本照片**：备注照片只保存在本机，使用系统授权 URI，不上传服务器。
+- **记账入口**：记账页双击底部「记账」Tab，或点击页面内「快速记账」提示，直接打开记一笔向导。
+- 不接 FCM；MQTT 只在进程存活时连接，可在“后台保活”中开启常驻连接前台服务；WxPusher 作为 App 被杀后的候补推送。
+- 双机 e2e 脚本仍待补。
 
 ## 单人记账与 UI 更新
 

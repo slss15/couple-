@@ -12,6 +12,7 @@ data class LedgerEntryDraft(
     val detail: String? = null,
     val occurredOn: LocalDate = LocalDate.now(),
     val note: String = "",
+    val photoUris: List<String> = emptyList(),
 ) {
     val steps: List<String> get() = if (type == LedgerEntryType.TRANSFER)
         listOf("金额", "收支类型", "转出账户", "转入账户", "确认转账")
@@ -24,6 +25,6 @@ data class LedgerEntryDraft(
         toAccountId = if (type == LedgerEntryType.TRANSFER) toAccountId else null,
         categoryId = if (type == LedgerEntryType.TRANSFER || category == null) null
             else if (detail.isNullOrBlank()) category else "$category·$detail",
-        occurredOn = occurredOn, note = note.trim(),
+        occurredOn = occurredOn, note = note.trim(), photoUris = photoUris,
     )
 }

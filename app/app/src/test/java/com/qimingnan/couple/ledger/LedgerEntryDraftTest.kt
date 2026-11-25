@@ -7,12 +7,13 @@ import org.junit.Test
 
 class LedgerEntryDraftTest {
     @Test fun personalExpenseHasSixStepsAndNoCoupleFields() {
-        val draft = LedgerEntryDraft(1250, LedgerEntryType.EXPENSE, "cash", category = "餐饮", detail = "午饭", note = "  一个人午饭  ")
+        val draft = LedgerEntryDraft(1250, LedgerEntryType.EXPENSE, "cash", category = "餐饮", detail = "午饭", note = "  一个人午饭  ", photoUris = listOf("content://photo/1"))
         assertEquals(6, draft.steps.size)
         val entry = draft.toEntry("id", "me")
         assertNull(LedgerLogic.validate(entry))
         assertEquals("餐饮·午饭", entry.categoryId)
         assertEquals("一个人午饭", entry.note)
+        assertEquals(listOf("content://photo/1"), entry.photoUris)
         assertNull(entry.fromAccountId)
         assertNull(entry.toAccountId)
     }

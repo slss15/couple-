@@ -1,18 +1,29 @@
 package com.qimingnan.couple.ui.ledger
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
 import com.qimingnan.couple.data.ledger.*
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -21,6 +32,7 @@ import java.time.LocalDate
 import java.util.UUID
 
 /** 普通收支六步、转账五步；每页只处理当前一步，不提供极速全表单。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun LedgerEntryWizard(
     vm: LedgerViewModel,
@@ -30,6 +42,20 @@ internal fun LedgerEntryWizard(
     initialLoanId: String? = null,
 ) {
     val t = LocalCoupleTokens.current
+    val context = LocalContext.current
+    var photoUrisText by rememberSaveable { mutableStateOf("") }
+    val photoUris = remember(photoUrisText) { photoUrisText.lineSequence().filter { it.isNotBlank() }.toList() }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val current = photoUris.toMutableList()
+        uris.take((9 - current.size).coerceAtLeast(0)).forEach { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val value = uri.toString()
+            if (value !in current) current += value
+        }
+        photoUrisText = current.joinToString("\n")
+    }
     val loans by vm.loans.collectAsStateWithLifecycle()
     val initialLoan = loans.firstOrNull { it.id == initialLoanId }
     val cashAccounts = accounts.filterNot { it.type.isLoan }
@@ -65,7 +91,7 @@ internal fun LedgerEntryWizard(
             else -> onDismiss()
         }
     }
-    val draft = LedgerEntryDraft(parseCents(amount), type, accountId, toId, category, detail, LocalDate.parse(date), note)
+    val draft = LedgerEntryDraft(parseCents(amount), type, accountId, toId, category, detail, LocalDate.parse(date), note, photoUris)
     val titles = if (repayment) draft.steps.mapIndexed { index, title -> if (index == 4) "选择借贷账户与个人 / 平台" else title } else draft.steps
     val lastStep = titles.lastIndex
     val selectedAccount = cashAccounts.firstOrNull { it.id == accountId }
@@ -179,6 +205,7 @@ internal fun LedgerEntryWizard(
                                     if (row.size == 1) Spacer(Modifier.weight(1f))
                                 }
                             }
+                            OptionCard("不细分", "只记录一级分类", { detail = null; step++ }, leading = { GlyphAvatar("略") })
                         }
                         step == lastStep -> {
                             SectionCard(if (transfer) "确认转账" else if (repayment) "确认还钱" else "确认账目") {
@@ -193,6 +220,38 @@ internal fun LedgerEntryWizard(
                             if (repayment && selectedLoan != null && draft.amountCents > selectedLoan.remainingCents) Text("还款超过未结清金额 ${centsText(selectedLoan.remainingCents)}，请返回修改金额。", color = t.colors.error)
                             EntryDatePicker(date, { date = it })
                             OutlinedTextField(note, { note = it }, label = { Text("备注（选填）") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
+                            Text("照片（选填，最多 9 张）", style = t.typography.label, color = t.colors.onSurface)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
+                                verticalArrangement = Arrangement.spacedBy(t.spacing.sm),
+                            ) {
+                                photoUris.forEach { uri ->
+                                    Box(Modifier.size(72.dp)) {
+                                        AsyncImage(
+                                            model = Uri.parse(uri),
+                                            contentDescription = "备注照片",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize().clip(t.shapes.medium),
+                                        )
+                                        IconButton(
+                                            onClick = { photoUrisText = photoUris.filterNot { it == uri }.joinToString("\n") },
+                                            modifier = Modifier.align(Alignment.TopEnd).size(24.dp),
+                                        ) {
+                                            Icon(Icons.Filled.Close, contentDescription = "删除照片", tint = t.colors.error)
+                                        }
+                                    }
+                                }
+                                if (photoUris.size < 9) {
+                                    OutlinedButton(
+                                        onClick = { photoPicker.launch(arrayOf("image/*")) },
+                                        modifier = Modifier.size(72.dp),
+                                        contentPadding = PaddingValues(0.dp),
+                                    ) {
+                                        Icon(Icons.Filled.Add, contentDescription = "添加照片")
+                                    }
+                                }
+                            }
+                            Text("照片只保存在本机，不会上传服务器。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                             Text("只记入你的个人账本。" + if (transfer || repayment) "借贷本金与转账不计入日常预算和收支统计，实际账户余额照常变动。" else "不会出现在动态、聊天或 TA 页面。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                         }
                     }

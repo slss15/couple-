@@ -54,6 +54,8 @@ data class LedgerEntryEntity(
     val pendingSync: Boolean,
     /** 备注（选填，v8 新增列，旧数据默认为空）。 */
     val note: String = "",
+    /** 本机 content:// URI，换行分隔；v11 新增列。 */
+    val photoUris: String = "",
     val loanId: String? = null,
     val loanAction: String? = null,
 )
@@ -68,13 +70,16 @@ fun LedgerAccountEntity.toModel() = LedgerAccount(
 fun LedgerEntry.toEntity(nowMillis: Long, existing: LedgerEntryEntity? = null) =
     LedgerEntryEntity(
         id, ownerId, accountId, type.name, categoryId, amountCents, fromAccountId, toAccountId,
-        occurredOn.toString(), existing?.createdAt ?: nowMillis, nowMillis, deleted, true, note, loanId, loanAction?.name,
+        occurredOn.toString(), existing?.createdAt ?: nowMillis, nowMillis, deleted, true, note,
+        photoUris.joinToString("\n"), loanId, loanAction?.name,
     )
 
 fun LedgerEntryEntity.toModel() = LedgerEntry(
     id, ownerId, accountId,
     LedgerEntryType.entries.firstOrNull { it.name == type } ?: LedgerEntryType.EXPENSE,
-    categoryId, amountCents, fromAccountId, toAccountId, LocalDate.parse(occurredOn), deleted, note, loanId, loanAction?.let { value -> LoanAction.entries.firstOrNull { it.name == value } },
+    categoryId, amountCents, fromAccountId, toAccountId, LocalDate.parse(occurredOn), deleted, note,
+    photoUris.lineSequence().filter { it.isNotBlank() }.toList(),
+    loanId, loanAction?.let { value -> LoanAction.entries.firstOrNull { it.name == value } },
 )
 
 @Entity(tableName = "ledger_loans")

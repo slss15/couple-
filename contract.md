@@ -139,7 +139,9 @@ The home server sits behind NAT (outbound only); clients reach it through Cloudf
 - OTA v2 design rationale and threat model: docs/ota-design.md.
 
 ## Chat (P1a: text messages; P1c: images + stickers) — authoritative for backend + app
-Scope: text, images, stickers (表情包), reply/quote, recall, read receipts, offline outbox. Voice and calls come later.
+
+> Product decision (2026-11-24): existing chat is maintenance-only; voice messages and calls are paused/out of scope. Daily communication uses WeChat.
+Scope: text, images, stickers (表情包), reply/quote, recall, read receipts, offline outbox.
 
 ### Model
 - Message = {id, coupleId, senderId, type:"text"|"image"|"sticker", text, replyTo:String|null, clientTs:Long, createdAt:Long, recalledAt:Long|null, mediaId:String|null, width:Int|null, height:Int|null}

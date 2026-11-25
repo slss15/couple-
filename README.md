@@ -2,6 +2,8 @@
 
 两人自用的情侣 App（monorepo）。
 
+> **当前产品取舍（2026-11-24）**：日常聊天和通话使用微信；本项目聊天功能冻结维护，P4 通话暂停、不排期。详见 [`docs/roadmap.md`](docs/roadmap.md)。
+
 | 目录 | 内容 |
 |---|---|
 | [`backend/`](backend/README.md) | Ktor 后端（MySQL + EMQX） |

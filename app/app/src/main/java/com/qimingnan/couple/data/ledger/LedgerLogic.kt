@@ -47,6 +47,8 @@ data class LedgerEntry(
     val deleted: Boolean = false,
     /** 备注（选填）：记一笔向导第 6 步确认页填的备注，存下来随账目显示。 */
     val note: String = "",
+    /** 本机持久授权的 content:// URI；账本照片不上传服务器。 */
+    val photoUris: List<String> = emptyList(),
     val loanId: String? = null,
     val loanAction: LoanAction? = null,
 )
