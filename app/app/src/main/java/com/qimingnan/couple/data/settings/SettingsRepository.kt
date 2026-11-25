@@ -47,6 +47,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
     suspend fun setDynamicColor(on: Boolean) = store.edit { it[DYNAMIC] = on; it[THEME_CUSTOMIZED] = true }
     suspend fun setDarkMode(m: DarkMode) = store.edit { it[DARK] = m.name; it[THEME_CUSTOMIZED] = true }
     suspend fun setFontSize(f: FontSize) = store.edit { it[FONT] = f.name; it[THEME_CUSTOMIZED] = true }
+    suspend fun setGlassStyle(style: GlassStyle) = store.edit { it[GLASS_STYLE] = style.name }
     /** 缓存服务端外观响应，断网时仍能按上次布局/主题启动。 */
     suspend fun cacheServerAppearance(json: String) = store.edit { it[SERVER_APPEARANCE] = json }
     /** 恢复使用服务端主题默认值；本地颜色偏好保留，重新手动选择时继续生效。 */
@@ -173,6 +174,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
         private val DYNAMIC = booleanPreferencesKey("dynamic_color")
         private val DARK = stringPreferencesKey("dark_mode")
         private val FONT = stringPreferencesKey("font_size")
+        private val GLASS_STYLE = stringPreferencesKey("glass_style")
         private val THEME_CUSTOMIZED = booleanPreferencesKey("theme_customized")
         private val DISABLED_PLUGINS = stringSetPreferencesKey("disabled_plugins")
         private val MONTHLY_BUDGET = longPreferencesKey("monthly_budget_cents")
@@ -201,6 +203,7 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
             dynamicColor = p[DYNAMIC] ?: false,
             darkMode = DarkMode.entries.firstOrNull { it.name == p[DARK] } ?: DarkMode.System,
             fontSize = FontSize.entries.firstOrNull { it.name == p[FONT] } ?: FontSize.Standard,
+            glassStyle = GlassStyle.entries.firstOrNull { it.name == p[GLASS_STYLE] } ?: GlassStyle.Frosted,
             themeCustomized = p[THEME_CUSTOMIZED] ?: listOf(SEED, DYNAMIC, DARK, FONT).any { it in p },
             disabledPlugins = p[DISABLED_PLUGINS] ?: emptySet(),
             monthlyBudgetCents = p[MONTHLY_BUDGET] ?: 0,

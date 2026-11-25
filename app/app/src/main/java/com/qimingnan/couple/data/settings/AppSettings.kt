@@ -8,6 +8,12 @@ enum class FontSize(val scale: Float, val label: String) {
     Small(0.85f, "小"), Standard(1.0f, "标准"), Large(1.15f, "大"), XLarge(1.3f, "特大"),
 }
 
+/** 底栏材质：毛玻璃偏安静，液态玻璃带轻微流动高光。 */
+enum class GlassStyle(val label: String) {
+    Frosted("毛玻璃"),
+    Liquid("液态玻璃"),
+}
+
 /** 本地设置（仅保存在本机 DataStore，不上传）。 */
 data class AppSettings(
     val hiddenTabs: Set<String> = emptySet(),
@@ -19,6 +25,8 @@ data class AppSettings(
     val dynamicColor: Boolean = false,
     val darkMode: DarkMode = DarkMode.System,
     val fontSize: FontSize = FontSize.Standard,
+    /** 底栏玻璃质感；只影响视觉，不改变布局或导航逻辑。 */
+    val glassStyle: GlassStyle = GlassStyle.Frosted,
     /** 用户是否手动改过主题；没改过时使用服务端主题默认值。 */
     val themeCustomized: Boolean = false,
     /** 本月个人支出预算（分），0 = 没设；统计页显示已用/剩余，80%/100% 时提醒。 */

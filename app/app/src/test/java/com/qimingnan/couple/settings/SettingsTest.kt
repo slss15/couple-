@@ -4,6 +4,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.qimingnan.couple.data.settings.AppSettings
 import com.qimingnan.couple.data.settings.DarkMode
 import com.qimingnan.couple.data.settings.FontSize
+import com.qimingnan.couple.data.settings.GlassStyle
 import com.qimingnan.couple.data.settings.SettingsRepository
 import com.qimingnan.couple.data.settings.TabVisibility
 import com.qimingnan.couple.theme.Contrast
@@ -49,7 +50,8 @@ class SettingsRepositoryTest {
         r.setDarkMode(DarkMode.Dark)
         r.setFontSize(FontSize.XLarge)
         r.setThemeSeed("teal")
-        val s = r.await { it.fontSize == FontSize.XLarge && it.themeSeed == "teal" }
+        r.setGlassStyle(GlassStyle.Liquid)
+        val s = r.await { it.fontSize == FontSize.XLarge && it.themeSeed == "teal" && it.glassStyle == GlassStyle.Liquid }
         assertEquals(setOf("tab_feed"), s.hiddenTabs)
         assertEquals(DarkMode.Dark, s.darkMode)
         r.setTabHidden("tab_feed", false)

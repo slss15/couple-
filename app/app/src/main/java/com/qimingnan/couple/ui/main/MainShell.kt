@@ -1,6 +1,16 @@
 package com.qimingnan.couple.ui.main
 
 import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -21,15 +31,20 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import com.qimingnan.couple.R
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.chat.ChatScreen
 import com.qimingnan.couple.ui.feed.FeedScreen
+import com.qimingnan.couple.ui.ledger.LedgerSubTab
 import com.qimingnan.couple.ui.me.MeScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +65,12 @@ enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: Im
     Period("tab_period", R.string.tab_period, Icons.Filled.FavoriteBorder, "period"),
 }
 
+private val LEDGER_SECONDARY_ITEMS = listOf(
+    SecondaryTabItem("stats", "统计", Icons.Filled.DateRange),
+    SecondaryTabItem("record", "记账", Icons.Filled.AddCircle),
+    SecondaryTabItem("accounts", "账户", Icons.Filled.Person),
+)
+
 @Composable
 fun MainShell(
     onRescan: () -> Unit,
@@ -64,7 +85,10 @@ fun MainShell(
     var showHome by rememberSaveable { mutableStateOf(false) }
     var openLedgerWizard by rememberSaveable { mutableStateOf(false) }
     var lastLedgerRecordTapAt by rememberSaveable { mutableStateOf(0L) }
-    var ledgerSubTab by rememberSaveable { mutableStateOf(com.qimingnan.couple.ui.ledger.LedgerSubTab.Record) }
+    var ledgerSubTab by rememberSaveable { mutableStateOf(LedgerSubTab.Record) }
+    val haptics = LocalHapticFeedback.current
+    var secondaryMenu by remember { mutableStateOf<SecondaryTabMenu?>(null) }
+    var secondaryMenuVisible by remember { mutableStateOf(false) }
     var homeApplied by rememberSaveable { mutableStateOf(false) }
     var showChat by rememberSaveable { mutableStateOf(false) }
     var showScheduled by rememberSaveable { mutableStateOf(false) }
@@ -80,6 +104,30 @@ fun MainShell(
         item.layoutId in visibleIds &&
             (item.pluginId == null || com.qimingnan.couple.data.plugin.PluginRegistry.isEnabled(item.pluginId, settings.disabledPlugins))
     }.sortedBy { orderedIds.indexOf(it.layoutId) }
+
+    fun showLedgerSecondaryMenu() {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        secondaryMenu = SecondaryTabMenu(LEDGER_SECONDARY_ITEMS, ledgerSubTab.ordinal)
+        secondaryMenuVisible = true
+    }
+    fun moveLedgerSecondaryMenu(index: Int) {
+        val current = secondaryMenu ?: return
+        if (current.selectedIndex == index) return
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        secondaryMenu = current.copy(selectedIndex = index)
+    }
+    fun closeLedgerSecondaryMenu() {
+        secondaryMenuVisible = false
+    }
+    fun commitLedgerSecondaryMenu(index: Int, switchToLedger: Boolean) {
+        ledgerSubTab = LedgerSubTab.entries[index.coerceIn(0, LedgerSubTab.entries.lastIndex)]
+        if (switchToLedger) {
+            tab = MainTab.Ledger
+            openLedgerWizard = false
+        }
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        secondaryMenuVisible = false
+    }
     // 等持久设置读完再应用一次；用户切换 Tab 后不被 StateFlow 默认值覆盖。
     LaunchedEffect(Unit) {
         if (!homeApplied) {
@@ -122,8 +170,9 @@ fun MainShell(
         tab = MainTab.entries.firstOrNull { it.layoutId == destination && it != MainTab.Ledger } ?: MainTab.Feed
         openLedgerWizard = false
     }
+    androidx.activity.compose.BackHandler(enabled = secondaryMenuVisible) { closeLedgerSecondaryMenu() }
     androidx.activity.compose.BackHandler(
-        enabled = showChat || showScheduled || showSettings || showAnniversary || (!showHome && (tab != MainTab.Feed || settings.homeTab == "home_page")),
+        enabled = !secondaryMenuVisible && (showChat || showScheduled || showSettings || showAnniversary || (!showHome && (tab != MainTab.Feed || settings.homeTab == "home_page"))),
     ) {
         when {
             showScheduled -> showScheduled = false
@@ -138,15 +187,19 @@ fun MainShell(
             else -> tab = MainTab.Feed
         }
     }
-    LaunchedEffect(tab) { if (tab != MainTab.Ledger) openLedgerWizard = false }
-    LaunchedEffect(tab) { if (tab == MainTab.Ledger) ledgerSubTab = com.qimingnan.couple.ui.ledger.LedgerSubTab.Record }
+    LaunchedEffect(tab) {
+        if (tab != MainTab.Ledger) {
+            openLedgerWizard = false
+            secondaryMenuVisible = false
+        }
+    }
     if (showHome) {
         com.qimingnan.couple.ui.home.HomeScreen(
             anniversaryVm = hiltViewModel(),
             ledgerVm = hiltViewModel(),
-            onRecord = { showHome = false; tab = MainTab.Ledger; openLedgerWizard = true },
+            onRecord = { showHome = false; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record; openLedgerWizard = true },
             onOpenAnniversary = { showHome = false; tab = MainTab.Anniversary },
-            onOpenLedger = { showHome = false; tab = MainTab.Ledger },
+            onOpenLedger = { showHome = false; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record },
             onOpenFeed = { showHome = false; tab = MainTab.Feed },
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
@@ -177,7 +230,7 @@ fun MainShell(
             // 从设置页打开纪念日全屏时保留 showSettings：纪念日盖在设置页上面，
             // 返回键先关纪念日回设置页（BackHandler 里纪念日优先于设置），而不是掉回底栏主页。
             onOpenAnniversary = { showAnniversary = true },
-            onOpenLedger = { showSettings = false; tab = MainTab.Ledger; ledgerSubTab = com.qimingnan.couple.ui.ledger.LedgerSubTab.Record },
+            onOpenLedger = { showSettings = false; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record },
             onOpenKeepAlive = onOpenKeepAlive,
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
@@ -191,112 +244,169 @@ fun MainShell(
         )
         return
     }
-    Scaffold(
-        containerColor = t.colors.background,
-        contentColor = t.colors.onBackground,
-        bottomBar = {
-            if (tab == MainTab.Ledger) {
-                // 记账专属底栏：顺序统计、记账、账户，记账在中间是默认页；主底栏在这里不显示。
-                NavigationBar(containerColor = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
-                    val ledgerTabs = listOf(
-                        com.qimingnan.couple.ui.ledger.LedgerSubTab.Stats to Icons.Filled.DateRange,
-                        com.qimingnan.couple.ui.ledger.LedgerSubTab.Record to Icons.Filled.AddCircle,
-                        com.qimingnan.couple.ui.ledger.LedgerSubTab.Accounts to Icons.Filled.Person,
-                    )
-                    ledgerTabs.forEach { (sub, icon) ->
-                        NavigationBarItem(
-                            selected = ledgerSubTab == sub,
-                            onClick = {
-                                if (sub == com.qimingnan.couple.ui.ledger.LedgerSubTab.Record) {
-                                    val now = android.os.SystemClock.elapsedRealtime()
-                                    val doubleTap = now - lastLedgerRecordTapAt in 1..350
-                                    ledgerSubTab = sub
-                                    if (doubleTap) {
-                                        openLedgerWizard = true
-                                        lastLedgerRecordTapAt = 0L
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = t.colors.background,
+            contentColor = t.colors.onBackground,
+            bottomBar = {
+                if (tab == MainTab.Ledger) {
+                    // 记账专属底栏：顺序统计、记账、账户，记账在中间是默认页；主底栏在这里不显示。
+                    GlassNavigationBar(style = settings.glassStyle) {
+                        val ledgerTabs = listOf(
+                            LedgerSubTab.Stats to Icons.Filled.DateRange,
+                            LedgerSubTab.Record to Icons.Filled.AddCircle,
+                            LedgerSubTab.Accounts to Icons.Filled.Person,
+                        )
+                        ledgerTabs.forEach { (sub, icon) ->
+                            NavigationBarItem(
+                                selected = ledgerSubTab == sub,
+                                onClick = {
+                                    if (sub == LedgerSubTab.Record) {
+                                        val now = android.os.SystemClock.elapsedRealtime()
+                                        val doubleTap = now - lastLedgerRecordTapAt in 1..350
+                                        ledgerSubTab = sub
+                                        if (doubleTap) {
+                                            openLedgerWizard = true
+                                            lastLedgerRecordTapAt = 0L
+                                        } else {
+                                            lastLedgerRecordTapAt = now
+                                        }
                                     } else {
-                                        lastLedgerRecordTapAt = now
+                                        ledgerSubTab = sub
+                                        lastLedgerRecordTapAt = 0L
                                     }
-                                } else {
-                                    ledgerSubTab = sub
-                                    lastLedgerRecordTapAt = 0L
-                                }
-                            },
-                            icon = { Icon(icon, contentDescription = null) },
-                            label = { Text(sub.label, style = t.typography.caption) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = t.colors.onPrimaryContainer,
-                                selectedTextColor = t.colors.primary,
-                                indicatorColor = t.colors.primaryContainer,
-                                unselectedIconColor = t.colors.onSurfaceVariant,
-                                unselectedTextColor = t.colors.onSurfaceVariant,
-                            ),
-                        )
+                                },
+                                icon = {
+                                    Icon(
+                                        icon,
+                                        contentDescription = null,
+                                        modifier = if (ledgerSubTab == sub) {
+                                            Modifier.secondaryTabLongPress(
+                                                enabled = true,
+                                                itemCount = LEDGER_SECONDARY_ITEMS.size,
+                                                initialIndex = ledgerSubTab.ordinal,
+                                                onOpen = ::showLedgerSecondaryMenu,
+                                                onMove = ::moveLedgerSecondaryMenu,
+                                                onFinish = { index -> commitLedgerSecondaryMenu(index, switchToLedger = false) },
+                                                onCancel = ::closeLedgerSecondaryMenu,
+                                            )
+                                        } else Modifier,
+                                    )
+                                },
+                                label = { Text(sub.label, style = t.typography.caption) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = t.colors.onPrimaryContainer,
+                                    selectedTextColor = t.colors.primary,
+                                    indicatorColor = t.colors.primaryContainer,
+                                    unselectedIconColor = t.colors.onSurfaceVariant,
+                                    unselectedTextColor = t.colors.onSurfaceVariant,
+                                ),
+                            )
+                        }
+                    }
+                } else {
+                    GlassNavigationBar(style = settings.glassStyle) {
+                        visibleTabs.forEach { item ->
+                            NavigationBarItem(
+                                selected = tab == item,
+                                onClick = {
+                                    if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
+                                    tab = item
+                                },
+                                icon = {
+                                    Icon(
+                                        item.icon,
+                                        contentDescription = null,
+                                        modifier = if (item == MainTab.Ledger) {
+                                            Modifier.secondaryTabLongPress(
+                                                enabled = true,
+                                                itemCount = LEDGER_SECONDARY_ITEMS.size,
+                                                initialIndex = ledgerSubTab.ordinal,
+                                                onOpen = ::showLedgerSecondaryMenu,
+                                                onMove = ::moveLedgerSecondaryMenu,
+                                                onFinish = { index -> commitLedgerSecondaryMenu(index, switchToLedger = true) },
+                                                onCancel = ::closeLedgerSecondaryMenu,
+                                            )
+                                        } else Modifier,
+                                    )
+                                },
+                                label = { Text(stringResource(item.label), style = t.typography.caption) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = t.colors.onPrimaryContainer,
+                                    selectedTextColor = t.colors.primary,
+                                    indicatorColor = t.colors.primaryContainer,
+                                    unselectedIconColor = t.colors.onSurfaceVariant,
+                                    unselectedTextColor = t.colors.onSurfaceVariant,
+                                ),
+                            )
+                        }
                     }
                 }
-            } else {
-                NavigationBar(containerColor = t.colors.surfaceContainer, contentColor = t.colors.onSurface) {
-                    visibleTabs.forEach { item ->
-                        NavigationBarItem(
-                            selected = tab == item,
-                            onClick = { tab = item },
-                            icon = { Icon(item.icon, contentDescription = null) },
-                            label = { Text(stringResource(item.label), style = t.typography.caption) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = t.colors.onPrimaryContainer,
-                                selectedTextColor = t.colors.primary,
-                                indicatorColor = t.colors.primaryContainer,
-                                unselectedIconColor = t.colors.onSurfaceVariant,
-                                unselectedTextColor = t.colors.onSurfaceVariant,
-                            ),
-                        )
-                    }
-                }
-            }
-        },
-    ) { padding ->
-        when (tab) {
-            MainTab.Me -> MeScreen(
-                onRescan = onRescan,
-                onOpenKeepAlive = onOpenKeepAlive,
-                onOpenSettings = { showSettings = true },
-                onOpenChat = { showChat = true },
-                sectionOrder = LayoutResolver.visibleIds(
-                    layout, "meSections",
-                    listOf("settings", "profile", "couple", "mqtt", "server", "updates"),
-                ),
-                modifier = Modifier.padding(padding),
-            )
-            MainTab.Feed -> FeedScreen(
-                vm = hiltViewModel(),
-                showAnniversaryCard = LayoutResolver.isVisible(layout, "feedHeader", "plugin:anniversary"),
-                modifier = Modifier.padding(padding),
-            )
-            MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(
-                vm = hiltViewModel(),
-                cardOrder = LayoutResolver.visibleIds(layout, "taCards", listOf("partner_card", "anniversary", "days")),
-                modifier = Modifier.padding(padding),
-            )
-            MainTab.Anniversary -> {
-                com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
-                    anniversaryVm = hiltViewModel(),
-                    ledgerVm = hiltViewModel(),
-                    today = java.time.LocalDate.now(),
-                    onBack = { tab = MainTab.Me },
-                    showBack = false,
+            },
+        ) { padding ->
+            when (tab) {
+                MainTab.Me -> MeScreen(
+                    onRescan = onRescan,
+                    onOpenKeepAlive = onOpenKeepAlive,
+                    onOpenSettings = { showSettings = true },
+                    onOpenChat = { showChat = true },
+                    sectionOrder = LayoutResolver.visibleIds(
+                        layout, "meSections",
+                        listOf("settings", "profile", "couple", "mqtt", "server", "updates"),
+                    ),
                     modifier = Modifier.padding(padding),
                 )
+                MainTab.Feed -> FeedScreen(
+                    vm = hiltViewModel(),
+                    showAnniversaryCard = LayoutResolver.isVisible(layout, "feedHeader", "plugin:anniversary"),
+                    modifier = Modifier.padding(padding),
+                )
+                MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(
+                    vm = hiltViewModel(),
+                    cardOrder = LayoutResolver.visibleIds(layout, "taCards", listOf("partner_card", "anniversary", "days")),
+                    modifier = Modifier.padding(padding),
+                )
+                MainTab.Anniversary -> {
+                    com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
+                        anniversaryVm = hiltViewModel(),
+                        ledgerVm = hiltViewModel(),
+                        today = java.time.LocalDate.now(),
+                        onBack = { tab = MainTab.Me },
+                        showBack = false,
+                        modifier = Modifier.padding(padding),
+                    )
+                }
+                MainTab.Ledger -> com.qimingnan.couple.ui.ledger.LedgerScreen(
+                    vm = hiltViewModel(),
+                    onBack = { returnToStart() },
+                    showBack = true,
+                    subTab = ledgerSubTab,
+                    autoOpenWizard = openLedgerWizard,
+                    onWizardDismissed = { openLedgerWizard = false },
+                    modifier = Modifier.padding(padding),
+                )
+                MainTab.Period -> com.qimingnan.couple.ui.period.PeriodScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             }
-            MainTab.Ledger -> com.qimingnan.couple.ui.ledger.LedgerScreen(
-                vm = hiltViewModel(),
-                onBack = { returnToStart() },
-                showBack = true,
-                subTab = ledgerSubTab,
-                autoOpenWizard = openLedgerWizard,
-                onWizardDismissed = { openLedgerWizard = false },
-                modifier = Modifier.padding(padding),
-            )
-            MainTab.Period -> com.qimingnan.couple.ui.period.PeriodScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
+        }
+
+        AnimatedVisibility(
+            visible = secondaryMenuVisible,
+            enter = fadeIn() + scaleIn(initialScale = 0.94f) + slideInVertically(initialOffsetY = { it / 3 }),
+            exit = fadeOut() + scaleOut(targetScale = 0.96f) + slideOutVertically(targetOffsetY = { it / 3 }),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = t.spacing.sm, vertical = t.spacing.xs),
+        ) {
+            secondaryMenu?.let { menu ->
+                SecondaryTabOverlay(
+                    menu = menu,
+                    style = settings.glassStyle,
+                    onSelect = { index ->
+                        commitLedgerSecondaryMenu(index, switchToLedger = tab != MainTab.Ledger)
+                    },
+                )
+            }
         }
     }
 }

@@ -46,6 +46,7 @@ import androidx.lifecycle.viewModelScope
 import com.qimingnan.couple.data.settings.AppSettings
 import com.qimingnan.couple.data.settings.DarkMode
 import com.qimingnan.couple.data.settings.FontSize
+import com.qimingnan.couple.data.settings.GlassStyle
 import com.qimingnan.couple.data.settings.SettingsRepository
 import com.qimingnan.couple.data.settings.TabVisibility
 import com.qimingnan.couple.data.update.ShizukuState
@@ -75,6 +76,7 @@ class SettingsViewModel @Inject constructor(
     fun setDynamic(on: Boolean) = viewModelScope.launch { repo.setDynamicColor(on) }
     fun setDarkMode(m: DarkMode) = viewModelScope.launch { repo.setDarkMode(m) }
     fun setFontSize(f: FontSize) = viewModelScope.launch { repo.setFontSize(f) }
+    fun setGlassStyle(style: GlassStyle) = viewModelScope.launch { repo.setGlassStyle(style) }
     fun useServerTheme() = viewModelScope.launch { repo.useServerTheme() }
     fun setPluginEnabled(id: String, enabled: Boolean) = viewModelScope.launch { repo.setPluginEnabled(id, enabled) }
     fun setMonthlyBudget(cents: Long) = viewModelScope.launch { repo.setMonthlyBudget(cents) }
@@ -235,6 +237,14 @@ fun SettingsScreen(
             SectionCard("字号") {
                 ChipRow(FontSize.entries, s.fontSize, { it.label }) { vm.setFontSize(it) }
                 Text("预览：今天也想你 ❤", style = t.typography.body, color = t.colors.onSurface)
+            }
+            SectionCard("底栏质感") {
+                ChipRow(GlassStyle.entries, s.glassStyle, { it.label }) { vm.setGlassStyle(it) }
+                Text(
+                    if (s.glassStyle == GlassStyle.Liquid) "液态玻璃会随主题色缓慢流动，高光更明显。"
+                    else "毛玻璃更安静，适合日常长时间使用。",
+                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                )
             }
             SectionCard("插件") {
                 com.qimingnan.couple.data.plugin.PluginRegistry.all.forEach { plugin ->
