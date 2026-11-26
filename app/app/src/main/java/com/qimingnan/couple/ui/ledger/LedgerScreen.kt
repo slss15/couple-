@@ -52,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.Font
@@ -90,6 +91,39 @@ enum class LedgerSubTab(val label: String) {
 }
 
 /**
+ * 顶部三段切换（统计 / 记一笔 / 账户）。calm 版不给记账第二套底栏，
+ * 三个二级页由这里切；底栏长按「记账」图标仍能弹出覆盖底栏的快捷浮层。
+ */
+@Composable
+private fun LedgerSegmented(current: LedgerSubTab, onChange: (LedgerSubTab) -> Unit) {
+    val t = LocalCoupleTokens.current
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = t.spacing.lg, vertical = t.spacing.sm)
+            .clip(t.shapes.pill).background(t.colors.surfaceContainer)
+            .padding(t.spacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
+    ) {
+        LedgerSubTab.entries.forEach { sub ->
+            val selected = sub == current
+            Surface(
+                onClick = { if (!selected) onChange(sub) },
+                shape = t.shapes.pill,
+                color = if (selected) t.colors.primaryContainer else Color.Transparent,
+                contentColor = if (selected) t.colors.onPrimaryContainer else t.colors.onSurfaceVariant,
+                modifier = Modifier.weight(1f).heightIn(min = 40.dp),
+            ) {
+                Box(
+                    Modifier.fillMaxWidth().padding(vertical = t.spacing.sm),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(sub.label, style = t.typography.label)
+                }
+            }
+        }
+    }
+}
+
+/**
  * Ordinary personal ledger screen (PR4), Stitch visual pass.
  *
  * Personal and private: the plugin has its own entries, budgets and accounts.
@@ -109,6 +143,8 @@ fun LedgerScreen(
     modifier: Modifier = Modifier,
     showBack: Boolean = true,
     subTab: LedgerSubTab = LedgerSubTab.Record,
+    /** 顶部三段切换回传：记账是普通底栏 Tab 后，二级页改由页面自己切。 */
+    onSubTabChange: (LedgerSubTab) -> Unit = {},
     autoOpenWizard: Boolean = false,
     onWizardDismissed: () -> Unit = {},
 ) {
@@ -148,7 +184,7 @@ fun LedgerScreen(
     if (subTab == LedgerSubTab.Accounts) {
         accounts.firstOrNull { it.id == selectedAccountId }?.let { detail ->
             Column(
-                Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding()
+                modifier.fillMaxSize().background(t.colors.background)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = t.spacing.lg, vertical = t.spacing.md),
                 verticalArrangement = Arrangement.spacedBy(t.spacing.md),
@@ -173,6 +209,7 @@ fun LedgerScreen(
                 if (!showQuick) onWizardDismissed()
             }) { Text(if (showQuick) "收起" else "立即记账") }
         }
+        LedgerSegmented(subTab, onSubTabChange)
         Column(
             Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(t.spacing.lg),

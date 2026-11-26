@@ -244,122 +244,69 @@ fun MainShell(
             containerColor = t.colors.background,
             contentColor = t.colors.onBackground,
             bottomBar = {
-                if (tab == MainTab.Ledger) {
-                    // 记账专属底栏：顺序统计、记账、账户，记账在中间是默认页；主底栏在这里不显示。
-                    GlassNavigationBar(
-                        style = settings.glassStyle,
-                        itemCount = LedgerSubTab.entries.size,
-                        onDragSelect = { index ->
-                            LedgerSubTab.entries.getOrNull(index)?.let { sub ->
-                                if (sub != ledgerSubTab) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                ledgerSubTab = sub
-                                lastLedgerRecordTapAt = 0L
+                // calm 版只保留一套底栏：记账的二级页改到页面顶部三段切换，
+                // 长按「记账」图标仍可弹出覆盖底栏的二级页浮层。
+                GlassNavigationBar(
+                    style = settings.glassStyle,
+                    itemCount = visibleTabs.size,
+                    onDragSelect = { index ->
+                        visibleTabs.getOrNull(index)?.let { item ->
+                            if (item != tab) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
+                                pinnedTab = null
+                                tab = item
                             }
-                        },
-                    ) {
-                        val ledgerTabs = listOf(
-                            LedgerSubTab.Stats to Icons.Filled.DateRange,
-                            LedgerSubTab.Record to Icons.Filled.AddCircle,
-                            LedgerSubTab.Accounts to Icons.Filled.Person,
-                        )
-                        ledgerTabs.forEach { (sub, icon) ->
-                            NavigationBarItem(
-                                selected = ledgerSubTab == sub,
-                                onClick = {
-                                    if (sub == LedgerSubTab.Record) {
-                                        val now = android.os.SystemClock.elapsedRealtime()
-                                        val doubleTap = now - lastLedgerRecordTapAt in 1..350
-                                        ledgerSubTab = sub
-                                        if (doubleTap) {
-                                            openLedgerWizard = true
-                                            lastLedgerRecordTapAt = 0L
-                                        } else {
-                                            lastLedgerRecordTapAt = now
-                                        }
-                                    } else {
-                                        ledgerSubTab = sub
+                        }
+                    },
+                ) {
+                    visibleTabs.forEach { item ->
+                        NavigationBarItem(
+                            selected = tab == item,
+                            onClick = {
+                                if (item == MainTab.Ledger) {
+                                    val now = android.os.SystemClock.elapsedRealtime()
+                                    val doubleTap = now - lastLedgerRecordTapAt in 1..350
+                                    if (tab != MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
+                                    if (doubleTap) {
+                                        // 双击「记账」直接打开记一笔向导（原来挂在记账专属底栏上）。
+                                        ledgerSubTab = LedgerSubTab.Record
+                                        openLedgerWizard = true
                                         lastLedgerRecordTapAt = 0L
+                                    } else {
+                                        lastLedgerRecordTapAt = now
                                     }
-                                },
-                                icon = {
-                                    Icon(
-                                        icon,
-                                        contentDescription = null,
-                                        modifier = if (ledgerSubTab == sub) {
-                                            Modifier.secondaryTabLongPress(
-                                                enabled = true,
-                                                itemCount = LEDGER_SECONDARY_ITEMS.size,
-                                                initialIndex = ledgerSubTab.ordinal,
-                                                onOpen = ::showLedgerSecondaryMenu,
-                                                onMove = ::moveLedgerSecondaryMenu,
-                                                onFinish = { index -> commitLedgerSecondaryMenu(index, switchToLedger = false) },
-                                                onCancel = ::closeLedgerSecondaryMenu,
-                                            )
-                                        } else Modifier,
-                                    )
-                                },
-                                label = { Text(sub.label, style = t.typography.caption) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = t.colors.onPrimaryContainer,
-                                    selectedTextColor = t.colors.primary,
-                                    indicatorColor = t.colors.primaryContainer,
-                                    unselectedIconColor = t.colors.onSurfaceVariant,
-                                    unselectedTextColor = t.colors.onSurfaceVariant,
-                                ),
-                            )
-                        }
-                    }
-                } else {
-                    GlassNavigationBar(
-                        style = settings.glassStyle,
-                        itemCount = visibleTabs.size,
-                        onDragSelect = { index ->
-                            visibleTabs.getOrNull(index)?.let { item ->
-                                if (item != tab) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
-                                    pinnedTab = null
-                                    tab = item
                                 }
-                            }
-                        },
-                    ) {
-                        visibleTabs.forEach { item ->
-                            NavigationBarItem(
-                                selected = tab == item,
-                                onClick = {
-                                    if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
-                                    pinnedTab = null
-                                    tab = item
-                                },
-                                icon = {
-                                    Icon(
-                                        item.icon,
-                                        contentDescription = null,
-                                        modifier = if (item == MainTab.Ledger) {
-                                            // 主底栏长按「记账」图标即可弹出二级页；记账页内的当前图标同样可长按。
-                                            Modifier.secondaryTabLongPress(
-                                                enabled = true,
-                                                itemCount = LEDGER_SECONDARY_ITEMS.size,
-                                                initialIndex = ledgerSubTab.ordinal,
-                                                onOpen = ::showLedgerSecondaryMenu,
-                                                onMove = ::moveLedgerSecondaryMenu,
-                                                onFinish = { index -> commitLedgerSecondaryMenu(index, switchToLedger = true) },
-                                                onCancel = ::closeLedgerSecondaryMenu,
-                                            )
-                                        } else Modifier,
-                                    )
-                                },
-                                label = { Text(stringResource(item.label), style = t.typography.caption) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = t.colors.onPrimaryContainer,
-                                    selectedTextColor = t.colors.primary,
-                                    indicatorColor = t.colors.primaryContainer,
-                                    unselectedIconColor = t.colors.onSurfaceVariant,
-                                    unselectedTextColor = t.colors.onSurfaceVariant,
-                                ),
-                            )
-                        }
+                                pinnedTab = null
+                                tab = item
+                            },
+                            icon = {
+                                Icon(
+                                    item.icon,
+                                    contentDescription = null,
+                                    modifier = if (item == MainTab.Ledger) {
+                                        // 长按「记账」图标：弹出覆盖底栏的二级页浮层（统计/记账/账户）。
+                                        Modifier.secondaryTabLongPress(
+                                            enabled = true,
+                                            itemCount = LEDGER_SECONDARY_ITEMS.size,
+                                            initialIndex = ledgerSubTab.ordinal,
+                                            onOpen = ::showLedgerSecondaryMenu,
+                                            onMove = ::moveLedgerSecondaryMenu,
+                                            onFinish = { index -> commitLedgerSecondaryMenu(index, switchToLedger = true) },
+                                            onCancel = ::closeLedgerSecondaryMenu,
+                                        )
+                                    } else Modifier,
+                                )
+                            },
+                            label = { Text(stringResource(item.label), style = t.typography.caption) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = t.colors.onPrimaryContainer,
+                                selectedTextColor = t.colors.primary,
+                                indicatorColor = t.colors.primaryContainer,
+                                unselectedIconColor = t.colors.onSurfaceVariant,
+                                unselectedTextColor = t.colors.onSurfaceVariant,
+                            ),
+                        )
                     }
                 }
             },
@@ -411,8 +358,10 @@ fun MainShell(
                 MainTab.Ledger -> com.qimingnan.couple.ui.ledger.LedgerScreen(
                     vm = hiltViewModel(),
                     onBack = { returnToStart() },
-                    showBack = true,
+                    // 记账现在是普通底栏 Tab：二级页由页面顶部三段切换，不再需要页头返回键。
+                    showBack = false,
                     subTab = ledgerSubTab,
+                    onSubTabChange = { ledgerSubTab = it },
                     autoOpenWizard = openLedgerWizard,
                     onWizardDismissed = { openLedgerWizard = false },
                     modifier = Modifier.padding(padding),
