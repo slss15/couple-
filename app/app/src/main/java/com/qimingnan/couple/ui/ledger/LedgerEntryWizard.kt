@@ -16,13 +16,12 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.qimingnan.couple.data.ledger.*
 import com.qimingnan.couple.theme.LocalCoupleTokens
@@ -32,7 +31,7 @@ import java.time.LocalDate
 import java.util.UUID
 
 /** 普通收支六步、转账五步；每页只处理当前一步，不提供极速全表单。 */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 internal fun LedgerEntryWizard(
     vm: LedgerViewModel,
@@ -106,14 +105,22 @@ internal fun LedgerEntryWizard(
     if (loanEditorOpen && selectedLoanAccount != null) LoanEditor(vm, selectedLoanAccount, cashAccounts, onDismiss = { loanEditorOpen = false })
     val scroll = rememberScrollState()
     LaunchedEffect(step) { scroll.scrollTo(0); error = null; addAccount = false }
-    Dialog(onDismissRequest = { if (!saving) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            color = t.colors.surface, shape = t.shapes.large,
-            modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().widthIn(max = 560.dp)
-                .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.88f).dp).imePadding(),
-        ) {
+    // 「记一笔」是抽屉：贴底滑出，不占整页；六步仍在同一张弹层里走完。
+    ModalBottomSheet(
+        onDismissRequest = { if (!saving) onDismiss() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = t.colors.surface,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = { BottomSheetDefaults.DragHandle(color = t.colors.onSurfaceVariant.copy(alpha = 0.4f)) },
+    ) {
             BackHandler(enabled = !saving) { goBack() }
-            Column(Modifier.padding(t.spacing.lg), verticalArrangement = Arrangement.spacedBy(t.spacing.md)) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.9f).dp)
+                    .imePadding()
+                    .padding(t.spacing.lg),
+                verticalArrangement = Arrangement.spacedBy(t.spacing.md),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("记一笔", style = t.typography.headline, color = t.colors.onSurface)
@@ -276,7 +283,6 @@ internal fun LedgerEntryWizard(
                 }
             }
         }
-    }
 }
 
 @Composable

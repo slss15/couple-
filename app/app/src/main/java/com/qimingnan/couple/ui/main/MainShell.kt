@@ -71,7 +71,6 @@ enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: Im
 
 private val LEDGER_SECONDARY_ITEMS = listOf(
     SecondaryTabItem("stats", "统计", Icons.Filled.DateRange),
-    SecondaryTabItem("record", "记账", Icons.Filled.AddCircle),
     SecondaryTabItem("accounts", "账户", Icons.Filled.Person),
 )
 
@@ -90,7 +89,7 @@ fun MainShell(
     var pinnedTab by rememberSaveable { mutableStateOf<MainTab?>(null) }
     var openLedgerWizard by rememberSaveable { mutableStateOf(false) }
     var lastLedgerRecordTapAt by rememberSaveable { mutableStateOf(0L) }
-    var ledgerSubTab by rememberSaveable { mutableStateOf(LedgerSubTab.Record) }
+    var ledgerSubTab by rememberSaveable { mutableStateOf(LedgerSubTab.Stats) }
     val haptics = LocalHapticFeedback.current
     var secondaryMenu by remember { mutableStateOf<SecondaryTabMenu?>(null) }
     var secondaryMenuVisible by remember { mutableStateOf(false) }
@@ -225,7 +224,7 @@ fun MainShell(
             // 从设置页打开纪念日全屏时保留 showSettings：纪念日盖在设置页上面，
             // 返回键先关纪念日回设置页（BackHandler 里纪念日优先于设置），而不是掉回底栏主页。
             onOpenAnniversary = { showAnniversary = true },
-            onOpenLedger = { showSettings = false; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record },
+            onOpenLedger = { showSettings = false; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Stats },
             onOpenKeepAlive = onOpenKeepAlive,
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
@@ -253,7 +252,7 @@ fun MainShell(
                         visibleTabs.getOrNull(index)?.let { item ->
                             if (item != tab) {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
+                                if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Stats
                                 pinnedTab = null
                                 tab = item
                             }
@@ -267,10 +266,9 @@ fun MainShell(
                                 if (item == MainTab.Ledger) {
                                     val now = android.os.SystemClock.elapsedRealtime()
                                     val doubleTap = now - lastLedgerRecordTapAt in 1..350
-                                    if (tab != MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
+                                    if (tab != MainTab.Ledger) ledgerSubTab = LedgerSubTab.Stats
                                     if (doubleTap) {
-                                        // 双击「记账」直接打开记一笔向导（原来挂在记账专属底栏上）。
-                                        ledgerSubTab = LedgerSubTab.Record
+                                        // 双击「记账」直接拉开记一笔抽屉（不再占一个二级页）。
                                         openLedgerWizard = true
                                         lastLedgerRecordTapAt = 0L
                                     } else {
@@ -285,7 +283,7 @@ fun MainShell(
                                     item.icon,
                                     contentDescription = null,
                                     modifier = if (item == MainTab.Ledger) {
-                                        // 长按「记账」图标：弹出覆盖底栏的二级页浮层（统计/记账/账户）。
+                                        // 长按「记账」图标：弹出覆盖底栏的二级页浮层（统计/账户）。
                                         Modifier.secondaryTabLongPress(
                                             enabled = true,
                                             itemCount = LEDGER_SECONDARY_ITEMS.size,
@@ -316,11 +314,11 @@ fun MainShell(
                     anniversaryVm = hiltViewModel(),
                     ledgerVm = hiltViewModel(),
                     meVm = hiltViewModel(),
-                    onRecord = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record; openLedgerWizard = true },
+                    onRecord = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Stats; openLedgerWizard = true },
                     onOpenTa = { pinnedTab = MainTab.Ta; tab = MainTab.Ta },
                     onOpenAnniversary = { pinnedTab = MainTab.Anniversary; tab = MainTab.Anniversary },
                     onOpenPeriod = { pinnedTab = MainTab.Period; tab = MainTab.Period },
-                    onOpenLedger = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record },
+                    onOpenLedger = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Stats },
                     onOpenFeed = { pinnedTab = null; tab = MainTab.Feed },
                     modifier = Modifier.padding(padding),
                 )
@@ -362,6 +360,16 @@ fun MainShell(
                     showBack = false,
                     subTab = ledgerSubTab,
                     onSubTabChange = { ledgerSubTab = it },
+                    // 在第一个/最后一个二级页还大幅左右滑：切到相邻的底栏 Tab。
+                    onSwipeToTab = { delta ->
+                        val index = visibleTabs.indexOf(tab)
+                        val target = visibleTabs.getOrNull(index + delta)
+                        if (target != null) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            pinnedTab = null
+                            tab = target
+                        }
+                    },
                     autoOpenWizard = openLedgerWizard,
                     onWizardDismissed = { openLedgerWizard = false },
                     modifier = Modifier.padding(padding),

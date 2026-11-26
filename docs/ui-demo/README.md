@@ -44,6 +44,14 @@
 - `preview-three-directions.png`：三方向同屏预览
 
 
+## Ledger（记账：统计 / 账户 + 记一笔抽屉）
+
+- `ledger-swipe.html`：记账页两段切换（统计 / 账户），三种切换方式——点顶部、长按底栏「记账」图标后左右划、在内容上左右划
+- `ledger-swipe.html#0` / `#1`：直接打开某一页；`#sheet`：直接拉开记一笔抽屉
+- 记一笔是贴底抽屉（ModalBottomSheet），不占二级页；双击底栏「记账」图标或点右上角「记一笔」打开
+- 阈值与 App 一致：切二级页 16% 宽度，已在边界时超过 40% 大幅滑动切相邻底栏
+- `preview-ledger-swipe.png` / `preview-ledger-sheet.png`：预览
+
 ## Calm Daily
 
 - `calm.html`：温暖克制版，单手机日常界面

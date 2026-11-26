@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
@@ -86,13 +88,13 @@ import java.util.UUID
 
 enum class LedgerSubTab(val label: String) {
     Stats("统计"),
-    Record("记账"),
     Accounts("账户"),
 }
 
 /**
- * 顶部三段切换（统计 / 记一笔 / 账户）。calm 版不给记账第二套底栏，
- * 三个二级页由这里切；底栏长按「记账」图标仍能弹出覆盖底栏的快捷浮层。
+ * 顶部两段切换（统计 / 账户）。记一笔不再是二级页，改成贴底的抽屉，
+ * 双击底栏「记账」图标直接打开；切换二级页有三种方式——点这里、
+ * 长按底栏「记账」图标后左右滑、在页面内容上左右滑。
  */
 @Composable
 private fun LedgerSegmented(current: LedgerSubTab, onChange: (LedgerSubTab) -> Unit) {
@@ -142,9 +144,11 @@ fun LedgerScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     showBack: Boolean = true,
-    subTab: LedgerSubTab = LedgerSubTab.Record,
-    /** 顶部三段切换回传：记账是普通底栏 Tab 后，二级页改由页面自己切。 */
+    subTab: LedgerSubTab = LedgerSubTab.Stats,
+    /** 顶部两段切换回传：记账是普通底栏 Tab 后，二级页改由页面自己切。 */
     onSubTabChange: (LedgerSubTab) -> Unit = {},
+    /** 已经在第一个/最后一个二级页还大幅左/右滑时，切到相邻底栏 Tab（-1 / +1）。 */
+    onSwipeToTab: (Int) -> Unit = {},
     autoOpenWizard: Boolean = false,
     onWizardDismissed: () -> Unit = {},
 ) {
@@ -200,218 +204,143 @@ fun LedgerScreen(
     }
 
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = t.spacing.xs), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = t.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
             Text("记账", style = t.typography.headline, color = t.colors.onSurface)
             Spacer(Modifier.weight(1f))
-            if (subTab == LedgerSubTab.Record) Button(onClick = {
-                showQuick = !showQuick
-                if (!showQuick) onWizardDismissed()
-            }) { Text(if (showQuick) "收起" else "立即记账") }
-        }
-        LedgerSegmented(subTab, onSubTabChange)
-        Column(
-            Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
-        ) {
-            operationError?.let { Text(it, color = t.colors.error) }
-            if (subTab == LedgerSubTab.Record && !showQuick) {
-                Surface(
-                    onClick = { showQuick = true },
-                    color = t.colors.surfaceContainer,
-                    shape = t.shapes.medium,
-                    modifier = Modifier.fillMaxWidth(),
+            // 记一笔是抽屉：这里留一个常驻入口，双击底栏「记账」图标也能直接打开。
+            Surface(
+                onClick = { showQuick = true },
+                shape = t.shapes.pill,
+                color = t.colors.primaryContainer,
+                contentColor = t.colors.onPrimaryContainer,
+            ) {
+                Row(
+                    Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(t.spacing.md),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
-                    ) {
-                        Icon(Icons.Filled.AddCircle, contentDescription = null, tint = t.colors.primary)
-                        Column(Modifier.weight(1f)) {
-                            Text("快速记账", style = t.typography.title, color = t.colors.onSurface)
-                            Text("双击底部「记账」开始，或点这里", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        }
-                        Text("→", style = t.typography.title, color = t.colors.primary)
-                    }
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("记一笔", style = t.typography.label)
                 }
             }
-            when (subTab) {
-                LedgerSubTab.Record -> {
-                    if (showQuick) LedgerEntryWizard(vm, orderedAccounts, entries, onDismiss = { showQuick = false; onWizardDismissed() })
-                    // 本月一眼：结余大字 + 收入/支出两个小格（单人，不分摊）。
-                    SectionCard("本月 · ${month.year}年${month.monthValue}月") {
-                        Text("结余 ${centsText(totals.netCents)}", style = t.typography.headline, color = t.colors.primary)
-                        Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.md)) {
-                            Text("收入 ${centsText(totals.incomeCents)}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-                            Text("支出 ${centsText(totals.expenseCents)}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-                        }
-                        Button(onClick = { showQuick = true }, modifier = Modifier.fillMaxWidth()) { Text("立即记账 · 分步记账") }
-                    }
-                    SectionCard("账目") {
-                        // 统计与记账共用同一个 month：统计页翻了月份再切回来，这里也放
-                        // 同样的切换条，不然列表已是旧月份、页面上却看不出是几月。
+        }
+        LedgerSegmented(subTab, onSubTabChange)
+        // 三种切换方式：点顶部、长按底栏「记账」图标后左右滑、在页面内容上左右滑。
+        Box(
+            Modifier.fillMaxSize().ledgerSwipe(
+                index = subTab.ordinal,
+                count = LedgerSubTab.entries.size,
+                onMove = { onSubTabChange(LedgerSubTab.entries[it]) },
+                onSwitchTab = onSwipeToTab,
+            ),
+        ) {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
+                verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
+            ) {
+                operationError?.let { Text(it, color = t.colors.error) }
+                when (subTab) {
+                    LedgerSubTab.Stats -> {
                         MonthSwitcher(
                             label = "${month.year}年${month.monthValue}月",
                             onPrev = { vm.setMonth(month.minusMonths(1)) },
                             onNext = { vm.setMonth(month.plusMonths(1)) },
                         )
+                        BalanceHero(totals.netCents, totals.incomeCents, totals.expenseCents)
+                        BudgetCard(
+                            spentCents = totals.expenseCents,
+                            budgetCents = settings.monthlyBudgetCents,
+                            onSaveBudget = { settingsVm.setMonthlyBudget(it) },
+                        )
                         val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
-                            .sortedByDescending { it.occurredOn }
-                        if (monthEntries.isEmpty()) {
-                            Text("还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
-                        }
-                        val today = LocalDate.now()
-                        monthEntries.groupBy { it.occurredOn }.toSortedMap(compareByDescending { it }).forEach { (date, dayEntries) ->
-                            val header = when (date) {
-                                today -> "今天 · ${date.monthValue}月${date.dayOfMonth}日"
-                                today.minusDays(1) -> "昨天 · ${date.monthValue}月${date.dayOfMonth}日"
-                                else -> "${date.monthValue}月${date.dayOfMonth}日"
+                        val expenseSlices = monthEntries.filter { it.type == LedgerEntryType.EXPENSE && it.loanAction == null }
+                            .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
+                            .map { (cat, list) -> CategorySlice(cat, list.sumOf { it.amountCents }, list.size) }
+                            .sortedByDescending { it.cents }
+                        CategoryBreakdownCard("支出分类", expenseSlices, totals.expenseCents, "本月还没有支出。")
+                        val incomeSlices = monthEntries.filter { it.type == LedgerEntryType.INCOME && it.loanAction == null }
+                            .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
+                            .map { (cat, list) -> CategorySlice(cat, list.sumOf { it.amountCents }, list.size) }
+                            .sortedByDescending { it.cents }
+                        CategoryBreakdownCard("收入分类", incomeSlices, totals.incomeCents, "本月还没有收入。")
+                        MonthEntriesCard(month, entries, accountById) { selectedEntry = it }
+                    }
+                    LedgerSubTab.Accounts -> {
+                        // 账户详情已提前全屏呈现（见函数开头），这里只剩列表。
+                        val total = LedgerLogic.totalAssets(accounts, entries, loans)
+                            SectionCard("总资产") {
+                                Text(centsText(total), style = t.typography.headline, color = t.colors.primary)
+                                Text("${accounts.size} 个账户 · 含借出待收回、扣除借入待还", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                             }
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text(header, style = t.typography.label, color = t.colors.onSurfaceVariant, modifier = Modifier.weight(1f))
-                                Text("共${dayEntries.size}笔", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                            if (accounts.isNotEmpty()) SectionCard("资金账户分布") {
+                                val withBalance = accounts.filterNot { it.type.isLoan }.map { a -> a to vm.balance(a, entries) }
+                                    .sortedByDescending { it.second }
+                                val cashTotal = withBalance.sumOf { it.second }
+                                withBalance.forEach { (a, bal) ->
+                                    val share = if (cashTotal > 0) (bal.toDouble() / cashTotal.toDouble() * 100).toInt() else 0
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            AccountIcon(a.type, Modifier.size(32.dp), a.bankCode)
+                                            Text(a.name, style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                                            if (cashTotal > 0) Text("$share%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                                            Text(centsText(bal), style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.padding(start = 8.dp))
+                                        }
+                                        if (cashTotal > 0) RatioBar(share / 100f)
+                                    }
+                                }
                             }
-                            dayEntries.forEach { e ->
-                                LedgerEntryRow(
-                                    onClick = { selectedEntry = e },
-                                    glyph = entryGlyph(e),
-                                    title = when (e.type) {
-                                        LedgerEntryType.EXPENSE -> "支出 · ${e.categoryId ?: "已删除分类"}"
-                                        LedgerEntryType.INCOME -> "收入 · ${e.categoryId ?: "已删除分类"}"
-                                        LedgerEntryType.TRANSFER -> "转账"
+                            Text("我的账户", style = t.typography.title, color = t.colors.onSurface)
+                            if (accounts.size > 1) Text("长按账户，浮起后拖动调整顺序，松手保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                            LongPressReorderableColumn(
+                                items = orderedAccounts,
+                                itemKey = { it.id },
+                                spacing = t.spacing.md,
+                                scrollState = scrollState,
+                                onOrderChange = { order, onSaved -> settingsVm.saveAccountOrder(order, accounts.map { it.id }, onSaved) },
+                            ) { a, _ ->
+                                Surface(
+                                    color = t.colors.surfaceContainer,
+                                    shape = t.shapes.large,
+                                    modifier = Modifier.fillMaxWidth().clickable { selectedAccountId = a.id },
+                                ) {
+                                    Row(Modifier.fillMaxWidth().padding(t.spacing.lg), verticalAlignment = Alignment.CenterVertically) {
+                                        AccountIcon(a.type, Modifier.size(48.dp), a.bankCode)
+                                        Column(Modifier.weight(1f).padding(start = t.spacing.md)) {
+                                            Text(a.name, style = t.typography.title, color = t.colors.onSurface)
+                                            Text(accountTypeLabel(a.type), style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                                        }
+                                        Text(centsText(vm.balance(a, entries)), style = t.typography.title, color = t.colors.onSurface)
+                                    }
+                                }
+                            }
+                            if (accounts.isEmpty()) Text("还没有账户，先在下方添加一个账户。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                            Button(onClick = { showAccounts = true }) { Text("添加账户") }
+                            if (showAccounts) {
+                                // 新建账户表单改到弹窗里（仿借贷编辑弹窗）：表单自带「保存账户」按钮，弹窗只补一个「取消」。
+                                AlertDialog(
+                                    onDismissRequest = { showAccounts = false },
+                                    title = { Text("添加账户") },
+                                    text = {
+                                        Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            AccountForm(vm, onDone = { showAccounts = false })
+                                        }
                                     },
-                                    subtitle = when (e.type) {
-                                        LedgerEntryType.TRANSFER -> "${accountById[e.fromAccountId]?.name ?: "?"} → ${accountById[e.toAccountId]?.name ?: "?"}"
-                                        else -> accountById[e.accountId]?.name ?: ""
-                                    },
-                                    amountText = when (e.type) {
-                                        LedgerEntryType.EXPENSE -> "-${compactMoney(e.amountCents)}"
-                                        LedgerEntryType.INCOME -> "+${compactMoney(e.amountCents)}"
-                                        LedgerEntryType.TRANSFER -> compactMoney(e.amountCents)
-                                    },
-                                    note = e.note,
+                                    confirmButton = {},
+                                    dismissButton = { TextButton(onClick = { showAccounts = false }) { Text("取消") } },
                                 )
                             }
-                        }
                     }
                 }
-                LedgerSubTab.Stats -> {
-                    MonthSwitcher(
-                        label = "${month.year}年${month.monthValue}月",
-                        onPrev = { vm.setMonth(month.minusMonths(1)) },
-                        onNext = { vm.setMonth(month.plusMonths(1)) },
-                    )
-                    SectionCard("本月汇总") {
-                        Text("结余 ${centsText(totals.netCents)}", style = t.typography.headline, color = t.colors.primary)
-                        Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.md)) {
-                            Column(Modifier.weight(1f)) {
-                                Text("本月总收入", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                                Text(centsText(totals.incomeCents), style = t.typography.title, color = t.colors.onSurface)
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text("本月总支出", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                                Text(centsText(totals.expenseCents), style = t.typography.title, color = t.colors.onSurface)
-                            }
-                        }
-                    }
-                    BudgetCard(
-                        spentCents = totals.expenseCents,
-                        budgetCents = settings.monthlyBudgetCents,
-                        onSaveBudget = { settingsVm.setMonthlyBudget(it) },
-                    )
-                    val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
-                    SectionCard("支出分类") {
-                        val byCat = monthEntries.filter { it.type == LedgerEntryType.EXPENSE && it.loanAction == null }
-                            .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
-                            .mapValues { (_, list) -> list.sumOf { it.amountCents } }
-                            .entries.sortedByDescending { it.value }
-                        if (byCat.isEmpty()) Text("本月还没有支出。", style = t.typography.body, color = t.colors.onSurfaceVariant)
-                        val totalExpense = totals.expenseCents.coerceAtLeast(1)
-                        byCat.forEach { (cat, cents) ->
-                            CategoryShareRow(cat, cents, cents.toFloat() / totalExpense.toFloat())
-                        }
-                    }
-                    SectionCard("收入分类") {
-                        val byCat = monthEntries.filter { it.type == LedgerEntryType.INCOME && it.loanAction == null }
-                            .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
-                            .mapValues { (_, list) -> list.sumOf { it.amountCents } }
-                            .entries.sortedByDescending { it.value }
-                        if (byCat.isEmpty()) Text("本月还没有收入。", style = t.typography.body, color = t.colors.onSurfaceVariant)
-                        val totalIncome = totals.incomeCents.coerceAtLeast(1)
-                        byCat.forEach { (cat, cents) ->
-                            CategoryShareRow(cat, cents, cents.toFloat() / totalIncome.toFloat())
-                        }
-                    }
-                }
-                LedgerSubTab.Accounts -> {
-                    // 账户详情已提前全屏呈现（见函数开头），这里只剩列表。
-                    val total = LedgerLogic.totalAssets(accounts, entries, loans)
-                        SectionCard("总资产") {
-                            Text(centsText(total), style = t.typography.headline, color = t.colors.primary)
-                            Text("${accounts.size} 个账户 · 含借出待收回、扣除借入待还", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        }
-                        if (accounts.isNotEmpty()) SectionCard("资金账户分布") {
-                            val withBalance = accounts.filterNot { it.type.isLoan }.map { a -> a to vm.balance(a, entries) }
-                                .sortedByDescending { it.second }
-                            val cashTotal = withBalance.sumOf { it.second }
-                            withBalance.forEach { (a, bal) ->
-                                val share = if (cashTotal > 0) (bal.toDouble() / cashTotal.toDouble() * 100).toInt() else 0
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                        AccountIcon(a.type, Modifier.size(32.dp), a.bankCode)
-                                        Text(a.name, style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f).padding(start = 8.dp))
-                                        if (cashTotal > 0) Text("$share%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                                        Text(centsText(bal), style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.padding(start = 8.dp))
-                                    }
-                                    if (cashTotal > 0) RatioBar(share / 100f)
-                                }
-                            }
-                        }
-                        Text("我的账户", style = t.typography.title, color = t.colors.onSurface)
-                        if (accounts.size > 1) Text("长按账户，浮起后拖动调整顺序，松手保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        LongPressReorderableColumn(
-                            items = orderedAccounts,
-                            itemKey = { it.id },
-                            spacing = t.spacing.md,
-                            scrollState = scrollState,
-                            onOrderChange = { order, onSaved -> settingsVm.saveAccountOrder(order, accounts.map { it.id }, onSaved) },
-                        ) { a, _ ->
-                            Surface(
-                                color = t.colors.surfaceContainer,
-                                shape = t.shapes.large,
-                                modifier = Modifier.fillMaxWidth().clickable { selectedAccountId = a.id },
-                            ) {
-                                Row(Modifier.fillMaxWidth().padding(t.spacing.lg), verticalAlignment = Alignment.CenterVertically) {
-                                    AccountIcon(a.type, Modifier.size(48.dp), a.bankCode)
-                                    Column(Modifier.weight(1f).padding(start = t.spacing.md)) {
-                                        Text(a.name, style = t.typography.title, color = t.colors.onSurface)
-                                        Text(accountTypeLabel(a.type), style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                                    }
-                                    Text(centsText(vm.balance(a, entries)), style = t.typography.title, color = t.colors.onSurface)
-                                }
-                            }
-                        }
-                        if (accounts.isEmpty()) Text("还没有账户，先在下方添加一个账户。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        Button(onClick = { showAccounts = true }) { Text("添加账户") }
-                        if (showAccounts) {
-                            // 新建账户表单改到弹窗里（仿借贷编辑弹窗）：表单自带「保存账户」按钮，弹窗只补一个「取消」。
-                            AlertDialog(
-                                onDismissRequest = { showAccounts = false },
-                                title = { Text("添加账户") },
-                                text = {
-                                    Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        AccountForm(vm, onDone = { showAccounts = false })
-                                    }
-                                },
-                                confirmButton = {},
-                                dismissButton = { TextButton(onClick = { showAccounts = false }) { Text("取消") } },
-                            )
-                        }
-                    }
-                }
+                Text("个人私密账本，不会出现在动态、聊天或 TA 页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
             }
-            Text("个人私密账本，不会出现在动态、聊天或 TA 页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+        }
+    }
+    if (showQuick) {
+        LedgerEntryWizard(vm, orderedAccounts, entries, onDismiss = { showQuick = false; onWizardDismissed() })
     }
 }
 
@@ -427,36 +356,180 @@ private fun entryGlyph(e: LedgerEntry): String = when (e.type) {
     else -> (e.categoryId ?: "其").firstOrNull()?.toString() ?: "其"
 }
 
-/** 大类首字 + 一句话说明（Stitch 第 4 步大类卡片的副标题，单人版）。 */
-private val CATEGORY_DESCRIPTIONS = mapOf(
-    "餐饮" to "早午晚餐、外卖零食、饮料下午茶",
-    "交通" to "地铁、打车、公交、加油停车",
-    "购物" to "超市买菜、生活用品、服饰穿搭",
-    "居住" to "房租水电、燃气宽带、家居家电",
-    "娱乐" to "电影游戏、演出聚会、旅行度假",
-    "医疗" to "药品、体检、就医问诊",
-    "教育" to "书籍课程、考证培训",
-    "其他" to "不可归类杂项",
-    "工资" to "月薪、奖金",
-    "兼职" to "兼职收入",
-    "理财收益" to "利息、分红",
-    "红包" to "红包、礼金",
-    "退款" to "退款返还",
-)
+/** 统计页一行分类：名字、金额、笔数。 */
+private data class CategorySlice(val name: String, val cents: Long, val count: Int)
 
-/** 统计页分类行：字形 + 大类名 + 金额 + 占比条。 */
+/** 本月结余大卡：渐变底 + 结余大字 + 收入/支出两列 + 支出占收入的比例条。 */
 @Composable
-private fun CategoryShareRow(category: String, cents: Long, fraction: Float) {
+private fun BalanceHero(netCents: Long, incomeCents: Long, expenseCents: Long) {
     val t = LocalCoupleTokens.current
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            GlyphAvatar(category.firstOrNull()?.toString() ?: "其", modifier = Modifier.size(40.dp))
-            Text(category, style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f).padding(start = 8.dp))
-            Text("${(fraction * 100).toInt()}%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-            Text(centsText(cents), style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.padding(start = 8.dp))
+    val ratio = when {
+        incomeCents > 0 -> (expenseCents.toFloat() / incomeCents.toFloat()).coerceIn(0f, 1f)
+        expenseCents > 0 -> 1f
+        else -> 0f
+    }
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(t.shapes.large)
+            .background(Brush.verticalGradient(listOf(t.colors.primaryContainer, t.colors.surfaceContainer)))
+            .padding(t.spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(t.spacing.sm),
+    ) {
+        Text("本月结余", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.72f))
+        Text(centsText(netCents), style = t.typography.display, color = t.colors.onPrimaryContainer)
+        Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.md)) {
+            Column(Modifier.weight(1f)) {
+                Text("收入", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.72f))
+                Text(centsText(incomeCents), style = t.typography.title, color = t.colors.onPrimaryContainer)
+            }
+            Column(Modifier.weight(1f)) {
+                Text("支出", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.72f))
+                Text(centsText(expenseCents), style = t.typography.title, color = t.colors.onPrimaryContainer)
+            }
         }
-        RatioBar(fraction)
-        Text(CATEGORY_DESCRIPTIONS[category] ?: "", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+        Row(
+            Modifier.fillMaxWidth().height(6.dp).clip(t.shapes.pill)
+                .background(t.colors.onPrimaryContainer.copy(alpha = 0.16f)),
+        ) {
+            Box(
+                Modifier.fillMaxWidth(ratio).fillMaxHeight().clip(t.shapes.pill)
+                    .background(t.colors.primary),
+            )
+        }
+        Text(
+            when {
+                incomeCents <= 0 && expenseCents > 0 -> "这个月只有支出。"
+                incomeCents <= 0 -> "这个月还没有收支。"
+                expenseCents > incomeCents -> "支出已超过收入 ${centsText(expenseCents - incomeCents)}"
+                else -> "支出占收入 ${(ratio * 100).toInt()}% · 还剩 ${centsText(incomeCents - expenseCents)}"
+            },
+            style = t.typography.caption,
+            color = t.colors.onPrimaryContainer.copy(alpha = 0.72f),
+        )
+    }
+}
+
+/** 分类占比的横向堆叠条：一眼看出钱主要花在哪几类。 */
+@Composable
+private fun StackedShareBar(fractions: List<Float>) {
+    val t = LocalCoupleTokens.current
+    val palette = listOf(
+        t.colors.primary, t.colors.secondary, t.colors.success,
+        t.colors.warning, t.colors.error, t.colors.outline,
+    )
+    Row(
+        Modifier.fillMaxWidth().height(8.dp).clip(t.shapes.pill),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        fractions.forEachIndexed { index, fraction ->
+            if (fraction <= 0f) return@forEachIndexed
+            Box(
+                Modifier.weight(fraction).fillMaxHeight().clip(t.shapes.pill)
+                    .background(palette[index % palette.size]),
+            )
+        }
+    }
+}
+
+/** 一张分类卡：堆叠占比条 + 每一类的金额、笔数、占比条。 */
+@Composable
+private fun CategoryBreakdownCard(
+    title: String,
+    slices: List<CategorySlice>,
+    totalCents: Long,
+    emptyText: String,
+) {
+    val t = LocalCoupleTokens.current
+    SectionCard(title) {
+        if (slices.isEmpty()) {
+            Text(emptyText, style = t.typography.body, color = t.colors.onSurfaceVariant)
+            return@SectionCard
+        }
+        StackedShareBar(slices.map { if (totalCents > 0) it.cents.toFloat() / totalCents.toFloat() else 0f })
+        slices.forEachIndexed { index, slice ->
+            val fraction = if (totalCents > 0) slice.cents.toFloat() / totalCents.toFloat() else 0f
+            CategoryShareRow(slice.name, slice.cents, fraction, slice.count, index)
+        }
+    }
+}
+
+/** 统计页分类行：字形 + 大类名 + 笔数/占比 + 金额 + 占比条。 */
+@Composable
+private fun CategoryShareRow(category: String, cents: Long, fraction: Float, count: Int, index: Int) {
+    val t = LocalCoupleTokens.current
+    val palette = listOf(
+        t.colors.primary, t.colors.secondary, t.colors.success,
+        t.colors.warning, t.colors.error, t.colors.outline,
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            GlyphAvatar(category.firstOrNull()?.toString() ?: "其", modifier = Modifier.size(36.dp))
+            Column(Modifier.weight(1f).padding(start = t.spacing.sm)) {
+                Text(category, style = t.typography.body, color = t.colors.onSurface)
+                Text("$count 笔 · ${(fraction * 100).toInt()}%", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+            }
+            Text(centsText(cents), style = t.typography.body, color = t.colors.onSurface)
+        }
+        Row(
+            Modifier.fillMaxWidth().height(4.dp).clip(t.shapes.pill).background(t.colors.surfaceContainer),
+        ) {
+            Box(
+                Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight()
+                    .clip(t.shapes.pill).background(palette[index % palette.size]),
+            )
+        }
+    }
+}
+
+/** 本月账目明细：按天分组，点一行看详情/改/删。 */
+@Composable
+private fun MonthEntriesCard(
+    month: java.time.YearMonth,
+    entries: List<LedgerEntry>,
+    accountById: Map<String, LedgerAccount>,
+    onEntryClick: (LedgerEntry) -> Unit,
+) {
+    val t = LocalCoupleTokens.current
+    SectionCard("账目明细") {
+        val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
+            .sortedByDescending { it.occurredOn }
+        if (monthEntries.isEmpty()) {
+            Text("这个月还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
+            return@SectionCard
+        }
+        val today = LocalDate.now()
+        monthEntries.groupBy { it.occurredOn }.toSortedMap(compareByDescending { it }).forEach { (date, dayEntries) ->
+            val header = when (date) {
+                today -> "今天 · ${date.monthValue}月${date.dayOfMonth}日"
+                today.minusDays(1) -> "昨天 · ${date.monthValue}月${date.dayOfMonth}日"
+                else -> "${date.monthValue}月${date.dayOfMonth}日"
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(header, style = t.typography.label, color = t.colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text("共${dayEntries.size}笔", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+            }
+            dayEntries.forEach { e ->
+                LedgerEntryRow(
+                    onClick = { onEntryClick(e) },
+                    glyph = entryGlyph(e),
+                    title = when (e.type) {
+                        LedgerEntryType.EXPENSE -> "支出 · ${e.categoryId ?: "已删除分类"}"
+                        LedgerEntryType.INCOME -> "收入 · ${e.categoryId ?: "已删除分类"}"
+                        LedgerEntryType.TRANSFER -> "转账"
+                    },
+                    subtitle = when (e.type) {
+                        LedgerEntryType.TRANSFER -> "${accountById[e.fromAccountId]?.name ?: "?"} → ${accountById[e.toAccountId]?.name ?: "?"}"
+                        else -> accountById[e.accountId]?.name ?: ""
+                    },
+                    amountText = when (e.type) {
+                        LedgerEntryType.EXPENSE -> "-${compactMoney(e.amountCents)}"
+                        LedgerEntryType.INCOME -> "+${compactMoney(e.amountCents)}"
+                        LedgerEntryType.TRANSFER -> compactMoney(e.amountCents)
+                    },
+                    note = e.note,
+                )
+            }
+        }
     }
 }
 
