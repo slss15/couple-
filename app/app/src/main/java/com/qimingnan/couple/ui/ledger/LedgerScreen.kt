@@ -1,11 +1,13 @@
 package com.qimingnan.couple.ui.ledger
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -205,18 +207,27 @@ fun LedgerScreen(
 
     Column(modifier) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = t.spacing.sm),
+            Modifier.fillMaxWidth().padding(
+                // 有返回键时让图标左边缘落在内容的 16dp 上；没有返回键时标题自己对齐 16dp。
+                start = if (showBack) t.spacing.xs else t.spacing.lg,
+                end = t.spacing.lg,
+                top = t.spacing.sm,
+                bottom = t.spacing.xs,
+            ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
             Text("记账", style = t.typography.headline, color = t.colors.onSurface)
             Spacer(Modifier.weight(1f))
             // 记一笔是抽屉：这里留一个常驻入口，双击底栏「记账」图标也能直接打开。
+            // 描边而不是实心 primaryContainer：顶部两段切换的选中态已经是实心强调色，
+            // 两个橙色块上下挨着会互相抢，主次反而分不出来。
             Surface(
                 onClick = { showQuick = true },
                 shape = t.shapes.pill,
-                color = t.colors.primaryContainer,
-                contentColor = t.colors.onPrimaryContainer,
+                color = t.colors.surface,
+                contentColor = t.colors.primary,
+                border = BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.45f)),
             ) {
                 Row(
                     Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
@@ -272,9 +283,16 @@ fun LedgerScreen(
                     LedgerSubTab.Accounts -> {
                         // 账户详情已提前全屏呈现（见函数开头），这里只剩列表。
                         val total = LedgerLogic.totalAssets(accounts, entries, loans)
-                            SectionCard("总资产") {
-                                Text(centsText(total), style = t.typography.headline, color = t.colors.primary)
-                                Text("${accounts.size} 个账户 · 含借出待收回、扣除借入待还", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                            // 和统计页的结余卡同一套底，两个二级页的大数字长得一样。
+                            TintCard {
+                                Text("总资产", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.86f))
+                                Text(
+                                    centsText(total),
+                                    style = t.typography.display.copy(letterSpacing = 0.sp),
+                                    color = t.colors.onPrimaryContainer,
+                                    maxLines = 1,
+                                )
+                                Text("${accounts.size} 个账户 · 含借出待收回、扣除借入待还", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.86f))
                             }
                             if (accounts.isNotEmpty()) SectionCard("资金账户分布") {
                                 val withBalance = accounts.filterNot { it.type.isLoan }.map { a -> a to vm.balance(a, entries) }
@@ -359,6 +377,31 @@ private fun entryGlyph(e: LedgerEntry): String = when (e.type) {
 /** 统计页一行分类：名字、金额、笔数。 */
 private data class CategorySlice(val name: String, val cents: Long, val count: Int)
 
+/**
+ * 大数字卡的底：surfaceContainer 再叠一层从上往下的主色淡染。
+ *
+ * 不直接把 primaryContainer 当渐变起点，有两个原因：① linepuppy 的 #FF793F 上
+ * 12sp 小字只有 2.9:1，达不到 4.5:1；② 顶部两段切换的选中态已经是实心主色，
+ * 卡片再压一块同样饱和的橙，两块会互相抢。淡染到 0.28 后小字是 8.4:1。
+ */
+@Composable
+private fun TintCard(content: @Composable ColumnScope.() -> Unit) {
+    val t = LocalCoupleTokens.current
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(t.shapes.large)
+            .background(t.colors.surfaceContainer)
+            .background(
+                Brush.verticalGradient(
+                    listOf(t.colors.primaryContainer.copy(alpha = 0.28f), Color.Transparent),
+                ),
+            )
+            .padding(t.spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(t.spacing.sm),
+        content = content,
+    )
+}
+
 /** 本月结余大卡：渐变底 + 结余大字 + 收入/支出两列 + 支出占收入的比例条。 */
 @Composable
 private fun BalanceHero(netCents: Long, incomeCents: Long, expenseCents: Long) {
@@ -368,22 +411,22 @@ private fun BalanceHero(netCents: Long, incomeCents: Long, expenseCents: Long) {
         expenseCents > 0 -> 1f
         else -> 0f
     }
-    Column(
-        Modifier.fillMaxWidth()
-            .clip(t.shapes.large)
-            .background(Brush.verticalGradient(listOf(t.colors.primaryContainer, t.colors.surfaceContainer)))
-            .padding(t.spacing.lg),
-        verticalArrangement = Arrangement.spacedBy(t.spacing.sm),
-    ) {
-        Text("本月结余", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.72f))
-        Text(centsText(netCents), style = t.typography.display, color = t.colors.onPrimaryContainer)
+    TintCard {
+        Text("本月结余", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.86f))
+        Text(
+            centsText(netCents),
+            // display 自带 4sp 字距，金额位数一多会顶到卡片边缘，这里收掉字距。
+            style = t.typography.display.copy(letterSpacing = 0.sp),
+            color = t.colors.onPrimaryContainer,
+            maxLines = 1,
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.md)) {
             Column(Modifier.weight(1f)) {
-                Text("收入", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.72f))
+                Text("收入", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.86f))
                 Text(centsText(incomeCents), style = t.typography.title, color = t.colors.onPrimaryContainer)
             }
             Column(Modifier.weight(1f)) {
-                Text("支出", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.72f))
+                Text("支出", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.86f))
                 Text(centsText(expenseCents), style = t.typography.title, color = t.colors.onPrimaryContainer)
             }
         }
@@ -404,19 +447,34 @@ private fun BalanceHero(netCents: Long, incomeCents: Long, expenseCents: Long) {
                 else -> "支出占收入 ${(ratio * 100).toInt()}% · 还剩 ${centsText(incomeCents - expenseCents)}"
             },
             style = t.typography.caption,
-            color = t.colors.onPrimaryContainer.copy(alpha = 0.72f),
+            color = t.colors.onPrimaryContainer.copy(alpha = 0.86f),
         )
     }
+}
+
+/**
+ * 分类占比的配色，按"相邻两色不能撞"排。
+ * 不放 secondary：它和 success 都是绿的，并排出现在一条堆叠条里分不出来；
+ * 也不放 error：红色放在支出分类里会被读成"超支报警"。
+ */
+@Composable
+private fun categoryPalette(): List<Color> {
+    val t = LocalCoupleTokens.current
+    return listOf(
+        t.colors.primary,
+        t.colors.primaryContainer,
+        t.colors.success,
+        t.colors.warning,
+        t.colors.outline,
+        t.colors.secondary,
+    )
 }
 
 /** 分类占比的横向堆叠条：一眼看出钱主要花在哪几类。 */
 @Composable
 private fun StackedShareBar(fractions: List<Float>) {
     val t = LocalCoupleTokens.current
-    val palette = listOf(
-        t.colors.primary, t.colors.secondary, t.colors.success,
-        t.colors.warning, t.colors.error, t.colors.outline,
-    )
+    val palette = categoryPalette()
     Row(
         Modifier.fillMaxWidth().height(8.dp).clip(t.shapes.pill),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -457,10 +515,7 @@ private fun CategoryBreakdownCard(
 @Composable
 private fun CategoryShareRow(category: String, cents: Long, fraction: Float, count: Int, index: Int) {
     val t = LocalCoupleTokens.current
-    val palette = listOf(
-        t.colors.primary, t.colors.secondary, t.colors.success,
-        t.colors.warning, t.colors.error, t.colors.outline,
-    )
+    val palette = categoryPalette()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             GlyphAvatar(category.firstOrNull()?.toString() ?: "其", modifier = Modifier.size(36.dp))
@@ -471,7 +526,9 @@ private fun CategoryShareRow(category: String, cents: Long, fraction: Float, cou
             Text(centsText(cents), style = t.typography.body, color = t.colors.onSurface)
         }
         Row(
-            Modifier.fillMaxWidth().height(4.dp).clip(t.shapes.pill).background(t.colors.surfaceContainer),
+            // 轨道不能用 surfaceContainer：这张卡自己就是 surfaceContainer，会完全看不见。
+            Modifier.fillMaxWidth().height(4.dp).clip(t.shapes.pill)
+                .background(t.colors.onSurface.copy(alpha = 0.08f)),
         ) {
             Box(
                 Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight()

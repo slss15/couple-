@@ -1,5 +1,6 @@
 package com.qimingnan.couple.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
 import com.qimingnan.couple.theme.LocalCoupleTokens
 
 @Composable
@@ -104,6 +106,10 @@ fun SectionCard(title: String?, modifier: Modifier = Modifier, content: @Composa
         color = t.colors.surfaceContainer,
         contentColor = t.colors.onSurface,
         shape = t.shapes.large,
+        // 发丝描边：linepuppy 浅色里 surfaceContainer(#FFF1EC) 和 background(#FFF8F6)
+        // 只差 4% 亮度，不加边卡片会糊在背景上、失去"这是一张卡"的读法。
+        // 10% 的 outline 在两个模式下都只是隐约一道，不抢内容。
+        border = BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.10f)),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(t.spacing.lg), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {

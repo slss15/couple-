@@ -3,39 +3,51 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#f4eee4" />
+<meta name="theme-color" content="#fff8f6" />
 <title>Couple — 记账：统计 / 账户 + 记一笔抽屉</title>
 <style>
+  /* 全部取自 App 的真实 token：默认种子 linepuppy 浅色（Palette.kt）。
+     改这里的色值前先去改 Palette.kt，两边要能对上。 */
   :root {
-    --cream-50:#fffaf2; --cream-100:#f4eee4; --ink-900:#2c2723; --ink-600:#756b61; --ink-400:#a59a8e;
-    --terracotta-500:#d66c4f; --terracotta-600:#b94f35; --terracotta-100:#f3d7c9;
-    --sage-500:#708a73; --sage-100:#dce7db;
-    --bg:#eee7dd; --surface:#fffaf2; --surface-container:#f6ebe4; --line:rgba(44,39,35,.11);
-    --accent:#b94f35; --accent-soft:#f3d7c9;
+    --bg:#fff8f6;
+    --surface:#ffffff;
+    --surface-container:#fff1ec;
+    --surface-variant:#f2dfd7;
+    --on-surface:#231915;
+    --on-surface-variant:#584239;
+    --primary:#a63b00;
+    --primary-container:#ff793f;
+    --on-primary-container:#652100;
+    --secondary:#4d6546;
+    --secondary-container:#cce8c1;
+    --outline:#8c7168;
+    --success:#1b6d2f;
+    --warning:#7a5900;
+    --error:#ba1a1a;
+    --line:rgba(35,25,21,.10);
     --font-ui:"Inter","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
-    --font-display:Georgia,"Songti SC","Noto Serif SC",serif;
   }
   *{box-sizing:border-box}
   html,body{height:100%}
   body{
-    margin:0;display:grid;place-items:center;min-height:100svh;color:var(--ink-900);font-family:var(--font-ui);
+    margin:0;display:grid;place-items:center;min-height:100svh;color:var(--on-surface);font-family:var(--font-ui);
     background:
-      radial-gradient(circle at 18% 10%, rgba(255,250,242,.75), transparent 34%),
-      radial-gradient(circle at 82% 80%, rgba(214,108,79,.08), transparent 30%),
-      var(--bg);
+      radial-gradient(circle at 18% 10%, rgba(255,255,255,.9), transparent 36%),
+      radial-gradient(circle at 82% 82%, rgba(255,121,63,.10), transparent 32%),
+      #f3e7e0;
     -webkit-font-smoothing:antialiased;
   }
-  .meta{position:fixed;top:26px;left:30px;display:flex;align-items:center;gap:9px;color:rgba(44,39,35,.5);font-size:9px;letter-spacing:.15em;text-transform:uppercase}
-  .meta::before{content:"";width:24px;height:1px;background:rgba(44,39,35,.3)}
+  .meta{position:fixed;top:26px;left:30px;display:flex;align-items:center;gap:9px;color:rgba(35,25,21,.5);font-size:9px;letter-spacing:.15em;text-transform:uppercase}
+  .meta::before{content:"";width:24px;height:1px;background:rgba(35,25,21,.3)}
   .meta button{margin-left:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;background:transparent;color:inherit;font:inherit;letter-spacing:.08em;cursor:pointer}
-  .meta button:hover{background:rgba(255,250,242,.6)}
+  .meta button:hover{background:rgba(255,255,255,.7)}
 
   .phone{
     position:relative;width:390px;height:min(844px, calc(100svh - 56px));min-height:600px;overflow:hidden;
-    border:7px solid #211d1a;border-radius:48px;background:var(--cream-100);
-    box-shadow:0 42px 110px rgba(76,55,38,.24), 0 2px 0 rgba(255,255,255,.65) inset;
+    border:7px solid #1c1714;border-radius:48px;background:var(--bg);
+    box-shadow:0 42px 110px rgba(76,55,38,.22), 0 2px 0 rgba(255,255,255,.7) inset;
   }
-  .phone::before{content:"";position:absolute;top:9px;left:50%;z-index:70;width:86px;height:23px;transform:translateX(-50%);border-radius:999px;background:#171411}
+  .phone::before{content:"";position:absolute;top:9px;left:50%;z-index:70;width:86px;height:23px;transform:translateX(-50%);border-radius:999px;background:#141110}
   .statusbar{position:relative;z-index:30;height:48px;padding:12px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;font-size:11px;font-weight:750}
   .status-icons{display:flex;align-items:center;gap:5px;opacity:.85}
   .app{position:relative;height:calc(100% - 48px)}
@@ -43,154 +55,167 @@
 
   .screen{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden;padding-bottom:104px}
   .screen.active{display:flex}
-  .screen.placeholder{align-items:center;justify-content:center;gap:10px;color:var(--ink-600);font-size:13px}
+  .screen.placeholder{align-items:center;justify-content:center;gap:10px;color:var(--on-surface-variant);font-size:13px}
 
-  .topbar{display:flex;align-items:center;gap:12px;padding:14px 20px 8px}
-  .eyebrow{margin:0 0 5px;color:var(--ink-600);font-size:9px;font-weight:750;letter-spacing:.15em;text-transform:uppercase}
-  .page-title{margin:0;font-size:25px;line-height:1.15;letter-spacing:-.045em;font-weight:700}
+  /* 页头：标题左边缘对齐内容 16，右侧是描边的「记一笔」胶囊 */
+  .topbar{display:flex;align-items:center;gap:12px;padding:8px 16px 4px}
+  .page-title{margin:0;font-size:24px;line-height:32px;letter-spacing:-.02em;font-weight:600}
   .record-btn{
     margin-left:auto;display:inline-flex;align-items:center;gap:5px;min-height:36px;padding:0 14px;
-    border:0;border-radius:999px;background:var(--accent-soft);color:var(--accent);
-    font:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:transform .15s;
+    border:1px solid rgba(140,113,104,.45);border-radius:999px;background:var(--surface);color:var(--primary);
+    font:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:transform .15s;
   }
   .record-btn:active{transform:scale(.96)}
-  .record-btn svg{width:14px;height:14px}
+  .record-btn svg{width:15px;height:15px}
 
-  .segmented{display:flex;gap:4px;margin:4px 20px 10px;padding:4px;border-radius:999px;background:var(--surface-container)}
+  /* 两段切换：轨道 surfaceContainer，选中 primaryContainer */
+  .segmented{display:flex;gap:4px;margin:8px 16px 8px;padding:4px;border-radius:999px;background:var(--surface-container)}
   .segmented button{
-    flex:1;min-height:38px;border:0;border-radius:999px;background:transparent;color:var(--ink-600);
-    font:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background .2s,color .2s,transform .2s;
+    flex:1;min-height:38px;border:0;border-radius:999px;background:transparent;color:var(--on-surface-variant);
+    font:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:background .2s,color .2s,transform .2s;
   }
-  .segmented button.active{background:var(--accent-soft);color:var(--accent);box-shadow:0 1px 3px rgba(44,39,35,.08)}
+  .segmented button.active{background:var(--primary-container);color:var(--on-primary-container)}
   .segmented button:active{transform:scale(.97)}
 
   .viewport{position:relative;flex:1;overflow:hidden;touch-action:pan-y}
   .strip{display:flex;height:100%;will-change:transform}
-  .panel{width:100%;height:100%;flex:0 0 100%;overflow-y:auto;padding:2px 20px 28px;scrollbar-width:none}
+  .panel{width:100%;height:100%;flex:0 0 100%;overflow-y:auto;padding:0 16px 28px;scrollbar-width:none}
   .panel::-webkit-scrollbar{display:none}
 
-  .card{padding:16px;border-radius:22px;background:var(--surface-container);margin-bottom:14px}
-  .card h3{margin:0 0 10px;font-size:13px;font-weight:700}
-  .label{margin:0;color:var(--ink-600);font-size:10px}
+  .card{padding:16px;border-radius:20px;background:var(--surface-container);border:1px solid rgba(140,113,104,.10);margin-bottom:12px}
+  .card h3{margin:0 0 10px;font-size:18px;line-height:26px;font-weight:500}
+  .label{margin:0;color:var(--on-surface-variant);font-size:12px;line-height:16px}
 
-  .month{display:flex;align-items:center;justify-content:center;gap:18px;margin:2px 0 12px;color:var(--ink-600);font-size:11px;letter-spacing:.03em}
+  .month{display:flex;align-items:center;justify-content:center;gap:18px;margin:2px 0 10px;color:var(--on-surface-variant);font-size:12px}
   .month button{width:26px;height:26px;border:0;border-radius:50%;background:transparent;color:inherit;font-size:13px;cursor:pointer}
-  .month button:hover{background:rgba(44,39,35,.06)}
+  .month button:hover{background:rgba(35,25,21,.06)}
 
-  .hero{padding:18px;border-radius:24px;margin-bottom:14px;background:linear-gradient(180deg,#f7e1d5 0%,#f4eae1 58%,#f4eee4 100%)}
-  .hero .label{font-size:10px}
-  .hero .big{margin:6px 0 0;font-family:var(--font-display);font-size:40px;letter-spacing:-.05em;line-height:1}
-  .hero .big small{font-family:var(--font-ui);font-size:12px;color:var(--ink-600);letter-spacing:0}
-  .hero .cols{display:flex;gap:18px;margin-top:15px}
+  /* 结余大卡：surfaceContainer 底 + 主色 0.42 淡染，小字用 0.86 透明度（对比度 5.7:1） */
+  .hero{
+    padding:16px;border-radius:20px;margin-bottom:12px;background:var(--surface-container);
+    border:1px solid rgba(140,113,104,.10);
+    background-image:linear-gradient(180deg, rgba(255,121,63,.28), rgba(255,121,63,0) 100%);
+  }
+  .hero .label{color:rgba(101,33,0,.86);font-size:12px}
+  .hero .big{margin:6px 0 0;font-size:40px;line-height:44px;font-weight:600;letter-spacing:0;color:var(--on-primary-container);white-space:nowrap}
+  .hero .big small{font-size:16px;font-weight:500;color:rgba(101,33,0,.86);margin-left:3px}
+  .hero .cols{display:flex;gap:12px;margin-top:14px}
   .hero .cols div{flex:1}
-  .hero .cols span{display:block;font-size:9px;color:var(--ink-600)}
-  .hero .cols strong{display:block;margin-top:3px;font-size:14px;font-weight:650}
-  .hero .ratio{position:relative;height:6px;margin-top:15px;border-radius:999px;background:rgba(44,39,35,.12);overflow:hidden}
-  .hero .ratio i{position:absolute;top:0;bottom:0;left:0;border-radius:999px;background:var(--accent)}
-  .hero .note{margin:9px 0 0;font-size:9px;color:var(--ink-600)}
+  .hero .cols span{display:block;font-size:12px;color:rgba(101,33,0,.86)}
+  .hero .cols strong{display:block;margin-top:3px;font-size:18px;font-weight:500;color:var(--on-primary-container)}
+  .hero .ratio{position:relative;height:6px;margin-top:14px;border-radius:999px;background:rgba(101,33,0,.16);overflow:hidden}
+  .hero .ratio i{position:absolute;top:0;bottom:0;left:0;border-radius:999px;background:var(--primary)}
+  .hero .note{margin:8px 0 0;font-size:12px;color:rgba(101,33,0,.86)}
 
   .budget-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px}
-  .budget-head strong{font-size:13px}
-  .budget-head span{font-size:10px;color:var(--ink-600)}
-  .track{position:relative;height:7px;border-radius:999px;background:rgba(44,39,35,.1);overflow:hidden}
-  .track i{position:absolute;top:0;bottom:0;left:0;border-radius:999px;background:var(--accent)}
-  .track.over i{background:#c0392b}
-  .budget-note{margin:8px 0 0;font-size:9px;color:#a2402f}
+  .budget-head strong{font-size:18px;font-weight:500}
+  .budget-head span{font-size:12px;color:var(--on-surface-variant)}
+  .track{position:relative;height:7px;border-radius:999px;background:rgba(35,25,21,.10);overflow:hidden}
+  .track i{position:absolute;top:0;bottom:0;left:0;border-radius:999px;background:var(--primary)}
+  .track.over i{background:var(--error)}
+  .budget-note{margin:8px 0 0;font-size:12px;color:var(--error)}
 
-  .stack{display:flex;gap:2px;height:8px;margin-bottom:14px}
+  .stack{display:flex;gap:2px;height:8px;margin-bottom:12px}
   .stack i{display:block;border-radius:999px}
-  .cat{display:flex;align-items:center;gap:10px;padding:7px 0 3px}
-  .cat .mark{width:32px;height:32px;border-radius:11px;background:var(--surface);color:var(--accent);display:grid;place-items:center;font-size:11px}
+  .cat{display:flex;align-items:center;gap:8px;padding:6px 0 2px}
+  .cat .mark{width:36px;height:36px;border-radius:12px;background:var(--surface);color:var(--primary);display:grid;place-items:center;font-size:13px}
   .cat .copy{flex:1;min-width:0}
-  .cat .copy strong{display:block;font-size:12px;font-weight:600}
-  .cat .copy span{display:block;margin-top:2px;font-size:9px;color:var(--ink-600)}
-  .cat .amt{font-size:12px;font-weight:650;white-space:nowrap}
-  .cat-bar{height:4px;margin:4px 0 5px 42px;border-radius:999px;background:rgba(44,39,35,.09)}
+  .cat .copy strong{display:block;font-size:15px;font-weight:400}
+  .cat .copy span{display:block;margin-top:1px;font-size:12px;color:var(--on-surface-variant)}
+  .cat .amt{font-size:15px;white-space:nowrap}
+  .cat-bar{height:4px;margin:4px 0 4px 44px;border-radius:999px;background:rgba(35,25,21,.08)}
   .cat-bar i{display:block;height:100%;border-radius:999px}
 
-  .day{display:flex;align-items:center;justify-content:space-between;margin:14px 0 2px;color:var(--ink-600);font-size:9px;letter-spacing:.05em}
-  .day:first-of-type{margin-top:4px}
-  .tx{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .day{display:flex;align-items:center;justify-content:space-between;margin:12px 0 2px;color:var(--on-surface-variant);font-size:14px;font-weight:500}
+  .day:first-of-type{margin-top:2px}
+  .day span:last-child{font-size:12px;font-weight:400}
+  .tx{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
   .tx:last-child{border-bottom:0}
-  .tx-icon{width:32px;height:32px;display:grid;place-items:center;border-radius:11px;background:var(--surface);color:var(--accent);font-size:11px}
+  .tx-icon{width:32px;height:32px;display:grid;place-items:center;border-radius:11px;background:var(--surface);color:var(--primary);font-size:12px}
   .tx-copy{flex:1;min-width:0}
-  .tx-copy strong{display:block;font-size:12px}
-  .tx-copy span{display:block;margin-top:3px;color:var(--ink-600);font-size:9px}
-  .amount{font-size:12px;font-weight:650;white-space:nowrap}
-  .amount.in{color:var(--sage-500)}
+  .tx-copy strong{display:block;font-size:15px;font-weight:400}
+  .tx-copy span{display:block;margin-top:2px;color:var(--on-surface-variant);font-size:12px}
+  .amount{font-size:15px;white-space:nowrap}
+  .amount.in{color:var(--success)}
 
-  .account{display:flex;align-items:center;gap:11px;padding:13px 0;border-bottom:1px solid var(--line)}
+  .account{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
   .account:last-child{border-bottom:0}
-  .mark{width:34px;height:34px;display:grid;place-items:center;border-radius:12px;background:var(--sage-100);color:var(--sage-500);font-size:11px}
+  .mark{width:34px;height:34px;display:grid;place-items:center;border-radius:12px;background:var(--secondary-container);color:var(--secondary);font-size:12px}
   .account .copy{flex:1}
-  .account .copy strong{display:block;font-size:12px}
-  .account .copy span{display:block;margin-top:3px;color:var(--ink-600);font-size:9px}
-  .account .val{font-family:var(--font-display);font-size:16px}
+  .account .copy strong{display:block;font-size:15px;font-weight:400}
+  .account .copy span{display:block;margin-top:2px;color:var(--on-surface-variant);font-size:12px}
+  .account .val{font-size:18px;font-weight:500}
 
   .edge-hint{
-    position:absolute;left:50%;bottom:18px;transform:translate(-50%,10px);z-index:5;
-    padding:7px 13px;border-radius:999px;background:rgba(44,39,35,.86);color:#fffaf2;font-size:10px;
+    position:absolute;left:50%;bottom:16px;transform:translate(-50%,10px);z-index:5;
+    padding:7px 13px;border-radius:999px;background:rgba(35,25,21,.88);color:#fff8f6;font-size:12px;
     opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;white-space:nowrap;
   }
   .edge-hint.show{opacity:1;transform:translate(-50%,0)}
 
-  /* 底栏 */
+  /* 底栏：GlassSurface（毛玻璃 / 液态玻璃），选中项 primaryContainer */
   .bottom-nav{
-    position:absolute;left:16px;right:16px;bottom:14px;z-index:25;height:68px;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;
-    padding:6px;border:1px solid rgba(44,39,35,.12);border-radius:23px;background:rgba(255,250,242,.82);
-    box-shadow:0 14px 38px rgba(76,55,38,.14);backdrop-filter:blur(18px);overflow:hidden;
+    position:absolute;left:12px;right:12px;bottom:8px;z-index:25;height:72px;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;
+    padding:6px;border:1px solid rgba(35,25,21,.10);border-radius:30px;background:rgba(255,255,255,.72);
+    box-shadow:0 14px 38px rgba(76,55,38,.14);backdrop-filter:blur(20px);overflow:hidden;
   }
-  .bottom-nav::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(44,39,35,.08),transparent 60%);pointer-events:none}
+  .bottom-nav::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,241,236,.25));pointer-events:none}
   .bottom-nav.liquid::after{
-    content:"";position:absolute;inset:-40%;background:linear-gradient(115deg,transparent 35%,rgba(185,79,53,.22) 48%,rgba(255,250,242,.5) 52%,transparent 65%);
+    content:"";position:absolute;inset:-40%;background:linear-gradient(115deg,transparent 35%,rgba(255,121,63,.26) 48%,rgba(255,255,255,.6) 52%,transparent 65%);
     animation:sheen 5.2s linear infinite;pointer-events:none;
   }
   @keyframes sheen{from{transform:translateX(-45%)}to{transform:translateX(45%)}}
-  .nav-item{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:54px;border:0;border-radius:17px;background:transparent;color:var(--ink-400);font:inherit;font-size:9px;cursor:pointer;transition:color .2s;touch-action:none}
-  .nav-item.active{color:var(--accent)}
-  .nav-icon{width:34px;height:25px;display:grid;place-items:center;border-radius:999px;transition:background .2s,transform .2s}
-  .nav-item.active .nav-icon{background:var(--accent-soft);transform:translateY(-1px)}
-  .nav-icon svg{width:17px;height:17px}
+  .nav-item{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:56px;border:0;border-radius:20px;background:transparent;color:var(--on-surface-variant);font:inherit;font-size:11px;cursor:pointer;transition:color .2s;touch-action:none}
+  .nav-item.active{color:var(--on-primary-container)}
+  .nav-icon{width:38px;height:26px;display:grid;place-items:center;border-radius:999px;transition:background .2s,transform .2s}
+  .nav-item.active .nav-icon{background:rgba(255,121,63,.92);transform:translateY(-1px)}
+  .nav-icon svg{width:18px;height:18px}
 
-  /* 长按「记账」浮出的二级页选择条 */
+  /* 长按「记账」浮出的二级页浮层 */
   .seg-overlay{
-    position:absolute;left:16px;right:16px;bottom:88px;z-index:40;display:flex;gap:6px;padding:6px;border-radius:20px;
-    background:rgba(44,39,35,.9);box-shadow:0 18px 40px rgba(44,39,35,.3);
-    opacity:0;transform:translateY(8px) scale(.98);pointer-events:none;transition:opacity .16s,transform .16s;
+    position:absolute;left:12px;right:12px;bottom:92px;z-index:40;display:flex;gap:8px;padding:12px 14px;border-radius:30px;
+    background:rgba(255,255,255,.94);border:1px solid rgba(35,25,21,.10);backdrop-filter:blur(18px);
+    box-shadow:0 18px 40px rgba(76,55,38,.20);
+    opacity:0;transform:translateY(10px) scale(.97);pointer-events:none;transition:opacity .16s,transform .16s;
   }
   .seg-overlay.open{opacity:1;transform:none}
-  .seg-chip{flex:1;min-height:38px;border:0;border-radius:14px;background:transparent;color:rgba(255,250,242,.62);font:inherit;font-size:12px;font-weight:600;transition:background .12s,color .12s}
-  .seg-chip.active{background:rgba(255,250,242,.95);color:var(--accent)}
+  .seg-chip{flex:1;min-height:58px;border:1px solid rgba(35,25,21,.08);border-radius:20px;background:rgba(255,255,255,.4);color:var(--on-surface-variant);font:inherit;font-size:12px;font-weight:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+  .seg-chip.active{background:rgba(255,121,63,.92);color:var(--on-primary-container);border-color:rgba(166,59,0,.28)}
+  .seg-chip svg{width:20px;height:20px}
+  .seg-hint{position:absolute;top:-22px;left:14px;font-size:12px;color:var(--on-surface-variant)}
 
   /* 记一笔抽屉 */
-  .sheet-scrim{position:absolute;inset:0;z-index:60;background:rgba(44,39,35,.34);opacity:0;pointer-events:none;transition:opacity .24s}
+  .sheet-scrim{position:absolute;inset:0;z-index:60;background:rgba(35,25,21,.32);opacity:0;pointer-events:none;transition:opacity .24s}
   .sheet-scrim.open{opacity:1;pointer-events:auto}
   .sheet{
-    position:absolute;left:0;right:0;bottom:0;z-index:61;max-height:84%;overflow-y:auto;
-    padding:10px 20px 26px;border-radius:28px 28px 0 0;background:var(--surface);
+    position:absolute;left:0;right:0;bottom:0;z-index:61;height:auto;max-height:88%;overflow-y:auto;
+    padding:8px 16px 24px;border-radius:28px 28px 0 0;background:var(--surface);
     box-shadow:0 -18px 48px rgba(76,55,38,.22);transform:translateY(103%);transition:transform .3s cubic-bezier(.2,.8,.2,1);
   }
   .sheet.open{transform:translateY(0)}
-  .handle{width:38px;height:4px;margin:2px auto 14px;border-radius:999px;background:rgba(44,39,35,.18)}
+  .handle{width:32px;height:4px;margin:4px auto 14px;border-radius:999px;background:rgba(88,66,57,.4)}
   .sheet-head{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
-  .sheet-head h3{margin:0;font-size:16px}
-  .sheet-head span{font-size:10px;color:var(--ink-600)}
-  .amount-big{margin:6px 0 10px;font-family:var(--font-display);font-size:46px;letter-spacing:-.05em;line-height:1}
-  .amount-big span{color:var(--accent)}
+  .sheet-head h3{margin:0;font-size:24px;line-height:32px;font-weight:600}
+  .sheet-head span{font-size:12px;color:var(--on-surface-variant)}
+  .amount-big{margin:8px 0 10px;font-size:40px;line-height:44px;font-weight:600;color:var(--on-surface)}
+  .amount-big span{color:var(--primary)}
+  .dots{display:flex;gap:5px;margin:8px 0 2px}
+  .dots i{height:4px;flex:1;border-radius:999px;background:rgba(35,25,21,.12)}
+  .dots i.on{background:var(--primary)}
   .chips{display:flex;flex-wrap:wrap;gap:7px}
-  .chip{min-height:32px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink-600);font:inherit;font-size:11px;cursor:pointer}
-  .chip.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .chip{min-height:34px;padding:0 13px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--on-surface-variant);font:inherit;font-size:14px;cursor:pointer}
+  .chip.active{border-color:var(--primary);background:rgba(255,121,63,.18);color:var(--primary)}
   .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
-  .key{min-height:44px;border:1px solid var(--line);border-radius:14px;background:var(--surface);font-family:var(--font-display);font-size:19px;cursor:pointer}
-  .key:active{background:var(--accent-soft)}
-  .primary{width:100%;min-height:50px;margin-top:14px;border:0;border-radius:16px;background:var(--accent);color:#fffaf2;font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+  .key{min-height:46px;border:1px solid var(--line);border-radius:14px;background:var(--surface);font-size:19px;cursor:pointer;color:var(--on-surface)}
+  .key:active{background:var(--surface-container)}
+  .primary{width:100%;min-height:50px;margin-top:14px;border:0;border-radius:16px;background:var(--primary);color:#fff;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
   .primary:active{transform:scale(.99)}
 
-  .legend{position:fixed;right:28px;bottom:28px;max-width:262px;padding:14px 16px;border:1px solid rgba(44,39,35,.1);border-radius:18px;background:rgba(255,250,242,.7);backdrop-filter:blur(10px);color:var(--ink-600);font-size:11px;line-height:1.7}
-  .legend b{color:var(--ink-900);font-weight:650}
+  .legend{position:fixed;right:28px;bottom:28px;max-width:268px;padding:14px 16px;border:1px solid rgba(35,25,21,.1);border-radius:18px;background:rgba(255,255,255,.72);backdrop-filter:blur(10px);color:var(--on-surface-variant);font-size:11px;line-height:1.7}
+  .legend b{color:var(--on-surface);font-weight:650}
   @media (max-width: 900px){
     .meta,.legend{display:none}
-    body{display:block;background:var(--cream-100)}
+    body{display:block;background:var(--bg)}
     .phone{width:100%;height:100svh;min-height:0;border:0;border-radius:0;box-shadow:none}
     .phone::before{display:none}
   }
@@ -218,10 +243,7 @@
 
         <section class="screen active" data-screen="ledger">
           <header class="topbar">
-            <div>
-              <p class="eyebrow">NOVEMBER 2026</p>
-              <h2 class="page-title">记账</h2>
-            </div>
+            <h2 class="page-title">记账</h2>
             <button class="record-btn" id="recordBtn" type="button" aria-label="记一笔">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
               记一笔
@@ -245,108 +267,108 @@
 
                 <div class="hero">
                   <p class="label">本月结余</p>
-                  <p class="big">¥3,240<small>.00</small></p>
+                  <p class="big">3240.00<small>元</small></p>
                   <div class="cols">
-                    <div><span>收入</span><strong>¥8,600</strong></div>
-                    <div><span>支出</span><strong>¥5,360</strong></div>
+                    <div><span>收入</span><strong>8600.00 元</strong></div>
+                    <div><span>支出</span><strong>5360.00 元</strong></div>
                   </div>
                   <div class="ratio"><i style="width:62%"></i></div>
-                  <p class="note">支出占收入 62% · 还剩 ¥3,240</p>
+                  <p class="note">支出占收入 62% · 还剩 3240.00 元</p>
                 </div>
 
                 <div class="card">
                   <div class="budget-head">
                     <strong>本月预算</strong>
-                    <span>¥4,000</span>
+                    <span>4000.00 元</span>
                   </div>
                   <div class="track over"><i style="width:100%"></i></div>
-                  <p class="budget-note">已用 ¥5,360 · 超支 ¥1,360</p>
+                  <p class="budget-note">已用 5360.00 元 · 已超 1360.00 元</p>
                 </div>
 
                 <div class="card">
                   <h3>支出分类</h3>
                   <div class="stack">
-                    <i style="flex:42;background:var(--accent)"></i>
-                    <i style="flex:26;background:var(--sage-500)"></i>
-                    <i style="flex:14;background:#c98a5e"></i>
-                    <i style="flex:11;background:#9a8f7f"></i>
-                    <i style="flex:7;background:#c9b7a4"></i>
+                    <i style="flex:42;background:var(--primary)"></i>
+                    <i style="flex:26;background:var(--primary-container)"></i>
+                    <i style="flex:14;background:var(--success)"></i>
+                    <i style="flex:11;background:var(--warning)"></i>
+                    <i style="flex:7;background:var(--outline)"></i>
                   </div>
 
                   <div class="cat">
                     <div class="mark">餐</div>
                     <div class="copy"><strong>餐饮</strong><span>18 笔 · 42%</span></div>
-                    <span class="amt">¥2,251.00</span>
+                    <span class="amt">2251.00 元</span>
                   </div>
-                  <div class="cat-bar"><i style="width:100%;background:var(--accent)"></i></div>
+                  <div class="cat-bar"><i style="width:100%;background:var(--primary)"></i></div>
 
                   <div class="cat">
                     <div class="mark">居</div>
                     <div class="copy"><strong>居住</strong><span>4 笔 · 26%</span></div>
-                    <span class="amt">¥1,394.00</span>
+                    <span class="amt">1394.00 元</span>
                   </div>
-                  <div class="cat-bar"><i style="width:62%;background:var(--sage-500)"></i></div>
+                  <div class="cat-bar"><i style="width:62%;background:var(--primary-container)"></i></div>
 
                   <div class="cat">
                     <div class="mark">交</div>
                     <div class="copy"><strong>交通</strong><span>9 笔 · 14%</span></div>
-                    <span class="amt">¥750.00</span>
+                    <span class="amt">750.00 元</span>
                   </div>
-                  <div class="cat-bar"><i style="width:33%;background:#c98a5e"></i></div>
+                  <div class="cat-bar"><i style="width:33%;background:var(--success)"></i></div>
 
                   <div class="cat">
                     <div class="mark">购</div>
                     <div class="copy"><strong>购物</strong><span>5 笔 · 11%</span></div>
-                    <span class="amt">¥590.00</span>
+                    <span class="amt">590.00 元</span>
                   </div>
-                  <div class="cat-bar"><i style="width:26%;background:#9a8f7f"></i></div>
+                  <div class="cat-bar"><i style="width:26%;background:var(--warning)"></i></div>
 
                   <div class="cat">
                     <div class="mark">其</div>
                     <div class="copy"><strong>其他</strong><span>3 笔 · 7%</span></div>
-                    <span class="amt">¥375.00</span>
+                    <span class="amt">375.00 元</span>
                   </div>
-                  <div class="cat-bar"><i style="width:17%;background:#c9b7a4"></i></div>
+                  <div class="cat-bar"><i style="width:17%;background:var(--outline)"></i></div>
                 </div>
 
                 <div class="card">
                   <h3>收入分类</h3>
-                  <div class="stack"><i style="flex:1;background:var(--sage-500)"></i></div>
+                  <div class="stack"><i style="flex:1;background:var(--primary)"></i></div>
                   <div class="cat">
-                    <div class="mark" style="background:var(--sage-100);color:var(--sage-500)">薪</div>
+                    <div class="mark">薪</div>
                     <div class="copy"><strong>工资</strong><span>1 笔 · 100%</span></div>
-                    <span class="amt">¥8,600.00</span>
+                    <span class="amt">8600.00 元</span>
                   </div>
-                  <div class="cat-bar"><i style="width:100%;background:var(--sage-500)"></i></div>
+                  <div class="cat-bar"><i style="width:100%;background:var(--primary)"></i></div>
                 </div>
 
                 <div class="card">
                   <h3>账目明细</h3>
-                  <div class="day"><span>今天 · 11月26日</span><span>共 2 笔</span></div>
-                  <div class="tx"><div class="tx-icon">食</div><div class="tx-copy"><strong>支出 · 餐饮</strong><span>微信钱包</span></div><span class="amount">-¥42.00</span></div>
-                  <div class="tx"><div class="tx-icon">行</div><div class="tx-copy"><strong>支出 · 交通</strong><span>微信钱包</span></div><span class="amount">-¥6.00</span></div>
+                  <div class="day"><span>今天 · 11月26日</span><span>共2笔</span></div>
+                  <div class="tx"><div class="tx-icon">食</div><div class="tx-copy"><strong>支出 · 餐饮</strong><span>微信钱包</span></div><span class="amount">-42.00 元</span></div>
+                  <div class="tx"><div class="tx-icon">行</div><div class="tx-copy"><strong>支出 · 交通</strong><span>微信钱包</span></div><span class="amount">-6.00 元</span></div>
 
-                  <div class="day"><span>昨天 · 11月25日</span><span>共 2 笔</span></div>
-                  <div class="tx"><div class="tx-icon">购</div><div class="tx-copy"><strong>支出 · 购物</strong><span>招商银行</span></div><span class="amount">-¥268.00</span></div>
-                  <div class="tx"><div class="tx-icon" style="background:var(--sage-100);color:var(--sage-500)">薪</div><div class="tx-copy"><strong>收入 · 工资</strong><span>招商银行</span></div><span class="amount in">+¥8,600.00</span></div>
+                  <div class="day"><span>昨天 · 11月25日</span><span>共2笔</span></div>
+                  <div class="tx"><div class="tx-icon">购</div><div class="tx-copy"><strong>支出 · 购物</strong><span>招商银行</span></div><span class="amount">-268.00 元</span></div>
+                  <div class="tx"><div class="tx-icon" style="color:var(--success)">薪</div><div class="tx-copy"><strong>收入 · 工资</strong><span>招商银行</span></div><span class="amount in">+8600.00 元</span></div>
                 </div>
 
-                <p class="label" style="text-align:center;margin-top:4px">个人私密账本，不会出现在动态、聊天或 TA 页。</p>
+                <p class="label" style="text-align:center;margin-top:2px">个人私密账本，不会出现在动态、聊天或 TA 页。</p>
               </div>
 
               <div class="panel">
                 <div class="hero">
                   <p class="label">总资产</p>
-                  <p class="big">¥18,420<small>.00</small></p>
-                  <p class="note">3 个账户 · 最近 30 天有 24 笔记账</p>
+                  <p class="big">18420.00<small>元</small></p>
+                  <p class="note">3 个账户 · 含借出待收回、扣除借入待还</p>
                 </div>
                 <div class="card">
                   <h3>账户</h3>
-                  <div class="account"><div class="mark">微</div><div class="copy"><strong>微信钱包</strong><span>日常支出</span></div><span class="val">¥2,180</span></div>
-                  <div class="account"><div class="mark" style="background:var(--accent-soft);color:var(--accent)">招</div><div class="copy"><strong>招商银行</strong><span>储蓄卡</span></div><span class="val">¥16,240</span></div>
-                  <div class="account"><div class="mark">现</div><div class="copy"><strong>现金</strong><span>零钱</span></div><span class="val">¥0</span></div>
+                  <div class="account"><div class="mark">微</div><div class="copy"><strong>微信钱包</strong><span>日常支出</span></div><span class="val">2180.00 元</span></div>
+                  <div class="account"><div class="mark">招</div><div class="copy"><strong>招商银行</strong><span>储蓄卡</span></div><span class="val">16240.00 元</span></div>
+                  <div class="account"><div class="mark">现</div><div class="copy"><strong>现金</strong><span>零钱</span></div><span class="val">0.00 元</span></div>
                 </div>
-                <p class="label" style="text-align:center;margin-top:4px">个人私密账本，不会出现在动态、聊天或 TA 页。</p>
+                <p class="label" style="text-align:center;margin-top:2px">个人私密账本，不会出现在动态、聊天或 TA 页。</p>
               </div>
 
             </div>
@@ -366,36 +388,31 @@
       </nav>
 
       <div class="seg-overlay" id="segOverlay" aria-hidden="true">
-        <button class="seg-chip active" type="button">统计</button>
-        <button class="seg-chip" type="button">账户</button>
+        <span class="seg-hint">左右拖动 · 松手切换</span>
+        <button class="seg-chip active" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M7 9h10M7 13h10M7 17h6"/></svg>
+          统计
+        </button>
+        <button class="seg-chip" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>
+          账户
+        </button>
       </div>
-
     </div>
 
     <div class="sheet-scrim" id="sheetScrim"></div>
     <div class="sheet" id="sheet" role="dialog" aria-label="记一笔">
       <div class="handle"></div>
-      <div class="sheet-head"><h3>记一笔</h3><span>抽屉 · 松手不回页面</span></div>
-      <div class="chips" style="margin-bottom:10px">
-        <button class="chip active" type="button">支出</button>
-        <button class="chip" type="button">收入</button>
-        <button class="chip" type="button">转账</button>
-      </div>
-      <p class="amount-big">¥<span id="amountText">42</span>.00</p>
-      <div class="chips" style="margin-bottom:2px">
-        <button class="chip active" type="button">餐饮</button>
-        <button class="chip" type="button">交通</button>
-        <button class="chip" type="button">购物</button>
-        <button class="chip" type="button">居住</button>
-        <button class="chip" type="button">其他</button>
-      </div>
+      <div class="sheet-head"><h3>记一笔</h3><span>第 1 步 / 共 6 步</span></div>
+      <div class="dots"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+      <p class="amount-big">¥<span id="amountText">42</span></p>
       <div class="keypad">
         <button class="key" type="button">1</button><button class="key" type="button">2</button><button class="key" type="button">3</button>
         <button class="key" type="button">4</button><button class="key" type="button">5</button><button class="key" type="button">6</button>
         <button class="key" type="button">7</button><button class="key" type="button">8</button><button class="key" type="button">9</button>
         <button class="key" type="button">.</button><button class="key" type="button">0</button><button class="key" type="button">⌫</button>
       </div>
-      <button class="primary" id="saveBtn" type="button">保存</button>
+      <button class="primary" id="saveBtn" type="button">下一步</button>
     </div>
   </div>
 
@@ -464,14 +481,14 @@
     edgeHint.classList.add('show');
   }
 
-  // —— 方式 1：点顶部两段 ——
+  // 方式 1：点顶部两段
   segmented.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-index]');
     if (!btn) return;
     setIndex(Number(btn.dataset.index), true);
   });
 
-  // —— 方式 3：在内容上左右划 ——
+  // 方式 3：在内容上左右划
   let startX = 0, startY = 0, dx = 0, dragging = false, pointerId = null;
 
   viewport.addEventListener('pointerdown', (e) => {
@@ -529,7 +546,7 @@
   viewport.addEventListener('pointerup', endDrag);
   viewport.addEventListener('pointercancel', endDrag);
 
-  // —— 方式 2：长按底栏「记账」图标 → 浮出选择条 → 左右划 → 松手生效 ——
+  // 方式 2：长按底栏「记账」图标 → 浮出选择条 → 左右划 → 松手生效
   const ledgerBtn = navItems.find((b) => b.dataset.tab === 'ledger');
   let lpTimer = null, lpActive = false, lpStartX = 0, suppressNavClick = false, lastTap = 0, overlayIndex = 0;
 
@@ -586,7 +603,7 @@
     lpTimer = null;
   });
 
-  // —— 双击「记账」→ 记一笔抽屉 ——
+  // 双击「记账」→ 记一笔抽屉
   ledgerBtn.addEventListener('click', () => {
     if (suppressNavClick) return;
     const now = Date.now();
@@ -612,7 +629,6 @@
   document.getElementById('saveBtn').addEventListener('click', closeSheet);
   document.getElementById('recordBtn').addEventListener('click', openSheet);
 
-  // 抽屉里的键盘、分类、类型只是示意，能点但不会真的记账。
   let amount = '42';
   const amountText = document.getElementById('amountText');
   [...document.querySelectorAll('.key')].forEach((k) => k.addEventListener('click', () => {
@@ -637,10 +653,15 @@
     e.currentTarget.textContent = nav.classList.contains('liquid') ? '切毛玻璃' : '切液态玻璃';
   });
 
-  // 支持 #0 / #1 直接打开某一页、#sheet 直接拉开抽屉，方便截图和分享。
+  // #0 / #1 直达某一页，#sheet 直接拉开抽屉。
   const initial = Number((location.hash || '').slice(1));
   if (Number.isInteger(initial) && initial >= 0 && initial < COUNT) setIndex(initial, false);
-  if ((location.hash || '').indexOf('sheet') >= 0) setTimeout(openSheet, 60);
+  if ((location.hash || '').indexOf('sheet') >= 0) {
+    // 截图模式：去掉动画，避免截到过渡中间帧。
+    sheet.style.transition = 'none';
+    scrim.style.transition = 'none';
+    openSheet();
+  }
 
   window.addEventListener('resize', () => apply(0, false));
   apply(0, false);
