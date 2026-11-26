@@ -30,6 +30,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,15 +49,24 @@ import com.qimingnan.couple.theme.LocalCoupleTokens
 fun GlassNavigationBar(
     style: GlassStyle,
     modifier: Modifier = Modifier,
+    /** 底栏项数；与 onDragSelect 一起启用「按住横向滑动选择」。 */
+    itemCount: Int = 0,
+    onDragSelect: ((Int) -> Unit)? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val t = LocalCoupleTokens.current
+    // 滑动选择的回调每次重组都是新 lambda；用 rememberUpdatedState + remember 固定引用，
+    // 否则 pointerInput 会因 key 变化在手势中途重启，滑到一半就断了。
+    val latestSelect = rememberUpdatedState(onDragSelect)
+    val swipeSelect: (Int) -> Unit = remember { { index: Int -> latestSelect.value?.invoke(index) } }
     Box(
         modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         GlassSurface(
             style = style,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().then(
+                if (itemCount > 1) Modifier.tabBarSwipe(itemCount, swipeSelect) else Modifier,
+            ),
             shape = RoundedCornerShape(30.dp),
         ) {
             NavigationBar(
@@ -127,64 +138,105 @@ private fun GlassSurface(
     content: @Composable () -> Unit,
 ) {
     val t = LocalCoupleTokens.current
+    val isLiquid = style == GlassStyle.Liquid
     val transition = rememberInfiniteTransition(label = "glass")
+    // 两条不同速度的光带：液态玻璃靠它们「流动」，毛玻璃不参与动画。
     val liquid by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(4_800, easing = LinearEasing), RepeatMode.Restart),
+        animationSpec = infiniteRepeatable(tween(5_200, easing = LinearEasing), RepeatMode.Restart),
         label = "glass-shift",
     )
-    val shift = liquid * 900f - 450f
-    val baseBrush = if (style == GlassStyle.Liquid) {
+    val drift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(9_400, easing = LinearEasing), RepeatMode.Reverse),
+        label = "glass-drift",
+    )
+    val shift = liquid * 1_100f - 550f
+    val baseBrush = if (isLiquid) {
         Brush.linearGradient(
             colors = listOf(
-                t.colors.surface.copy(alpha = 0.78f),
-                t.colors.primary.copy(alpha = 0.14f),
-                t.colors.surface.copy(alpha = 0.84f),
-                t.colors.secondary.copy(alpha = 0.12f),
-                t.colors.surface.copy(alpha = 0.76f),
+                t.colors.surface.copy(alpha = 0.72f),
+                t.colors.primary.copy(alpha = 0.18f),
+                t.colors.surface.copy(alpha = 0.88f),
+                t.colors.secondary.copy(alpha = 0.16f),
+                t.colors.surface.copy(alpha = 0.70f),
             ),
             start = Offset(shift, 0f),
-            end = Offset(shift + 900f, 700f),
+            end = Offset(shift + 1_100f, 760f),
         )
     } else {
+        // 毛玻璃：上亮下暗的竖向渐变 + 顶部高光，安静不抢内容。
         Brush.verticalGradient(
-            colors = listOf(t.colors.surface.copy(alpha = 0.86f), t.colors.surfaceContainer.copy(alpha = 0.72f)),
+            colors = listOf(
+                t.colors.surface.copy(alpha = 0.90f),
+                t.colors.surfaceContainer.copy(alpha = 0.64f),
+            ),
         )
     }
 
     Box(
         modifier
-            .shadow(14.dp, shape, clip = false)
+            .shadow(if (isLiquid) 20.dp else 14.dp, shape, clip = false)
             .clip(shape)
             .background(baseBrush)
-            .border(1.dp, t.colors.onSurface.copy(alpha = 0.12f), shape),
+            .border(1.dp, t.colors.onSurface.copy(alpha = if (isLiquid) 0.16f else 0.10f), shape),
     ) {
-        if (style == GlassStyle.Liquid) {
+        // 顶部高光：两种材质都有，液态玻璃更亮。
+        Box(
+            Modifier.matchParentSize().drawBehind {
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            t.colors.onSurface.copy(alpha = if (isLiquid) 0.14f else 0.08f),
+                            t.colors.onSurface.copy(alpha = 0f),
+                        ),
+                        startY = 0f,
+                        endY = size.height * 0.55f,
+                    ),
+                )
+            },
+        )
+        if (isLiquid) {
             Box(
                 Modifier.matchParentSize().drawBehind {
-                    val bandX = size.width * liquid
+                    val w = size.width
+                    val h = size.height
+                    val bandX = w * liquid
                     drawRect(
                         brush = Brush.linearGradient(
                             colors = listOf(
                                 t.colors.onSurface.copy(alpha = 0f),
-                                t.colors.onSurface.copy(alpha = 0.10f),
+                                t.colors.onSurface.copy(alpha = 0.13f),
                                 t.colors.onSurface.copy(alpha = 0f),
                             ),
-                            start = Offset(bandX - size.width * 0.28f, 0f),
-                            end = Offset(bandX + size.width * 0.28f, size.height),
+                            start = Offset(bandX - w * 0.30f, 0f),
+                            end = Offset(bandX + w * 0.30f, h),
+                        ),
+                    )
+                    val driftX = w * drift
+                    drawRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                t.colors.primary.copy(alpha = 0f),
+                                t.colors.primary.copy(alpha = 0.18f),
+                                t.colors.primary.copy(alpha = 0f),
+                            ),
+                            start = Offset(driftX - w * 0.24f, h),
+                            end = Offset(driftX + w * 0.24f, 0f),
+                        ),
+                    )
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(t.colors.onSurface.copy(alpha = 0.12f), t.colors.onSurface.copy(alpha = 0f)),
+                            center = Offset(bandX, h * 0.16f),
+                            radius = h * 1.1f,
                         ),
                     )
                 },
             )
         }
-        Box(
-            Modifier.matchParentSize().background(
-                Brush.verticalGradient(
-                    listOf(t.colors.onSurface.copy(alpha = 0.08f), t.colors.onSurface.copy(alpha = 0f)),
-                ),
-            ),
-        )
         content()
     }
 }

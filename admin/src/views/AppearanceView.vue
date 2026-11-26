@@ -69,6 +69,11 @@ function isLocked(itemId: string): boolean {
   return catalog.value.some((zone) => zone.items.some((item) => item.id === itemId && item.locked))
 }
 
+function visibleByDefault(zoneId: string, itemId: string): boolean {
+  if (zoneId !== 'bottomBar') return itemId !== 'chat_entry'
+  return ['tab_home', 'tab_feed', 'tab_ledger', 'me_entry'].includes(itemId)
+}
+
 function sortedItems(zoneId: string): LayoutItem[] {
   return [...(zoneOf(zoneId)?.items ?? [])].sort((a, b) => a.order - b.order)
 }
@@ -90,7 +95,7 @@ function ensureCatalogItems() {
         item = {
           id: catItem.id,
           order: catItem.locked && catItem.id === 'me_entry' ? 3 : nextOrder++,
-          visible: !catItem.locked && catItem.id !== 'chat_entry' && catItem.id !== 'tab_period',
+          visible: visibleByDefault(cat.id, catItem.id),
           size: 'M',
         }
         zone.items.push(item)

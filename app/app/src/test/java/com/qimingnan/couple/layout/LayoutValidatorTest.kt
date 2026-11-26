@@ -42,8 +42,9 @@ class LayoutValidatorTest {
             .mapZone("topBar") { items -> items + LayoutItem("me_entry", 5, size = ItemSize.S) }
         assertTrue(codes(moved).contains("LOCKED_MOVED"))
 
+        // 只交换锁定项与另一个 Tab 的位置，不制造重复 order，确保只报 LOCKED_MOVED。
         val reordered = LayoutRules.DEFAULT.mapZone("bottomBar") { items ->
-            items.map { when (it.id) { "me_entry" -> it.copy(order = 0); "tab_feed" -> it.copy(order = 3); else -> it } }
+            items.map { when (it.id) { "me_entry" -> it.copy(order = 4); "tab_ta" -> it.copy(order = 3); else -> it } }
         }
         assertEquals(listOf("LOCKED_MOVED"), codes(reordered))
     }
@@ -58,7 +59,14 @@ class LayoutValidatorTest {
     @Test fun capacityAndGridWidthEnforced() {
         val tooMany = LayoutRules.DEFAULT.mapZone("bottomBar") { items -> items + (4..6).map { LayoutItem("extra_$it", it, size = ItemSize.S) } }
         assertTrue(codes(tooMany).contains("ZONE_OVER_CAPACITY"))
-        val tooWide = LayoutRules.DEFAULT.mapZone("bottomBar") { items -> items + LayoutItem("big", 4, size = ItemSize.L) }
+        // 默认底栏可见 4 项各占 2 格（共 8 格，宽 16），再加三个 L 必然超宽。
+        val tooWide = LayoutRules.DEFAULT.mapZone("bottomBar") { items ->
+            items + listOf(
+                LayoutItem("big_a", 4, size = ItemSize.L),
+                LayoutItem("big_b", 5, size = ItemSize.L),
+                LayoutItem("big_c", 6, size = ItemSize.L),
+            )
+        }
         assertTrue(codes(tooWide).contains("ZONE_OVER_WIDTH"))
         // 隐藏的条目不占网格宽度
         val hidden = LayoutRules.DEFAULT.mapZone("feedHeader") { items -> items + LayoutItem("big", 99, visible = false, size = ItemSize.L) }

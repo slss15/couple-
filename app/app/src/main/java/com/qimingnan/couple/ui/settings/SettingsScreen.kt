@@ -100,16 +100,16 @@ class KeepAliveSettingsViewModel @Inject constructor(
     fun setEnabled(on: Boolean) = controller.setEnabled(on)
 }
 
-private val TAB_LABELS = mapOf("tab_feed" to "动态", "tab_ta" to "TA", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
-/** 默认启动页：含独立首页（打开 App 先看到的启动页）和动态等 5 个 Tab。 */
-private val HOME_TAB_LABELS = mapOf(
-    "home_page" to "首页（启动页）",
+private val TAB_LABELS = mapOf(
+    "tab_home" to "首页",
     "tab_feed" to "动态",
     "tab_ta" to "TA",
-    "me_entry" to "我的",
-    "tab_anniversary" to "纪念日",
     "tab_ledger" to "记账",
+    "tab_anniversary" to "纪念日",
+    "tab_period" to "经期",
 )
+/** 默认启动页：底栏任意一个 Tab 都可以设为打开 App 的第一屏，默认是首页。 */
+private val HOME_TAB_LABELS = TAB_LABELS + mapOf("me_entry" to "我的")
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -147,7 +147,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
         ) {
             SectionCard("底部 Tab") {
-                Text("最多显示 5 个，隐藏的 Tab 不在主底栏出现；管理员在布局中关闭的入口不会显示。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text("默认底栏是 首页 / 动态 / 记账 / 我的；TA、纪念日、经期关掉后仍可从首页快捷入口进入。管理员在布局中关闭的入口不会显示。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 TabVisibility.HIDEABLE.forEach { id ->
                     SwitchRow("显示「${TAB_LABELS[id]}」", checked = id !in s.hiddenTabs) { vm.setTabHidden(id, !it) }
                 }
@@ -155,7 +155,7 @@ fun SettingsScreen(
             }
             SectionCard("底部 Tab 顺序") {
                 Text("长按一项，浮起后拖动调整底栏从左到右的顺序，松手保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                val orderLabels = mapOf("tab_feed" to "动态", "tab_ta" to "TA", "me_entry" to "我的", "tab_anniversary" to "纪念日", "tab_ledger" to "记账")
+                val orderLabels = TAB_LABELS + mapOf("me_entry" to "我的")
                 LongPressReorderableColumn(
                     items = s.tabOrder,
                     itemKey = { it },
@@ -169,11 +169,6 @@ fun SettingsScreen(
                 }
                 Text("实时预览", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                    if (s.homeTab == "home_page") {
-                        Surface(color = t.colors.primaryContainer, shape = t.shapes.pill) {
-                            Text("首页", style = t.typography.label, color = t.colors.onPrimaryContainer, modifier = Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm))
-                        }
-                    }
                     s.tabOrder.filter { it == TabVisibility.LOCKED || it !in s.hiddenTabs }.forEach { id ->
                         val selected = s.homeTab == id
                         Surface(
@@ -189,14 +184,19 @@ fun SettingsScreen(
                         }
                     }
                 }
-                Text("高亮的是默认启动页；未设置时默认打开动态。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text("高亮的是默认启动页；未设置时默认打开首页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
             }
             SectionCard("默认启动页") {
-                Text("打开 App 时首先显示哪个页面：选「首页（启动页）」就是独立的首页，也可以选动态等任意一个 Tab。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text("打开 App 时首先显示哪个页面：默认是首页，也可以选任意一个 Tab。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
                     HOME_TAB_LABELS.forEach { (id, label) ->
-                        val pluginId = when (id) { "tab_ledger" -> "ledger"; "tab_anniversary" -> "anniversary"; else -> null }
-                        val available = id == "home_page" || (id !in s.hiddenTabs && (pluginId == null || pluginId !in s.disabledPlugins))
+                        val pluginId = when (id) {
+                            "tab_ledger" -> "ledger"
+                            "tab_anniversary" -> "anniversary"
+                            "tab_period" -> "period"
+                            else -> null
+                        }
+                        val available = id !in s.hiddenTabs && (pluginId == null || pluginId !in s.disabledPlugins)
                         FilterChip(selected = s.homeTab == id, enabled = available, onClick = { vm.setHomeTab(id) }, label = { Text(label) })
                     }
                 }
@@ -241,8 +241,15 @@ fun SettingsScreen(
             SectionCard("底栏质感") {
                 ChipRow(GlassStyle.entries, s.glassStyle, { it.label }) { vm.setGlassStyle(it) }
                 Text(
-                    if (s.glassStyle == GlassStyle.Liquid) "液态玻璃会随主题色缓慢流动，高光更明显。"
-                    else "毛玻璃更安静，适合日常长时间使用。",
+                    if (s.glassStyle == GlassStyle.Liquid) {
+                        "液态玻璃：底栏与二级菜单上有两道不同速度的流动高光，会随主题色变化。"
+                    } else {
+                        "毛玻璃：上亮下暗的静态磨砂质感，更安静，适合日常长时间使用。"
+                    },
+                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                )
+                Text(
+                    "底栏支持按住横向滑动切换；在记账页长按「记账」图标约 1 秒，可弹出覆盖底栏的二级页（统计 / 记账 / 账户），松手即回到原页面。",
                     style = t.typography.caption, color = t.colors.onSurfaceVariant,
                 )
             }

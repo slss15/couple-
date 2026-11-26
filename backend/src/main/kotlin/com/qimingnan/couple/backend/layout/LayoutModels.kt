@@ -40,7 +40,7 @@ object LayoutRules {
 
     val ZONE_CAPACITY: Map<String, Int> = mapOf(
         "topBar" to 4,
-        "bottomBar" to 6,
+        "bottomBar" to 8,
         "feedHeader" to 6,
         "taHeader" to 4,
         "taCards" to 12,
@@ -51,7 +51,7 @@ object LayoutRules {
 
     val ZONE_GRID_WIDTH: Map<String, Int> = mapOf(
         "topBar" to 8,
-        "bottomBar" to 12,
+        "bottomBar" to 16,
         "feedHeader" to 8,
         "taHeader" to 8,
         "taCards" to 48,
@@ -84,12 +84,13 @@ object LayoutRules {
             LayoutZone(
                 "bottomBar",
                 listOf(
-                    LayoutItem("tab_feed", 0),
-                    LayoutItem("tab_ta", 1),
-                    LayoutItem("tab_anniversary", 2),
+                    LayoutItem("tab_home", 0),
+                    LayoutItem("tab_feed", 1),
+                    LayoutItem("tab_ledger", 2),
                     LayoutItem("me_entry", 3),
-                    LayoutItem("tab_ledger", 4),
-                    LayoutItem("tab_period", 5, visible = false),
+                    LayoutItem("tab_ta", 4, visible = false),
+                    LayoutItem("tab_anniversary", 5, visible = false),
+                    LayoutItem("tab_period", 6, visible = false),
                 ),
             ),
             LayoutZone("feedHeader", listOf(LayoutItem("plugin:anniversary", 0, size = ItemSize.L))),

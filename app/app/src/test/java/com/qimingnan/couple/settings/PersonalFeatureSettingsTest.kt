@@ -2,6 +2,7 @@ package com.qimingnan.couple.settings
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.qimingnan.couple.data.ledger.*
 import com.qimingnan.couple.data.settings.*
@@ -22,32 +23,46 @@ class PersonalFeatureSettingsTest {
     @After fun tearDown() { scope.cancel() }
     private fun SettingsRepository.await(predicate: (AppSettings) -> Boolean) = runBlocking { withTimeout(5000) { settings.first(predicate) } }
 
-    @Test fun defaultsToFeedAndCreamTheme() {
-        assertEquals("tab_feed", AppSettings().homeTab)
+    @Test fun defaultsToHomeTabAndCreamTheme() {
+        assertEquals("tab_home", AppSettings().homeTab)
         assertEquals("linepuppy", AppSettings().themeSeed)
         assertTrue(AppSettings().retainRecentTask)
-        assertEquals("tab_feed", SettingsRepository.decode(androidx.datastore.preferences.core.emptyPreferences()).homeTab)
+        assertEquals("tab_home", SettingsRepository.decode(androidx.datastore.preferences.core.emptyPreferences()).homeTab)
     }
     @Test fun startupHonorsPersistedSelectionInsteadOfInitialStateFlowDefault() = runBlocking {
         repo.setHomeTab("tab_ledger")
         assertEquals("tab_ledger", repo.initialSettings().homeTab)
-        repo.setHomeTab("home_page")
-        assertEquals("home_page", repo.initialSettings().homeTab)
         repo.setHomeTab("unknown")
-        assertEquals("home_page", repo.initialSettings().homeTab)
+        assertEquals("tab_ledger", repo.initialSettings().homeTab)
     }
-    @Test fun hiddenOrDisabledStartFallsBackToVisibleFeedOrMe() {
-        assertEquals("tab_feed", StartupPage.resolve("tab_ledger", listOf("tab_feed", "me_entry")))
+    /** 旧版独立首页（home_page）持久值在读取与写入时都迁移到 tab_home。 */
+    @Test fun legacyStandaloneHomeMigratesToHomeTab() = runBlocking {
+        store.edit { it[stringPreferencesKey("home_tab")] = "home_page" }
+        assertEquals("tab_home", repo.initialSettings().homeTab)
+        assertEquals("tab_home", StartupPage.normalize("home_page"))
+        repo.setHomeTab("home_page")
+        assertEquals("tab_home", repo.initialSettings().homeTab)
+    }
+    @Test fun hiddenStartFallsBackToDefaultHomeThenMe() {
+        // 选中的 Tab 被隐藏时先回默认首页，首页也隐藏时回「我的」。
+        assertEquals("tab_home", StartupPage.resolve("tab_ledger", listOf("tab_home", "tab_feed", "me_entry")))
+        assertEquals("me_entry", StartupPage.resolve("tab_ledger", listOf("tab_feed", "me_entry")))
         assertEquals("me_entry", StartupPage.resolve("tab_feed", listOf("me_entry")))
-        assertEquals("home_page", StartupPage.resolve("home_page", listOf("me_entry")))
+        assertEquals("me_entry", StartupPage.resolve("home_page", listOf("me_entry")))
     }
     @Test fun consecutiveTabReordersAreNotLost() = runBlocking {
         repo.moveTabOrder("tab_ledger", -1)
         repo.moveTabOrder("tab_ledger", -1)
         repo.moveTabOrder("tab_ledger", -1)
-        assertEquals(listOf("tab_feed", "tab_ledger", "tab_ta", "me_entry", "tab_anniversary"), repo.initialSettings().tabOrder)
+        assertEquals(
+            listOf("tab_ledger", "tab_home", "tab_feed", "me_entry", "tab_ta", "tab_anniversary", "tab_period"),
+            repo.initialSettings().tabOrder,
+        )
         repo.moveTabOrder("tab_feed", -1)
-        assertEquals("tab_feed", repo.initialSettings().tabOrder.first())
+        assertEquals(
+            listOf("tab_ledger", "tab_feed", "tab_home", "me_entry", "tab_ta", "tab_anniversary", "tab_period"),
+            repo.initialSettings().tabOrder,
+        )
     }
     @Test fun accountReorderRemovesDeletedIdsAndAddsNewAccounts() = runBlocking {
         repo.moveAccountOrder("c", -1, listOf("a", "b", "c"))
@@ -62,7 +77,10 @@ class PersonalFeatureSettingsTest {
         repo.setTabOrder(listOf("tab_ledger", "tab_feed", "tab_ta", "me_entry", "tab_anniversary"))
         repo.setTabOrder(listOf("tab_ta", "tab_ta", "unknown", "tab_ledger"))
         val state = repo.initialSettings()
-        assertEquals(listOf("tab_ta", "tab_ledger", "tab_feed", "me_entry", "tab_anniversary"), state.tabOrder)
+        assertEquals(
+            listOf("tab_ta", "tab_ledger", "tab_home", "tab_feed", "me_entry", "tab_anniversary", "tab_period"),
+            state.tabOrder,
+        )
         assertEquals("tab_ledger", state.homeTab)
         assertTrue("tab_ta" in state.hiddenTabs)
     }

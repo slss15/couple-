@@ -36,6 +36,8 @@ data class CoupleColors(
     val onWarning: Color,
     val sharingIndicator: Color,
     val onSharingIndicator: Color,
+    val onHero: Color,
+    val heroScrim: Color,
 ) {
     companion object {
         fun from(p: CouplePalette) = CoupleColors(
@@ -51,6 +53,7 @@ data class CoupleColors(
             success = Color(p.success), onSuccess = Color(p.onSuccess),
             warning = Color(p.warning), onWarning = Color(p.onWarning),
             sharingIndicator = Color(p.sharingIndicator), onSharingIndicator = Color(p.onSharingIndicator),
+            onHero = Color(p.onHero), heroScrim = Color(p.heroScrim),
         )
     }
 }

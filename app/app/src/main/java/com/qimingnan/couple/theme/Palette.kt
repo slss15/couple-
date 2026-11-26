@@ -30,6 +30,9 @@ data class CouplePalette(
     /** “正在共享”醒目指示（plan §5 TA） */
     val sharingIndicator: Long,
     val onSharingIndicator: Long,
+    /** 首页日落插画上的固定浅色文字；插画本身不随深色模式反色。 */
+    val onHero: Long = 0xFFFFF8F2,
+    val heroScrim: Long = 0xFF2E2522,
 ) {
     /** 文字/前景色 与 背景色 的配对，要求对比度 ≥ 4.5:1。 */
     fun textPairs(): Map<String, Pair<Long, Long>> = mapOf(

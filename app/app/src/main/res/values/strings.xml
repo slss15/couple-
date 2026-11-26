@@ -4,6 +4,7 @@
     <string name="app_name">Couple</string>
 
     <string name="tab_chat">聊天</string>
+    <string name="tab_home">首页</string>
     <string name="tab_feed">动态</string>
     <string name="tab_ta">TA</string>
     <string name="tab_me">我的</string>

@@ -6,8 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LayoutResolverTest {
-    private val allTabs = listOf("tab_feed", "tab_ta", "me_entry", "tab_anniversary", "tab_ledger", "tab_period")
-    private val fallback = listOf("tab_feed", "tab_ta", "me_entry", "tab_anniversary", "tab_ledger")
+    private val allTabs = listOf("tab_home", "tab_feed", "tab_ta", "me_entry", "tab_anniversary", "tab_ledger", "tab_period")
+    private val fallback = listOf("tab_home", "tab_feed", "tab_ledger", "me_entry", "tab_ta", "tab_anniversary", "tab_period")
 
     @Test fun serverOrderWinsWhenUserHasNotCustomized() {
         val layout = LayoutRules.DEFAULT.copy(zones = LayoutRules.DEFAULT.zones.map { zone ->
@@ -23,8 +23,15 @@ class LayoutResolverTest {
     }
 
     @Test fun localOrderWinsInsideServerVisibleSet() {
-        val local = listOf("tab_ledger", "tab_feed", "tab_ta", "me_entry", "tab_anniversary")
+        // 默认布局可见项是 首页/动态/记账/我的；本地顺序在这四项内优先。
+        val local = listOf("tab_ledger", "tab_home", "tab_feed", "me_entry")
         assertEquals(local, LayoutResolver.resolveTabOrder(LayoutRules.DEFAULT, local, true, allTabs, fallback))
+        // 本地顺序里被服务端隐藏的 Tab 不会因此重新出现。
+        val stale = listOf("tab_ta", "tab_ledger", "tab_feed", "me_entry")
+        assertEquals(
+            listOf("tab_ledger", "tab_feed", "me_entry", "tab_home"),
+            LayoutResolver.resolveTabOrder(LayoutRules.DEFAULT, stale, true, allTabs, fallback),
+        )
     }
 
     @Test fun serverHiddenTabCannotBeRestoredLocally() {

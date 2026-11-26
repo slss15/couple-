@@ -94,7 +94,12 @@ class AppearanceTest {
         val tooMany = LayoutRules.DEFAULT.copy(
             zones = LayoutRules.DEFAULT.zones.map { zone ->
                 if (zone.id != "bottomBar") zone
-                else zone.copy(items = zone.items + LayoutItem("tab_extra", 99, visible = false))
+                else zone.copy(
+                    items = zone.items + listOf(
+                        LayoutItem("tab_extra", 99, visible = false),
+                        LayoutItem("tab_extra2", 100, visible = false),
+                    ),
+                )
             },
         )
         assertEquals(400, client.putAppearance(admin.accessToken, AppearanceUpdate(layout = tooMany)).status.value)

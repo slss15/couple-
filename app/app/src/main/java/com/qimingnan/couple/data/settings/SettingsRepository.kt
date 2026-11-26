@@ -39,8 +39,9 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
     suspend fun initialSettings(): AppSettings = decode(store.data.catch { emit(emptyPreferences()) }.first())
 
     suspend fun setHomeTab(id: String) {
-        if (id != StartupPage.HOME && id !in AppSettings.DEFAULT_TAB_ORDER) return
-        store.edit { it[HOME_TAB] = id }
+        val normalized = StartupPage.normalize(id)
+        if (normalized !in AppSettings.DEFAULT_TAB_ORDER) return
+        store.edit { it[HOME_TAB] = normalized }
     }
     suspend fun setRetainRecentTask(on: Boolean) = store.edit { it[RETAIN_RECENT] = on }
     suspend fun setThemeSeed(id: String) = store.edit { it[SEED] = id; it[DYNAMIC] = false; it[THEME_CUSTOMIZED] = true }
@@ -191,14 +192,15 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
         private val LOANS = stringSetPreferencesKey("loan_records")
         private val SERVER_APPEARANCE = stringPreferencesKey("server_appearance_json")
 
-        /** 顺序里补齐缺失的 Tab、去掉多余的，保证 5 个都在。 */
+        /** 顺序里补齐缺失的 Tab、去掉多余的；home_page 是旧版独立首页 id。 */
         fun effectiveTabOrder(stored: List<String>): List<String> =
-            (stored + AppSettings.DEFAULT_TAB_ORDER).distinct()
+            (stored.map(StartupPage::normalize) + AppSettings.DEFAULT_TAB_ORDER).distinct()
                 .filter { it in AppSettings.DEFAULT_TAB_ORDER }
 
         fun decode(p: Preferences) = AppSettings(
-            hiddenTabs = (p[HIDDEN] ?: emptySet()) - TabVisibility.LOCKED,
-            homeTab = (p[HOME_TAB] ?: StartupPage.DEFAULT).takeIf { it == StartupPage.HOME || it in AppSettings.DEFAULT_TAB_ORDER } ?: StartupPage.DEFAULT,
+            hiddenTabs = (p[HIDDEN] ?: emptySet()).map(StartupPage::normalize).toSet() - TabVisibility.LOCKED,
+            homeTab = StartupPage.normalize(p[HOME_TAB] ?: StartupPage.DEFAULT)
+                .takeIf { it in AppSettings.DEFAULT_TAB_ORDER } ?: StartupPage.DEFAULT,
             themeSeed = p[SEED] ?: AppSettings.DEFAULT_SEED,
             dynamicColor = p[DYNAMIC] ?: false,
             darkMode = DarkMode.entries.firstOrNull { it.name == p[DARK] } ?: DarkMode.System,

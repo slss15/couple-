@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.qimingnan.couple.R
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.chat.ChatScreen
@@ -57,12 +59,14 @@ import com.qimingnan.couple.ui.settings.SettingsViewModel
 
 /** 底部 Tab：聊天模块保留，入口默认隐藏；P5 后顺序与显隐由服务端布局下发。 */
 enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: ImageVector, val pluginId: String? = null) {
-    Feed("tab_feed", R.string.tab_feed, Icons.Filled.Home),
-    Ta("tab_ta", R.string.tab_ta, Icons.Filled.Favorite),
+    /** 首页是打开 App 的第一屏（calm 版），默认底栏只有 首页/动态/记账/我的 四项。 */
+    Home("tab_home", R.string.tab_home, Icons.Filled.Home),
+    Feed("tab_feed", R.string.tab_feed, Icons.Filled.Favorite),
+    Ta("tab_ta", R.string.tab_ta, Icons.Filled.FavoriteBorder),
     Me("me_entry", R.string.tab_me, Icons.Filled.Person),
     Anniversary("tab_anniversary", R.string.tab_anniversary, Icons.Filled.DateRange, "anniversary"),
     Ledger("tab_ledger", R.string.tab_ledger, Icons.Filled.AddCircle, "ledger"),
-    Period("tab_period", R.string.tab_period, Icons.Filled.FavoriteBorder, "period"),
+    Period("tab_period", R.string.tab_period, Icons.Filled.Star, "period"),
 }
 
 private val LEDGER_SECONDARY_ITEMS = listOf(
@@ -81,8 +85,9 @@ fun MainShell(
     val settings by settingsVm.settings.collectAsStateWithLifecycle()
     val appearance by settingsVm.appearance.collectAsStateWithLifecycle()
     val layout = appearance.appearance.layout
-    var tab by rememberSaveable { mutableStateOf(MainTab.Feed) }
-    var showHome by rememberSaveable { mutableStateOf(false) }
+    var tab by rememberSaveable { mutableStateOf(MainTab.Home) }
+    /** 首页快捷入口可能指向默认隐藏的 Tab（TA / 纪念日 / 经期）：临时「钉住」该页，返回即回首页。 */
+    var pinnedTab by rememberSaveable { mutableStateOf<MainTab?>(null) }
     var openLedgerWizard by rememberSaveable { mutableStateOf(false) }
     var lastLedgerRecordTapAt by rememberSaveable { mutableStateOf(0L) }
     var ledgerSubTab by rememberSaveable { mutableStateOf(LedgerSubTab.Record) }
@@ -141,8 +146,7 @@ fun MainShell(
                     (item.pluginId == null || item.pluginId !in initial.disabledPlugins)
             }.map { it.layoutId }
             val destination = com.qimingnan.couple.data.settings.StartupPage.resolve(initial.homeTab, initialVisible)
-            showHome = destination == "home_page"
-            tab = MainTab.entries.firstOrNull { it.layoutId == destination } ?: MainTab.Feed
+            tab = MainTab.entries.firstOrNull { it.layoutId == destination } ?: MainTab.Home
             homeApplied = true
         }
     }
@@ -153,6 +157,8 @@ fun MainShell(
         return
     }
     LaunchedEffect(settings.hiddenTabs, settings.disabledPlugins, layout, tab) {
+        // 快捷入口临时打开的隐藏页不受「可见 Tab」约束，否则会被立刻弹回首页。
+        if (tab == pinnedTab) return@LaunchedEffect
         val resolved = TabVisibility.resolveSelected(tab.layoutId, allIds, settings.hiddenTabs)
         val resolvedTab = MainTab.entries.first { it.layoutId == resolved }
         val pluginOk = resolvedTab.pluginId == null ||
@@ -166,13 +172,14 @@ fun MainShell(
     }
     fun returnToStart() {
         val destination = com.qimingnan.couple.data.settings.StartupPage.resolve(settings.homeTab, visibleTabs.map { it.layoutId })
-        showHome = destination == "home_page"
-        tab = MainTab.entries.firstOrNull { it.layoutId == destination && it != MainTab.Ledger } ?: MainTab.Feed
+        pinnedTab = null
+        tab = MainTab.entries.firstOrNull { it.layoutId == destination && it != MainTab.Ledger } ?: MainTab.Home
         openLedgerWizard = false
     }
     androidx.activity.compose.BackHandler(enabled = secondaryMenuVisible) { closeLedgerSecondaryMenu() }
     androidx.activity.compose.BackHandler(
-        enabled = !secondaryMenuVisible && (showChat || showScheduled || showSettings || showAnniversary || (!showHome && (tab != MainTab.Feed || settings.homeTab == "home_page"))),
+        enabled = !secondaryMenuVisible &&
+            (showChat || showScheduled || showSettings || showAnniversary || pinnedTab != null || tab != MainTab.Home),
     ) {
         when {
             showScheduled -> showScheduled = false
@@ -182,9 +189,9 @@ fun MainShell(
             // 设置关掉、纪念日还盖在上面，得多按一次返回才回到设置页。
             showAnniversary -> showAnniversary = false
             showSettings -> showSettings = false
-            tab == MainTab.Ledger -> { tab = MainTab.Feed; openLedgerWizard = false }
-            settings.homeTab == "home_page" -> showHome = true
-            else -> tab = MainTab.Feed
+            pinnedTab != null -> { pinnedTab = null; tab = MainTab.Home }
+            tab == MainTab.Ledger -> { tab = MainTab.Home; openLedgerWizard = false }
+            else -> tab = MainTab.Home
         }
     }
     LaunchedEffect(tab) {
@@ -192,18 +199,6 @@ fun MainShell(
             openLedgerWizard = false
             secondaryMenuVisible = false
         }
-    }
-    if (showHome) {
-        com.qimingnan.couple.ui.home.HomeScreen(
-            anniversaryVm = hiltViewModel(),
-            ledgerVm = hiltViewModel(),
-            onRecord = { showHome = false; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record; openLedgerWizard = true },
-            onOpenAnniversary = { showHome = false; tab = MainTab.Anniversary },
-            onOpenLedger = { showHome = false; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record },
-            onOpenFeed = { showHome = false; tab = MainTab.Feed },
-            modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
-        )
-        return
     }
     if (showChat) {
         com.qimingnan.couple.ui.chat.ChatScreen(
@@ -251,7 +246,17 @@ fun MainShell(
             bottomBar = {
                 if (tab == MainTab.Ledger) {
                     // 记账专属底栏：顺序统计、记账、账户，记账在中间是默认页；主底栏在这里不显示。
-                    GlassNavigationBar(style = settings.glassStyle) {
+                    GlassNavigationBar(
+                        style = settings.glassStyle,
+                        itemCount = LedgerSubTab.entries.size,
+                        onDragSelect = { index ->
+                            LedgerSubTab.entries.getOrNull(index)?.let { sub ->
+                                if (sub != ledgerSubTab) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                ledgerSubTab = sub
+                                lastLedgerRecordTapAt = 0L
+                            }
+                        },
+                    ) {
                         val ledgerTabs = listOf(
                             LedgerSubTab.Stats to Icons.Filled.DateRange,
                             LedgerSubTab.Record to Icons.Filled.AddCircle,
@@ -305,12 +310,26 @@ fun MainShell(
                         }
                     }
                 } else {
-                    GlassNavigationBar(style = settings.glassStyle) {
+                    GlassNavigationBar(
+                        style = settings.glassStyle,
+                        itemCount = visibleTabs.size,
+                        onDragSelect = { index ->
+                            visibleTabs.getOrNull(index)?.let { item ->
+                                if (item != tab) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
+                                    pinnedTab = null
+                                    tab = item
+                                }
+                            }
+                        },
+                    ) {
                         visibleTabs.forEach { item ->
                             NavigationBarItem(
                                 selected = tab == item,
                                 onClick = {
                                     if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Record
+                                    pinnedTab = null
                                     tab = item
                                 },
                                 icon = {
@@ -318,6 +337,7 @@ fun MainShell(
                                         item.icon,
                                         contentDescription = null,
                                         modifier = if (item == MainTab.Ledger) {
+                                            // 主底栏长按「记账」图标即可弹出二级页；记账页内的当前图标同样可长按。
                                             Modifier.secondaryTabLongPress(
                                                 enabled = true,
                                                 itemCount = LEDGER_SECONDARY_ITEMS.size,
@@ -345,6 +365,18 @@ fun MainShell(
             },
         ) { padding ->
             when (tab) {
+                MainTab.Home -> com.qimingnan.couple.ui.home.HomeScreen(
+                    anniversaryVm = hiltViewModel(),
+                    ledgerVm = hiltViewModel(),
+                    meVm = hiltViewModel(),
+                    onRecord = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record; openLedgerWizard = true },
+                    onOpenTa = { pinnedTab = MainTab.Ta; tab = MainTab.Ta },
+                    onOpenAnniversary = { pinnedTab = MainTab.Anniversary; tab = MainTab.Anniversary },
+                    onOpenPeriod = { pinnedTab = MainTab.Period; tab = MainTab.Period },
+                    onOpenLedger = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Record },
+                    onOpenFeed = { pinnedTab = null; tab = MainTab.Feed },
+                    modifier = Modifier.padding(padding),
+                )
                 MainTab.Me -> MeScreen(
                     onRescan = onRescan,
                     onOpenKeepAlive = onOpenKeepAlive,
@@ -396,7 +428,8 @@ fun MainShell(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(horizontal = t.spacing.sm, vertical = t.spacing.xs),
+                // 与底栏同一套内边距，二级页浮层正好盖住底栏，松手后恢复原样。
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             secondaryMenu?.let { menu ->
                 SecondaryTabOverlay(
