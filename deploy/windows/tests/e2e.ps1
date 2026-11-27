@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   End-to-end test of the Windows package on a throwaway Windows host (CI: windows-latest, see
   .github/workflows/_windows-package.yml job `e2e`). DESTRUCTIVE: installs MySQL 8.4 to C:\mysql, the Couple services
