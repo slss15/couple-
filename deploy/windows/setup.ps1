@@ -33,7 +33,9 @@ param(
     [string]$MysqlDir = 'C:\mysql',
     [string]$MysqlDataDir = 'C:\mysql-data',
     # Root password of an already-installed MySQL (only needed when DB_PASSWORD is still empty).
-    [SecureString]$MysqlRootPassword,
+    # 收 object 而不是 [SecureString]：5.1 里未传参的 [SecureString] 会变成 ""，
+    # 传普通字符串又会直接抛转换错误。Get-MysqlRootSecret 两种都接受。
+    $MysqlRootPassword,
     # Name of the locally-managed Cloudflare Tunnel (created or reused).
     [string]$TunnelName = 'couple',
     # Replace an existing DNS record of the hostname with the tunnel CNAME without asking.
@@ -214,13 +216,18 @@ function Install-BundledMysql([hashtable]$Pins, [string]$Proxy, [long]$TotalRam)
 
 # Returns the root password for the MySQL in $BinDir: config\mysql-root.txt, -MysqlRootPassword, a fresh
 # --initialize-insecure root (sets a random password and saves it), or an interactive prompt.
-function Get-MysqlRootSecret([string]$BinDir, [bool]$Bundled, [SecureString]$Given) {
+# $Given 故意不声明成 [SecureString]：Windows PowerShell 5.1 会把未传/传 $null 的
+# [SecureString] 形参变成空字符串 ""，再传给下一个 [SecureString] 形参就会抛
+# "Cannot convert the "" value of type System.String to type System.Security.SecureString"，
+# 一键安装在「初始化 MySQL」这一步必挂。这里收 object，自己判断类型。
+function Get-MysqlRootSecret([string]$BinDir, [bool]$Bundled, $Given) {
     $saved = (Read-KeyValueFile $script:rootFile)['MYSQL_ROOT_PASSWORD']
     if ($saved) {
         if ((Invoke-MysqlSql $BinDir 'root' $saved 'SELECT 1').ExitCode -eq 0) { return $saved }
         Write-Warning "config\mysql-root.txt 里的 root 密码无法登录 MySQL"
     }
-    $given = ConvertFrom-SecureStringPlain $Given
+    $given = if ($Given -is [System.Security.SecureString]) { ConvertFrom-SecureStringPlain $Given }
+             elseif ($Given) { [string]$Given } else { '' }
     if ($given) {
         if ((Invoke-MysqlSql $BinDir 'root' $given 'SELECT 1').ExitCode -eq 0) { return $given }
         throw '-MysqlRootPassword 无法登录 MySQL（root@localhost）'
@@ -259,7 +266,7 @@ function Initialize-CoupleDatabase([string]$BinDir, [string]$RootSecret, [string
     if ($r.ExitCode -ne 0) { Write-Host $r.Output; throw '创建数据库/用户 couple 失败' }
 }
 
-function Invoke-MysqlStep([hashtable]$Pins, [string]$Proxy, [long]$TotalRam, [SecureString]$RootPassword) {
+function Invoke-MysqlStep([hashtable]$Pins, [string]$Proxy, [long]$TotalRam, $RootPassword) {
     $svc = Find-MysqlService
     $bundled = $false
     if ($null -eq $svc) {
