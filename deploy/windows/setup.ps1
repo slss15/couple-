@@ -33,9 +33,7 @@ param(
     [string]$MysqlDir = 'C:\mysql',
     [string]$MysqlDataDir = 'C:\mysql-data',
     # Root password of an already-installed MySQL (only needed when DB_PASSWORD is still empty).
-    # 收 object 而不是 [SecureString]：5.1 里未传参的 [SecureString] 会变成 ""，
-    # 传普通字符串又会直接抛转换错误。Get-MysqlRootSecret 两种都接受。
-    $MysqlRootPassword,
+    [SecureString]$MysqlRootPassword,
     # Name of the locally-managed Cloudflare Tunnel (created or reused).
     [string]$TunnelName = 'couple',
     # Replace an existing DNS record of the hostname with the tunnel CNAME without asking.
@@ -68,8 +66,14 @@ function Enter-Step([int]$Number, [string]$Title) {
 function Write-Info([string]$Message) { Write-Host "    $Message" }
 function Write-Ok([string]$Message) { Write-Host "    $Message" -ForegroundColor Green }
 
-function ConvertFrom-SecureStringPlain([SecureString]$Secure) {
+# 参数故意不声明类型：Windows PowerShell 5.1 会把未传参/传 $null 的 [SecureString] 形参
+# 变成空字符串 ""，再传给 [SecureString] 形参就会抛
+# "Cannot convert the "" value of type System.String to type System.Security.SecureString"。
+# 收 object 后自己判断：SecureString 就解密，其他（含空串）原样转字符串。
+# 参数名不带 Password，不会触发 PSScriptAnalyzer 的 PSAvoidUsingPlainTextForPassword。
+function ConvertFrom-SecureStringPlain($Secure) {
     if ($null -eq $Secure) { return '' }
+    if ($Secure -isnot [System.Security.SecureString]) { return [string]$Secure }
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
     try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
@@ -216,18 +220,19 @@ function Install-BundledMysql([hashtable]$Pins, [string]$Proxy, [long]$TotalRam)
 
 # Returns the root password for the MySQL in $BinDir: config\mysql-root.txt, -MysqlRootPassword, a fresh
 # --initialize-insecure root (sets a random password and saves it), or an interactive prompt.
-# $Given 故意不声明成 [SecureString]：Windows PowerShell 5.1 会把未传/传 $null 的
-# [SecureString] 形参变成空字符串 ""，再传给下一个 [SecureString] 形参就会抛
+# $Given 不声明类型：Windows PowerShell 5.1 会把未传参/传 $null 的 [SecureString] 形参
+# 变成空字符串 ""，把 "" 再传给另一个 [SecureString] 形参就会抛
 # "Cannot convert the "" value of type System.String to type System.Security.SecureString"，
-# 一键安装在「初始化 MySQL」这一步必挂。这里收 object，自己判断类型。
+# 一键安装在「初始化 MySQL」这一步必挂（e2e 就是这么挂的）。收 object 后由
+# ConvertFrom-SecureStringPlain 按类型分支处理。参数名不带 Password，不触发
+# PSScriptAnalyzer 的 PSAvoidUsingPlainTextForPassword。
 function Get-MysqlRootSecret([string]$BinDir, [bool]$Bundled, $Given) {
     $saved = (Read-KeyValueFile $script:rootFile)['MYSQL_ROOT_PASSWORD']
     if ($saved) {
         if ((Invoke-MysqlSql $BinDir 'root' $saved 'SELECT 1').ExitCode -eq 0) { return $saved }
         Write-Warning "config\mysql-root.txt 里的 root 密码无法登录 MySQL"
     }
-    $given = if ($Given -is [System.Security.SecureString]) { ConvertFrom-SecureStringPlain $Given }
-             elseif ($Given) { [string]$Given } else { '' }
+    $given = ConvertFrom-SecureStringPlain $Given
     if ($given) {
         if ((Invoke-MysqlSql $BinDir 'root' $given 'SELECT 1').ExitCode -eq 0) { return $given }
         throw '-MysqlRootPassword 无法登录 MySQL（root@localhost）'
@@ -266,7 +271,7 @@ function Initialize-CoupleDatabase([string]$BinDir, [string]$RootSecret, [string
     if ($r.ExitCode -ne 0) { Write-Host $r.Output; throw '创建数据库/用户 couple 失败' }
 }
 
-function Invoke-MysqlStep([hashtable]$Pins, [string]$Proxy, [long]$TotalRam, $RootPassword) {
+function Invoke-MysqlStep([hashtable]$Pins, [string]$Proxy, [long]$TotalRam, [SecureString]$RootPassword) {
     $svc = Find-MysqlService
     $bundled = $false
     if ($null -eq $svc) {
