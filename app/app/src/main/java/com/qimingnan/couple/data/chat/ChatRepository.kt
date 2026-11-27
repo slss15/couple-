@@ -288,8 +288,12 @@ class ChatRepository @Inject constructor(
             com.qimingnan.couple.data.feed.OutboxFiles.delete(context, "chat-$id")
             true
         } catch (e: HttpException) {
+            // 只有 408/429/5xx 值得重试。409（ID_CONFLICT / MEDIA_ALREADY_USED）是永久错误，
+            // 以前把它当可重试，WorkManager 会一直退避重试、消息永远停在「发送中」，
+            // 而 UI 只有 FAILED 才给重试入口，用户彻底卡死。
             val code = e.code()
-            if (code != 409 && code != 429) dao.updatePendingState(id, FAILED)
+            val retryable = code == 408 || code == 429 || code >= 500
+            if (!retryable) dao.updatePendingState(id, FAILED)
             false
         } catch (e: SerializationException) {
             dao.updatePendingState(id, FAILED)

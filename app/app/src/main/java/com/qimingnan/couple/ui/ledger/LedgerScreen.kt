@@ -112,8 +112,12 @@ private fun LedgerSegmented(current: LedgerSubTab, onChange: (LedgerSubTab) -> U
             Surface(
                 onClick = { if (!selected) onChange(sub) },
                 shape = t.shapes.pill,
-                color = if (selected) t.colors.primaryContainer else Color.Transparent,
-                contentColor = if (selected) t.colors.onPrimaryContainer else t.colors.onSurfaceVariant,
+                // 选中态用白底 + 主色文字 + 发丝边，不用实心 primaryContainer：
+                // linepuppy 的 #FF793F 铺满半个屏幕，会把下面的结余大卡压掉，
+                // 整页最响的应该只有那张大数字卡。
+                color = if (selected) t.colors.surface else Color.Transparent,
+                contentColor = if (selected) t.colors.primary else t.colors.onSurfaceVariant,
+                border = if (selected) BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.18f)) else null,
                 modifier = Modifier.weight(1f).heightIn(min = 40.dp),
             ) {
                 Box(
@@ -167,6 +171,13 @@ fun LedgerScreen(
     var showQuick by remember { mutableStateOf(false) }
     // 首页「记一笔」直达向导第 1 步：MainShell 把这个信号置真时打开弹窗。
     LaunchedEffect(autoOpenWizard) { if (autoOpenWizard) showQuick = true }
+    // 每分钟对一次表：跨天/跨月后统计页和账目列表要跟着走，否则新账目落在新月份却看不见。
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000)
+            vm.syncMonthToToday()
+        }
+    }
     var showAccounts by remember { mutableStateOf(false) }
     var selectedAccountId by remember { mutableStateOf<String?>(null) }
     val selectedAccount = accounts.firstOrNull { it.id == selectedAccountId }
@@ -569,10 +580,13 @@ private fun MonthEntriesCard(
                 LedgerEntryRow(
                     onClick = { onEntryClick(e) },
                     glyph = entryGlyph(e),
-                    title = when (e.type) {
-                        LedgerEntryType.EXPENSE -> "支出 · ${e.categoryId ?: "已删除分类"}"
-                        LedgerEntryType.INCOME -> "收入 · ${e.categoryId ?: "已删除分类"}"
-                        LedgerEntryType.TRANSFER -> "转账"
+                    title = when {
+                        // 借贷资金流水：categoryId 里已经写着「还钱·个人·张三」，
+                        // 再套一层「支出 ·」会变成「支出 · 还钱·个人·张三」，读着别扭。
+                        e.loanAction != null -> e.categoryId ?: "借贷流水"
+                        e.type == LedgerEntryType.TRANSFER -> "转账"
+                        e.type == LedgerEntryType.EXPENSE -> "支出 · ${e.categoryId ?: "已删除分类"}"
+                        else -> "收入 · ${e.categoryId ?: "已删除分类"}"
                     },
                     subtitle = when (e.type) {
                         LedgerEntryType.TRANSFER -> "${accountById[e.fromAccountId]?.name ?: "?"} → ${accountById[e.toAccountId]?.name ?: "?"}"
@@ -624,18 +638,32 @@ private fun BudgetCard(spentCents: Long, budgetCents: Long, onSaveBudget: (Long)
     }
     // 预算金额改到弹窗里填：AmountField 的内置数字键盘（底部弹层）已在借贷编辑弹窗里这样用过。
     if (editing) {
+        var error by remember { mutableStateOf<String?>(null) }
         AlertDialog(
-            onDismissRequest = { editing = false },
+            onDismissRequest = { editing = false; error = null },
             title = { Text(if (budgetCents > 0) "改预算" else "设置预算") },
-            text = { AmountField(value = text, onValueChange = { text = it }, label = "预算（元）") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                    AmountField(value = text, onValueChange = { text = it; error = null }, label = "预算（元）")
+                    // 以前这里 `if (cents > 0)` 才保存，填 0 或填错都直接关弹窗，
+                    // 于是预算一旦设过就永远清不掉。现在 0 = 取消预算，格式错就留在弹窗里提示。
+                    Text("填 0 表示取消预算。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    error?.let { Text(it, style = t.typography.caption, color = t.colors.error) }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    val cents = Money.parseCents(text) ?: 0L
-                    if (cents > 0) onSaveBudget(cents)
-                    editing = false
+                    val raw = text.trim()
+                    val cents = if (raw.isEmpty()) 0L else Money.parseCents(raw)
+                    if (cents == null) {
+                        error = "金额格式不对，例如 1200 或 1200.50"
+                    } else {
+                        onSaveBudget(cents)
+                        editing = false
+                    }
                 }) { Text("保存预算") }
             },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text("取消") } },
+            dismissButton = { TextButton(onClick = { editing = false; error = null }) { Text("取消") } },
         )
     }
 }
@@ -835,6 +863,10 @@ private fun EntryDetailDialog(
     val t = LocalCoupleTokens.current
     var confirmDelete by remember { mutableStateOf(false) }
     val isLoanEntry = entry.loanId != null
+    // 借入/借出本金是借贷明细的一部分，单独删会被后端规则挡掉（LoanLedgerRepository.deleteEntry
+    // 直接 error）。还款记录则可以删——删了会把 repaidCents 退回去。
+    val isLoanPrincipal = entry.loanAction == com.qimingnan.couple.data.ledger.LoanAction.BORROW ||
+        entry.loanAction == com.qimingnan.couple.data.ledger.LoanAction.LEND
     var amountText by remember(entry) { mutableStateOf(BigDecimal(entry.amountCents).divide(BigDecimal(100)).toPlainString()) }
     var note by remember(entry) { mutableStateOf(entry.note) }
     var category by remember(entry) { mutableStateOf(entry.categoryId?.substringBefore("·") ?: "") }
@@ -878,7 +910,9 @@ private fun EntryDetailDialog(
                     OutlinedTextField(value = note, onValueChange = { note = it }, label = { Text("备注") }, modifier = Modifier.fillMaxWidth())
                 }
                 error?.let { Text(it, style = t.typography.caption, color = t.colors.error) }
-                TextButton(onClick = { confirmDelete = true }) { Text("删除这条账目", color = t.colors.error) }
+                if (!isLoanPrincipal) {
+                    TextButton(onClick = { confirmDelete = true }) { Text("删除这条账目", color = t.colors.error) }
+                }
             }
         },
         confirmButton = {
@@ -929,7 +963,9 @@ private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved
             label = { Text("账户名") },
             modifier = Modifier.fillMaxWidth(),
         )
-        AmountField(value = initial, onValueChange = { initial = it }, label = "期初余额（元）")
+        var initialError by remember { mutableStateOf<String?>(null) }
+        AmountField(value = initial, onValueChange = { initial = it; initialError = null }, label = "期初余额（元）")
+        initialError?.let { Text(it, style = t.typography.caption, color = t.colors.error) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LedgerAccountType.entries.filterNot { it.isLoan }.forEach { ty ->
                 FilterChip(selected = type == ty, onClick = { type = ty }, label = { Text(accountTypeLabel(ty)) })
@@ -939,11 +975,20 @@ private fun AccountEditForm(vm: LedgerViewModel, account: LedgerAccount, onSaved
             BankPicker(bank = bank, onPick = { bank = it; bankManual = true })
         }
         Button(onClick = {
-            val cents = parseCents(initial).takeIf { it != 0L } ?: account.initialBalanceCents
-            if (name.isNotBlank()) vm.saveAccount(
-                account.copy(name = name, type = type, initialBalanceCents = cents, bankCode = if (type == LedgerAccountType.BANK) bank?.code else null),
-            )
-            onSaved()
+            // 以前是 `takeIf { it != 0L } ?: account.initialBalanceCents`：想把期初余额改成 0
+            // 会被静默换回旧值，填错了也一样，弹窗照常关。现在非法输入留在弹窗里提示。
+            val raw = initial.trim()
+            val cents = if (raw.isEmpty()) 0L else Money.parseCents(raw)
+            when {
+                cents == null -> initialError = "金额格式不对，例如 1200 或 1200.50"
+                name.isBlank() -> initialError = "请填写账户名"
+                else -> {
+                    vm.saveAccount(
+                        account.copy(name = name, type = type, initialBalanceCents = cents, bankCode = if (type == LedgerAccountType.BANK) bank?.code else null),
+                    )
+                    onSaved()
+                }
+            }
         }) { Text("保存修改") }
     }
 }

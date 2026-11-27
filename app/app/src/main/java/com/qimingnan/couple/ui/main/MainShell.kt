@@ -169,16 +169,22 @@ fun MainShell(
             tab = resolvedTab
         }
     }
+    // 返回键的终点 = 用户设的启动页（在可见 Tab 里解析）。
+    // 不能硬编码 Home：首页被隐藏时 Home 不在 visibleTabs，下面那个 LaunchedEffect
+    // 会立刻把 tab 弹回去，于是每次返回都只是 Home→Me 空转，永远退不出 App。
+    val startTab = MainTab.entries.firstOrNull {
+        it.layoutId == com.qimingnan.couple.data.settings.StartupPage.resolve(settings.homeTab, visibleTabs.map { t -> t.layoutId }) &&
+            it != MainTab.Ledger
+    } ?: visibleTabs.firstOrNull() ?: MainTab.Me
     fun returnToStart() {
-        val destination = com.qimingnan.couple.data.settings.StartupPage.resolve(settings.homeTab, visibleTabs.map { it.layoutId })
         pinnedTab = null
-        tab = MainTab.entries.firstOrNull { it.layoutId == destination && it != MainTab.Ledger } ?: MainTab.Home
+        tab = startTab
         openLedgerWizard = false
     }
     androidx.activity.compose.BackHandler(enabled = secondaryMenuVisible) { closeLedgerSecondaryMenu() }
     androidx.activity.compose.BackHandler(
         enabled = !secondaryMenuVisible &&
-            (showChat || showScheduled || showSettings || showAnniversary || pinnedTab != null || tab != MainTab.Home),
+            (showChat || showScheduled || showSettings || showAnniversary || pinnedTab != null || tab != startTab),
     ) {
         when {
             showScheduled -> showScheduled = false
@@ -188,9 +194,7 @@ fun MainShell(
             // 设置关掉、纪念日还盖在上面，得多按一次返回才回到设置页。
             showAnniversary -> showAnniversary = false
             showSettings -> showSettings = false
-            pinnedTab != null -> { pinnedTab = null; tab = MainTab.Home }
-            tab == MainTab.Ledger -> { tab = MainTab.Home; openLedgerWizard = false }
-            else -> tab = MainTab.Home
+            else -> returnToStart()
         }
     }
     LaunchedEffect(tab) {
@@ -202,7 +206,9 @@ fun MainShell(
     if (showChat) {
         com.qimingnan.couple.ui.chat.ChatScreen(
             vm = hiltViewModel(),
-            onOpenScheduled = { showScheduled = true },
+            // 必须先关聊天页：下面是 if (showChat) { ...; return }，只置 showScheduled
+            // 的话 ScheduledScreen 永远走不到，点「定时消息」没反应、返回键还要按两次。
+            onOpenScheduled = { showChat = false; showScheduled = true },
             modifier = Modifier.fillMaxSize().background(t.colors.background).statusBarsPadding(),
         )
         return

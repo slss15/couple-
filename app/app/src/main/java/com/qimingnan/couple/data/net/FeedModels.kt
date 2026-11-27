@@ -62,8 +62,12 @@ sealed interface FeedEvent {
     @Serializable
     data class Delete(val id: String) : FeedEvent
 
+    /**
+     * liked：这次操作之后「userId 本人」有没有赞过。服务端 like 与 unlike 推同一种事件，
+     * 只靠 userId 猜不出方向（取消赞也会带 userId=我），所以由服务端显式给出来。
+     */
     @Serializable
-    data class Like(val postId: String, val userId: String, val count: Int) : FeedEvent
+    data class Like(val postId: String, val userId: String, val count: Int, val liked: Boolean? = null) : FeedEvent
 
     @Serializable
     data class Comment(val postId: String, val comment: CommentView) : FeedEvent
@@ -85,7 +89,12 @@ sealed interface FeedEvent {
                 "delete" -> obj["id"].str()?.let(::Delete)
                 "like" -> {
                     val postId = obj["postId"].str() ?: return null
-                    Like(postId, obj["userId"].str() ?: "", obj["count"]?.str()?.toIntOrNull() ?: 0)
+                    Like(
+                        postId,
+                        obj["userId"].str() ?: "",
+                        obj["count"]?.str()?.toIntOrNull() ?: 0,
+                        obj["liked"]?.str()?.toBooleanStrictOrNull(),
+                    )
                 }
                 "comment" -> {
                     val postId = obj["postId"].str() ?: return null

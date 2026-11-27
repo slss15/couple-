@@ -30,13 +30,31 @@ class BaseUrlInterceptor(private val baseUrlProvider: () -> String?) : Intercept
     }
 }
 
-/** 给非 /auth/ 请求加 Bearer token。 */
-class AuthHeaderInterceptor(private val tokenStore: TokenStore) : Interceptor {
+/**
+ * 给非 /auth/ 请求加 Bearer token。
+ *
+ * 只对**当前服务器**的 host 加：Coil 复用的是同一个 apiClient（见 AppModule.imageLoader），
+ * 而表情包搜索结果里是第三方图床的绝对地址（backend Stickers.kt 直接透传 oiapi/apihz 的 URL）。
+ * 不加这道 host 判断的话，打开表情面板就会把 access token 明文发给第三方。
+ */
+class AuthHeaderInterceptor(
+    private val tokenStore: TokenStore,
+    private val serverHost: () -> String?,
+) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val req = chain.request()
         if (isAuthEndpoint(req) || req.header("Authorization") != null) return chain.proceed(req)
+        val host = serverHost() ?: return chain.proceed(req)
+        if (!req.url.host.equals(host, ignoreCase = true)) return chain.proceed(req)
         val token = tokenStore.read()?.accessToken ?: return chain.proceed(req)
         return chain.proceed(req.newBuilder().header("Authorization", "Bearer $token").build())
+    }
+
+    companion object {
+        fun fromStore(store: BootstrapStore, tokenStore: TokenStore) = AuthHeaderInterceptor(
+            tokenStore = tokenStore,
+            serverHost = { store.currentConfigBlocking()?.baseUrl?.let { runCatching { it.toHttpUrl().host }.getOrNull() } },
+        )
     }
 }
 

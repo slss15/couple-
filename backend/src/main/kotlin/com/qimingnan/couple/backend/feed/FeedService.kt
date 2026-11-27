@@ -244,7 +244,9 @@ class FeedService(
             if (!exists) FeedRepo.insertLike(postId, caller.userId, config.clock())
             FeedRepo.likeCount(postId) to !exists
         }
-        if (inserted) push.publish(cid, "feed", """{"kind":"like","postId":"$postId","userId":"${caller.userId}","count":$count}""")
+        // liked 必须显式给：like 与 unlike 推的是同一种事件，客户端只看 userId
+        // 分不出方向（取消赞也带 userId=我），会把心形又点亮。
+        if (inserted) push.publish(cid, "feed", """{"kind":"like","postId":"$postId","userId":"${caller.userId}","count":$count,"liked":true}""")
         return LikeCountView(count)
     }
 
@@ -256,7 +258,7 @@ class FeedService(
             if (exists) PostLikes.deleteWhere { (PostLikes.postId eq postId) and (PostLikes.userId eq caller.userId) }
             FeedRepo.likeCount(postId) to exists
         }
-        if (removed) push.publish(cid, "feed", """{"kind":"like","postId":"$postId","userId":"${caller.userId}","count":$count}""")
+        if (removed) push.publish(cid, "feed", """{"kind":"like","postId":"$postId","userId":"${caller.userId}","count":$count,"liked":false}""")
         return LikeCountView(count)
     }
 

@@ -188,6 +188,14 @@ fun ScheduleSendDialog(text: String, vm: ScheduledViewModel, onDismiss: () -> Un
     var busy by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.errors.collect { busy = false; Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
 
+    // 单次定时必须晚于现在。否则 ScheduleCalc.next 对 ONCE 返回 null，
+    // 消息照样建成功、列表还显示「已发送」，实际永远发不出去。
+    val pickedDate = dateState.selectedDateMillis
+        ?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
+        ?: LocalDate.now(zone)
+    val pickedAt = ZonedDateTime.of(pickedDate, LocalTime.of(timeState.hour, timeState.minute), zone)
+    val tooEarly = kind == ScheduleRule.ONCE && !pickedAt.isAfter(ZonedDateTime.now(zone))
+
     AlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -213,16 +221,20 @@ fun ScheduleSendDialog(text: String, vm: ScheduledViewModel, onDismiss: () -> Un
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     TimePicker(state = timeState)
                 }
+                if (tooEarly) {
+                    Text(
+                        "这个时间已经过去了，换一个晚一点的时间。",
+                        style = t.typography.caption,
+                        color = t.colors.error,
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
-                enabled = !busy && text.isNotBlank(),
+                enabled = !busy && text.isNotBlank() && !tooEarly,
                 onClick = {
-                    val date = dateState.selectedDateMillis
-                        ?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
-                        ?: LocalDate.now(zone)
-                    val at = ZonedDateTime.of(date, LocalTime.of(timeState.hour, timeState.minute), zone)
+                    val at = pickedAt
                     busy = true
                     vm.createText(text, ScheduleRule.fromPick(kind, at)) {
                         busy = false

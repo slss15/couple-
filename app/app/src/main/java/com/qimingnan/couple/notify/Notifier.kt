@@ -25,8 +25,12 @@ import javax.inject.Singleton
 @Singleton
 class Notifier @Inject constructor(@ApplicationContext private val context: Context) {
 
-    /** 前台可见性登记：key = screen（"feed"/"chat"/…），value = 是否当前可见。 */
-    private val visible = mutableMapOf<String, Boolean>()
+    /**
+     * 前台可见性登记：key = screen（"feed"/"chat"/…），value = 是否当前可见。
+     * 写是 UI 线程（DisposableEffect），读是 MQTT 收集协程（Dispatchers.Default），
+     * 普通 HashMap 会有可见性问题：聊天页开着照样弹通知、或者退出后不再弹。
+     */
+    private val visible = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     fun setScreenVisible(screen: String, visibleNow: Boolean) {
         visible[screen] = visibleNow

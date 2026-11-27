@@ -527,7 +527,9 @@ private fun StickerPanel(
                     horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
                     verticalArrangement = Arrangement.spacedBy(t.spacing.xs),
                 ) {
-                    items(results.size, key = { results[it].url }) { i ->
+                    // key 必须唯一：搜索结果里同一个 URL 可能出现两次（聚合源重复/分页重叠），
+                    // 直接用 url 当 key 会抛 "Key was already used" 崩在打开面板那一刻。
+                    items(results.size, key = { i -> "$i-" + results[i].url }) { i ->
                         val s = results[i]
                         coil.compose.AsyncImage(
                             model = s.url,

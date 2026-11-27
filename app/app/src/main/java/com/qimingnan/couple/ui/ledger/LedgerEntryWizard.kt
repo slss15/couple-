@@ -82,10 +82,18 @@ internal fun LedgerEntryWizard(
     val expectedKind = if (type == LedgerEntryType.INCOME) LoanKind.LENT else LoanKind.BORROWED
     val selectedLoanAccount = allAccounts.firstOrNull { it.id == loanAccountId && it.type.loanKind == expectedKind }
     val eligibleLoans = loans.filter { !it.settled && it.kind == expectedKind && it.loanAccountId == selectedLoanAccount?.id }
+    // 从借贷明细点「收回借款 / 归还借款」进来时分类已经定成「还钱」，第 4 步（一级分类）
+    // 是多余的：走一遍还会把 loanId / loanAccountId / counterpartyKey 全清掉，
+    // 用户得重新选一遍账户和对象。所以这条路径直接跳过分类步。
+    val presetLoan = initialLoanId != null
+    fun advance(from: Int) {
+        step = if (presetLoan && from == 2) 4 else from + 1
+    }
     fun goBack() {
         when {
             step == 4 && repayment && counterpartyKey != null -> { counterpartyKey = null; loanId = null }
             step == 4 && repayment && loanAccountId != null -> { loanAccountId = null; loanId = null }
+            step == 4 && presetLoan -> step = 2
             step > 0 -> step--
             else -> onDismiss()
         }
@@ -153,8 +161,15 @@ internal fun LedgerEntryWizard(
                             if (choices.isEmpty()) Text(if (cashAccounts.isEmpty()) "先添加一个资金账户，再继续记账。" else "转账需要另一个账户。", style = t.typography.body, color = t.colors.onSurfaceVariant)
                             choices.forEach { account ->
                                 OptionCard(account.name, "余额 " + centsText(vm.balance(account, entries)), {
-                                    if (step == 2) accountId = account.id else toId = account.id
-                                    step++
+                                    if (step == 2) {
+                                        accountId = account.id
+                                        // 返回改转出账户时，原来选的转入可能和它撞成同一个，
+                                        // 确认页会显示 C → C 且保存按钮静默置灰。
+                                        if (toId == account.id) toId = null
+                                    } else {
+                                        toId = account.id
+                                    }
+                                    advance(step)
                                 }, selected = account.id == if (step == 2) accountId else toId, leading = {
                                     AccountIcon(account.type, Modifier.size(44.dp), account.bankCode)
                                 })

@@ -89,4 +89,11 @@ interface AnniversaryDao {
 
     @Query("UPDATE anniversary_events SET deleted = 1, updatedAt = :now, pendingSync = 1 WHERE id = :id")
     suspend fun softDelete(id: String, now: Long)
+
+    /**
+     * 解绑时清空本地缓存。用硬删除而不是 softDelete：softDelete 会标 pendingSync=1
+     * 把删除推到服务端，那会把对方那边的纪念日一起删掉。
+     */
+    @Query("DELETE FROM anniversary_events")
+    suspend fun clearAll()
 }

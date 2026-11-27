@@ -117,7 +117,7 @@ object AppModule {
         .readTimeout(30, TimeUnit.SECONDS)
         .apply { interceptors().clear() }
         .addInterceptor(BaseUrlInterceptor.fromStore(bootstrapStore))
-        .addInterceptor(AuthHeaderInterceptor(tokenStore))
+        .addInterceptor(AuthHeaderInterceptor.fromStore(bootstrapStore, tokenStore))
         .addInterceptor(DemoInterceptor())
         .addInterceptor(logging())
         .authenticator(TokenAuthenticator(refresher))

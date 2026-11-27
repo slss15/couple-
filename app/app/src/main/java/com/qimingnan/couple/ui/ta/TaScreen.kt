@@ -277,7 +277,11 @@ private fun DayDialog(existing: ImportantDay?, onSave: (String, Int, Int, Int?) 
     var month by rememberSaveable { mutableStateOf(existing?.month?.toString() ?: "") }
     var day by rememberSaveable { mutableStateOf(existing?.day?.toString() ?: "") }
     var year by rememberSaveable { mutableStateOf(existing?.year?.toString() ?: "") }
-    val ok = name.isNotBlank() && month.toIntOrNull() in 1..12 && day.toIntOrNull() in 1..31
+    // 只校验 1..31 会放进 "2-31""4-31"，落库后按 Calendar 宽松规则滚到下个月 1 号，
+    // 倒计时就指向了一个不存在的日期。
+    val monthValue = month.toIntOrNull()?.takeIf { it in 1..12 }
+    val dayMax = monthValue?.let { java.time.Month.of(it).maxLength() } ?: 31
+    val ok = name.isNotBlank() && monthValue != null && day.toIntOrNull() in 1..dayMax
 
     AlertDialog(
         onDismissRequest = onCancel,

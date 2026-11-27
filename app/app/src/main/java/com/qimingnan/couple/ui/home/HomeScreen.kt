@@ -27,6 +27,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,7 +82,16 @@ fun HomeScreen(
     meVm: MeViewModel = hiltViewModel(),
 ) {
     val t = LocalCoupleTokens.current
-    val today = LocalDate.now()
+    // 首页是"打开就放着不动"的页面：today 只在一次组合里求值的话，跨过零点后
+    // 日期标题、在一起天数、纪念日倒计时、本月收支会一直停在前一天。
+    var today by remember { mutableStateOf(LocalDate.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000)
+            val now = LocalDate.now()
+            if (now != today) today = now
+        }
+    }
     val meState by meVm.state.collectAsStateWithLifecycle()
     val events by anniversaryVm.events.collectAsStateWithLifecycle()
     val entries by ledgerVm.entries.collectAsStateWithLifecycle()

@@ -71,7 +71,8 @@ class TokenRefreshTest {
         val refresher = TokenRefresher(store, plain, { "$base/api/v1" }, { "DEV1" })
         val c = plain.newBuilder()
             .addInterceptor(BaseUrlInterceptor { base })
-            .addInterceptor(AuthHeaderInterceptor(store))
+            // 拦截器只对当前服务器 host 加 Bearer，测试里就是本地 MockWebServer。
+            .addInterceptor(AuthHeaderInterceptor(store) { java.net.URI(base).host })
             .authenticator(TokenAuthenticator(refresher))
             .build()
         return c to refresher

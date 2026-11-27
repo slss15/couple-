@@ -35,6 +35,25 @@ class SettingsRepository(private val store: DataStore<Preferences>, scope: Corou
             p[HIDDEN] = if (hidden) cur + id else cur - id
         }
     }
+    /**
+     * 登出 / 换账号时清掉**属于某个人的**设置。
+     *
+     * 这些 key 没有 ownerId，跟着设备走：不清的话下一个账号会直接继承上一个人的
+     * 月预算、纪念日打卡、旅行计划和遗留借贷，而 travel_account_id 还会指向别人的账户 id。
+     * 主题、字体、底栏顺序、玻璃质感是设备级偏好，故意保留。
+     */
+    suspend fun clearPersonalData() = store.edit { p ->
+        p.remove(MONTHLY_BUDGET)
+        p.remove(CHECKINS)
+        p.remove(SURPRISE)
+        p.remove(TRAVEL_ACCOUNT)
+        p.remove(TRAVEL_TARGET)
+        p.remove(TRAVEL_NAME)
+        p.remove(LOANS)
+        p.remove(LOANS_IMPORTED)
+        p.remove(ACCOUNT_ORDER)
+    }
+
     /** 等持久设置读取完成再决定启动页，不能拿 StateFlow 初始默认值代替用户选择。 */
     suspend fun initialSettings(): AppSettings = decode(store.data.catch { emit(emptyPreferences()) }.first())
 

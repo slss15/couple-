@@ -86,11 +86,27 @@ class TaViewModel @Inject constructor(
         }
     }
 
+    /** "MM-DD" 且月份/日期真实存在；以前只校验格式，"13-45""02-31" 都能存进去。 */
+    private fun isMonthDay(value: String): Boolean {
+        val m = Regex("^(\\d{2})-(\\d{2})$").find(value) ?: return false
+        val month = m.groupValues[1].toIntOrNull() ?: return false
+        val day = m.groupValues[2].toIntOrNull() ?: return false
+        return month in 1..12 && day in 1..java.time.Month.of(month).maxLength()
+    }
+
     fun saveMe(bio: String, birthday: String, birthYear: Int?, showBirthday: Boolean) {
         viewModelScope.launch {
+            // 空串 = 清空。不能传 null：CoupleJson 的 explicitNulls=false 会把 null 字段整个省掉，
+            // 后端看到的是"没带这个字段"，于是清空简介/生日永远保存不上、刷新又变回来。
+            val trimmedBirthday = birthday.trim()
             val req = UpdateMeRequest(
-                bio = bio.trim().ifEmpty { null },
-                birthday = birthday.takeIf { Regex("^\\d{2}-\\d{2}$").matches(it) },
+                bio = bio.trim(),
+                // 空串 = 清空；格式不对（如 13-45）就不发，避免把旧值覆盖成垃圾。
+                birthday = when {
+                    trimmedBirthday.isEmpty() -> ""
+                    isMonthDay(trimmedBirthday) -> trimmedBirthday
+                    else -> null
+                },
                 birthYear = birthYear?.takeIf { it in 1900..2100 },
                 showBirthday = showBirthday,
             )

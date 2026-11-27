@@ -125,8 +125,9 @@ class FeedRepository @Inject constructor(
         notifier.createChannels()
         scope.launch {
             // MQTT 与演示进程内流不会同时活跃；两个都收。
-            launch { mqtt.feedEvents.collect { applyEvent(it) } }
-            launch { DemoBackend.feedEvents.collect { applyEvent(it) } }
+            // 推送处理绝不能把进程带崩：一条坏事件只丢自己，不影响后续。
+            launch { mqtt.feedEvents.collect { runCatching { applyEvent(it) } } }
+            launch { DemoBackend.feedEvents.collect { runCatching { applyEvent(it) } } }
         }
     }
 
@@ -140,16 +141,20 @@ class FeedRepository @Inject constructor(
             is FeedEvent.Like -> {
                 val me = selfId()
                 dao.postRow(e.postId)?.let { row ->
-                    val likedByMe = when {
-                        e.userId == me -> true
-                        e.userId == row.post.authorId && row.post.authorId != me -> false
-                        else -> row.post.likedByMe
-                    }
+                    // 只改「我自己的」赞状态，而且必须用服务端给的 liked：
+                    // like 与 unlike 推的是同一种事件，以前按 userId==me 推成 true，
+                    // 结果取消赞之后心形又被点亮。别人的操作只更新计数。
+                    val likedByMe = if (e.userId == me && e.liked != null) e.liked else row.post.likedByMe
                     dao.updateLikes(e.postId, e.count, likedByMe)
                 }
             }
             is FeedEvent.Comment -> {
-                dao.upsertComments(listOf(CommentEntity(e.comment.id, e.comment.postId, e.comment.authorId, e.comment.text, e.comment.createdAt)))
+                // post_comments 对 posts(id) 有外键，本地只缓存最新一页；帖子不在库里时
+                // 直接插会抛 SQLiteConstraintException，而这个 collect 在无异常处理器的
+                // appScope 里跑，会把进程带崩。所以先确认帖子存在，不存在就等下次刷新补拉。
+                if (dao.postRow(e.comment.postId) != null) {
+                    dao.upsertComments(listOf(CommentEntity(e.comment.id, e.comment.postId, e.comment.authorId, e.comment.text, e.comment.createdAt)))
+                }
                 maybeNotify(e.comment.authorId, "新的评论", e.comment.text)
             }
             is FeedEvent.CommentDelete -> dao.deleteCommentRow(e.id)
@@ -253,10 +258,13 @@ class FeedRepository @Inject constructor(
         val row = dao.postRow(postId) ?: return
         if (row.post.pendingState != null) return
         val liked = row.post.likedByMe
-        dao.updateLikes(postId, row.post.likeCount + if (liked) -1 else 1, !liked)
+        val originalCount = row.post.likeCount
+        dao.updateLikes(postId, originalCount + if (liked) -1 else 1, !liked)
         runCatching { if (liked) api.unlikePost(postId) else api.likePost(postId) }
             .onFailure { r ->
-                dao.postRow(postId)?.let { cur -> dao.updateLikes(postId, cur.post.likeCount, liked) }
+                // 回滚必须用乐观更新**之前**的计数：以前重读库里那行（已经是 +1 后的值），
+                // 结果失败一次点赞数就永久多 1。
+                dao.updateLikes(postId, originalCount, liked)
                 _error.value = r.message
             }
     }

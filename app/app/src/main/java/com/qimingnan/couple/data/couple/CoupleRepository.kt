@@ -1,7 +1,9 @@
 package com.qimingnan.couple.data.couple
 
+import androidx.room.withTransaction
 import com.qimingnan.couple.data.auth.SessionManager
 import com.qimingnan.couple.data.auth.SessionState
+import com.qimingnan.couple.data.db.AppDatabase
 import com.qimingnan.couple.data.db.ProfileDao
 import com.qimingnan.couple.data.db.toModel
 import com.qimingnan.couple.data.net.ApiError
@@ -31,6 +33,7 @@ class CoupleRepository @Inject constructor(
     private val api: CoupleApi,
     private val dao: ProfileDao,
     private val session: SessionManager,
+    private val db: AppDatabase,
 ) {
     private val _state = MutableStateFlow<CoupleState>(CoupleState.Unknown)
     val state: StateFlow<CoupleState> = _state.asStateFlow()
@@ -132,6 +135,13 @@ class CoupleRepository @Inject constructor(
     suspend fun onUnpaired() {
         _unpairPrompt.value = null
         dao.clearCouple()
+        // 解绑后会话还留着（不是登出），但这段关系的聊天/动态/纪念日缓存只属于旧情侣：
+        // 不清掉的话，和新人配对后旧消息会直接混进新会话里（chat_messages 没有 coupleId 列）。
+        db.withTransaction {
+            db.chatDao().clearAll()
+            db.feedDao().clearAll()
+            db.anniversaryDao().clearAll()
+        }
         session.forceRefresh()
         _state.value = CoupleState.NotPaired
     }

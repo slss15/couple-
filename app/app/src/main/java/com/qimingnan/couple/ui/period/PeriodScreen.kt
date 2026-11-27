@@ -50,7 +50,6 @@ import com.qimingnan.couple.data.period.Stats
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private val ISO = DateTimeFormatter.ISO_LOCAL_DATE
@@ -207,7 +206,9 @@ private fun AddLogDialog(onSave: (LocalDate, LocalDate?, String) -> Unit, onCanc
             confirmButton = {
                 val millis = state.selectedDateMillis
                 TextButton(
-                    onClick = { millis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()) } },
+                    // Material3 的 selectedDateMillis 是「UTC 零点」。用 systemDefault 换算的话，
+                    // 负偏移时区（美洲）会整体差一天；ScheduledScreen 里也是用 UTC。
+                    onClick = { millis?.let { onPick(Instant.ofEpochMilli(it).atZone(java.time.ZoneOffset.UTC).toLocalDate()) } },
                     enabled = millis != null,
                 ) { Text("保存") }
             },

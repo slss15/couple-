@@ -116,8 +116,8 @@ object TaRepo {
 
     fun updateMe(userId: String, bio: String?, birthday: String?, birthYear: Int?, showBirthday: Boolean?) {
         Users.update({ Users.id eq userId }) {
-            bio?.let { v -> it[this.bio] = v }
-            birthday?.let { v -> it[Users.birthday] = v }
+            bio?.let { v -> it[this.bio] = v.takeIf { s -> s.isNotEmpty() } }
+            birthday?.let { v -> it[Users.birthday] = v.takeIf { s -> s.isNotEmpty() } }
             birthYear?.let { v -> it[Users.birthYear] = v.toShort() }
             showBirthday?.let { v -> it[Users.showBirthday] = v }
         }
@@ -161,7 +161,9 @@ class TaService(private val db: Db, private val config: AppConfig) {
     }
 
     suspend fun updateMe(caller: AuthUser, req: UpdateMeRequest) {
-        req.birthday?.let { validateBirthday(it) }
+        // 空串 = 清空。客户端原来用 null 表示"不改"，但 JSON 里 explicitNulls=false
+        // 会把 null 字段整个省掉，于是清空简介/生日永远保存不上。
+        req.birthday?.let { if (it.isNotEmpty()) validateBirthday(it) }
         req.birthYear?.let { if (it !in 1900..2100) throw badRequest("VALIDATION_ERROR", "birthYear must be 1900..2100") }
         req.bio?.let { if (it.length > 200) throw badRequest("VALIDATION_ERROR", "bio too long (max 200)") }
         db.tx {

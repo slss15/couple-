@@ -10,6 +10,7 @@ import com.qimingnan.couple.data.net.RegisterRequest
 import com.qimingnan.couple.data.net.TokenPair
 import com.qimingnan.couple.data.net.User
 import com.qimingnan.couple.data.net.apiCall
+import com.qimingnan.couple.data.settings.SettingsRepository
 import com.qimingnan.couple.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,7 @@ class SessionManager @Inject constructor(
     private val refresher: TokenRefresher,
     private val device: DeviceIdentity,
     private val dao: ProfileDao,
+    private val settings: SettingsRepository,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     private val _state = MutableStateFlow<SessionState>(SessionState.Loading)
@@ -86,6 +88,9 @@ class SessionManager @Inject constructor(
         if (refresh != null) apiCall { api.logout(LogoutRequest(refresh)) } // 尽力而为
         withContext(Dispatchers.IO) { tokenStore.clear() }
         dao.clearAll()
+        // 个人数据（预算 / 打卡 / 旅行 / 遗留借贷）没有 ownerId，跟着设备走，登出必须清，
+        // 否则下一个账号会继承上一个人的设置。
+        settings.clearPersonalData()
         _state.value = SessionState.LoggedOut
     }
 
@@ -93,6 +98,7 @@ class SessionManager @Inject constructor(
     suspend fun clearLocal(message: String? = null) {
         withContext(Dispatchers.IO) { tokenStore.clear() }
         dao.clearAll()
+        settings.clearPersonalData()
         _state.value = SessionState.LoggedOut
         message?.let { _messages.tryEmit(it) }
     }

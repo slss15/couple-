@@ -101,6 +101,15 @@ class LedgerViewModel @Inject constructor(
         month.value = m
     }
 
+    /**
+     * 把当前页拉回本月。月份只在 ViewModel 创建时取一次，App 挂着跨月之后
+     * 新记的账目（occurredOn = 今天）落在新月份，而页面还停在旧月份，看起来像没存上。
+     */
+    fun syncMonthToToday() {
+        val today = YearMonth.from(LocalDate.now())
+        if (month.value != today) month.value = today
+    }
+
     fun newId(): String = UUID.randomUUID().toString()
 
     fun saveAccount(account: LedgerAccount, onComplete: (String?) -> Unit = {}) = viewModelScope.launch {
@@ -128,7 +137,9 @@ class LedgerViewModel @Inject constructor(
             val withOwner = entry.copy(ownerId = ownerId)
             val invalid = LedgerLogic.validate(withOwner)
             if (invalid != null) invalid else {
-                dao.upsertEntry(withOwner.toEntity(clock.nowMillis()))
+                // 编辑已有账目时保留原 createdAt：明细按 (occurredOn, createdAt) 倒序排，
+                // 重置成当前时间会让这条在同一天里突然跳到最前面。
+                dao.upsertEntry(withOwner.toEntity(clock.nowMillis(), dao.entryById(withOwner.id)))
                 null
             }
         }.getOrElse { it.message ?: "记账保存失败" }

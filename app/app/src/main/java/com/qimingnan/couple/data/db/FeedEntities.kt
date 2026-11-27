@@ -141,8 +141,12 @@ interface FeedDao {
     @Query("SELECT COUNT(*) FROM posts")
     suspend fun count(): Int
 
-    /** 已确认（pendingState IS NULL）且比 [ts] 新的帖子 id——刷新时用来剔除服务器已删的。 */
-    @Query("SELECT id FROM posts WHERE pendingState IS NULL AND createdAt >= :ts")
+    /**
+     * 已确认（pendingState IS NULL）且**严格**比 [ts] 新的帖子 id——刷新时用来剔除服务器已删的。
+     * 必须是严格大于：用 >= 会把和分页边界同一毫秒的帖子也算进来，那些帖子不在本页 keep 里，
+     * 于是被当成"服务端已删"直接删掉，动态凭空消失。
+     */
+    @Query("SELECT id FROM posts WHERE pendingState IS NULL AND createdAt > :ts")
     suspend fun confirmedIdsNewerThan(ts: Long): List<String>
 
     @Query("SELECT id FROM posts WHERE pendingState IS NULL ORDER BY createdAt DESC, id DESC")

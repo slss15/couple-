@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,8 +59,10 @@ fun KeepAliveScreen(onBack: () -> Unit, vm: KeepAliveViewModel = hiltViewModel()
     val s by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
-    var enablingFgs by remember { mutableStateOf(false) }
-    var notificationDenied by remember { mutableStateOf(false) }
+    // rememberSaveable：授权弹窗期间旋转屏幕/被系统重建后，结果回调里还要靠它
+    // 判断"这次授权是用户想开保活"，用 remember 会丢，导致授权成功也开不起来。
+    var enablingFgs by rememberSaveable { mutableStateOf(false) }
+    var notificationDenied by rememberSaveable { mutableStateOf(false) }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (enablingFgs) {
             notificationDenied = !granted
