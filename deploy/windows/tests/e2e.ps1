@@ -39,7 +39,10 @@ function Assert-True([bool]$Condition, [string]$Message) { if (-not $Condition) 
 
 function Invoke-Script([string]$Shell, [string]$Script, [string[]]$Arguments) {
     Write-Host "> $Shell -File $Script $($Arguments -join ' ')"
-    & $Shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Script @Arguments
+    # 子进程的 stdout 必须显式送到控制台（| Out-Host）。不接的话它会顺着管道进函数返回值，
+    # 和下面的 $LASTEXITCODE 拼成数组，于是 Assert-True ($code -eq 0) 断言的实际是
+    # "输出里存在一个等于 0 的元素"——子脚本只要打印过 "0"，退出码非 0 也会判成功。
+    & $Shell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Script @Arguments | Out-Host
     return $LASTEXITCODE
 }
 
