@@ -60,6 +60,10 @@
   /* 页头：标题左边缘对齐内容 16，右侧是描边的「记一笔」胶囊 */
   .topbar{display:flex;align-items:center;gap:12px;padding:8px 16px 4px}
   .page-title{margin:0;font-size:24px;line-height:32px;letter-spacing:-.02em;font-weight:600}
+  .glass-btn{
+    padding:6px 10px;border:1px solid rgba(140,113,104,.28);border-radius:999px;background:transparent;
+    color:var(--on-surface-variant);font:inherit;font-size:12px;cursor:pointer;
+  }
   .record-btn{
     margin-left:auto;display:inline-flex;align-items:center;gap:5px;min-height:36px;padding:0 14px;
     border:1px solid rgba(140,113,104,.45);border-radius:999px;background:var(--surface);color:var(--primary);
@@ -115,6 +119,12 @@
   .track.over i{background:var(--error)}
   .budget-note{margin:8px 0 0;font-size:12px;color:var(--error)}
 
+  .trend{display:flex;align-items:flex-end;gap:8px;height:110px;padding-top:6px}
+  .tcol{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:6px}
+  .tbar{width:100%;border-radius:12px 12px 4px 4px;background:rgba(255,121,63,.5)}
+  .tbar.now{background:var(--primary)}
+  .tcol span{font-size:12px;color:var(--on-surface-variant)}
+  .tcol:last-child span{color:var(--primary)}
   .stack{display:flex;gap:2px;height:8px;margin-bottom:12px}
   .stack i{display:block;border-radius:999px}
   .cat{display:flex;align-items:center;gap:8px;padding:6px 0 2px}
@@ -126,6 +136,11 @@
   .cat-bar{height:4px;margin:4px 0 4px 44px;border-radius:999px;background:rgba(35,25,21,.08)}
   .cat-bar i{display:block;height:100%;border-radius:999px}
 
+  .summary{display:flex;gap:10px;margin-bottom:12px}
+  .summary div{flex:1;padding:12px 14px;border-radius:16px;background:var(--surface-container);border:1px solid rgba(140,113,104,.10)}
+  .summary span{display:block;font-size:12px;color:var(--on-surface-variant)}
+  .summary strong{display:block;margin-top:2px;font-size:17px;font-weight:600}
+  .summary .net{color:var(--primary)}
   .day{display:flex;align-items:center;justify-content:space-between;margin:12px 0 2px;color:var(--on-surface-variant);font-size:14px;font-weight:500}
   .day:first-of-type{margin-top:2px}
   .day span:last-child{font-size:12px;font-weight:400}
@@ -156,10 +171,12 @@
   /* 底栏：GlassSurface（毛玻璃 / 液态玻璃），选中项 primaryContainer */
   .bottom-nav{
     position:absolute;left:12px;right:12px;bottom:8px;z-index:25;height:72px;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;
-    padding:6px;border:1px solid rgba(35,25,21,.10);border-radius:30px;background:rgba(255,255,255,.72);
+    padding:6px;border:1px solid rgba(140,113,104,.10);border-radius:30px;background:rgba(255,255,255,.62);
     box-shadow:0 14px 38px rgba(76,55,38,.14);backdrop-filter:blur(20px);overflow:hidden;
   }
-  .bottom-nav::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,241,236,.25));pointer-events:none}
+  .bottom-nav::before{content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,241,236,.20));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(35,25,21,.07);}
   .bottom-nav.liquid::after{
     content:"";position:absolute;inset:-40%;background:linear-gradient(115deg,transparent 35%,rgba(255,121,63,.26) 48%,rgba(255,255,255,.6) 52%,transparent 65%);
     animation:sheen 5.2s linear infinite;pointer-events:none;
@@ -244,6 +261,7 @@
         <section class="screen active" data-screen="ledger">
           <header class="topbar">
             <h2 class="page-title">记账</h2>
+            <button class="glass-btn" id="glassChip" type="button">毛玻璃</button>
             <button class="record-btn" id="recordBtn" type="button" aria-label="记一笔">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
               记一笔
@@ -252,7 +270,8 @@
 
           <div class="segmented" id="segmented" role="tablist" aria-label="记账二级页">
             <button type="button" class="active" data-index="0">统计</button>
-            <button type="button" data-index="1">账户</button>
+            <button type="button" data-index="1">明细</button>
+            <button type="button" data-index="2">账户</button>
           </div>
 
           <div class="viewport" id="viewport">
@@ -283,6 +302,18 @@
                   </div>
                   <div class="track over"><i style="width:100%"></i></div>
                   <p class="budget-note">已用 5360.00 元 · 已超 1360.00 元</p>
+                </div>
+
+                <div class="card">
+                  <h3>近 6 个月支出</h3>
+                  <div class="trend">
+                    <div class="tcol"><div class="tbar" style="height:38%"></div><span>6月</span></div>
+                    <div class="tcol"><div class="tbar" style="height:52%"></div><span>7月</span></div>
+                    <div class="tcol"><div class="tbar" style="height:44%"></div><span>8月</span></div>
+                    <div class="tcol"><div class="tbar" style="height:70%"></div><span>9月</span></div>
+                    <div class="tcol"><div class="tbar" style="height:58%"></div><span>10月</span></div>
+                    <div class="tcol"><div class="tbar now" style="height:88%"></div><span>11月</span></div>
+                  </div>
                 </div>
 
                 <div class="card">
@@ -342,18 +373,33 @@
                   <div class="cat-bar"><i style="width:100%;background:var(--primary)"></i></div>
                 </div>
 
+                <p class="label" style="text-align:center;margin-top:2px">个人私密账本，不会出现在动态、聊天或 TA 页。</p>
+              </div>
+
+              <div class="panel">
+                <div class="month">
+                  <button type="button" aria-label="上个月">‹</button>
+                  <span>2026年11月</span>
+                  <button type="button" aria-label="下个月">›</button>
+                </div>
+
+                <div class="summary">
+                  <div><span>收入</span><strong>8600.00</strong></div>
+                  <div><span>支出</span><strong>5360.00</strong></div>
+                  <div><span>结余</span><strong class="net">3240.00</strong></div>
+                </div>
+
                 <div class="card">
                   <h3>账目明细</h3>
-                  <div class="day"><span>今天 · 11月26日</span><span>共2笔</span></div>
+                  <div class="day"><span>今天 · 11月26日</span><span>共2笔 · 支出 48.00</span></div>
                   <div class="tx"><div class="tx-icon">食</div><div class="tx-copy"><strong>支出 · 餐饮</strong><span>微信钱包</span></div><span class="amount">-42.00 元</span></div>
                   <div class="tx"><div class="tx-icon">行</div><div class="tx-copy"><strong>支出 · 交通</strong><span>微信钱包</span></div><span class="amount">-6.00 元</span></div>
 
-                  <div class="day"><span>昨天 · 11月25日</span><span>共2笔</span></div>
+                  <div class="day"><span>昨天 · 11月25日</span><span>共2笔 · 净 +8332.00</span></div>
                   <div class="tx"><div class="tx-icon">购</div><div class="tx-copy"><strong>支出 · 购物</strong><span>招商银行</span></div><span class="amount">-268.00 元</span></div>
                   <div class="tx"><div class="tx-icon" style="color:var(--success)">薪</div><div class="tx-copy"><strong>收入 · 工资</strong><span>招商银行</span></div><span class="amount in">+8600.00 元</span></div>
                 </div>
 
-                <p class="label" style="text-align:center;margin-top:2px">个人私密账本，不会出现在动态、聊天或 TA 页。</p>
               </div>
 
               <div class="panel">
@@ -394,6 +440,10 @@
           统计
         </button>
         <button class="seg-chip" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          明细
+        </button>
+        <button class="seg-chip" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.5"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>
           账户
         </button>
@@ -418,7 +468,7 @@
 
   <aside class="legend">
     <b>三种切换</b><br>
-    1 · 点顶部「统计 / 账户」<br>
+    1 · 点顶部「统计 / 明细 / 账户」<br>
     2 · 长按底栏「记账」图标（约 0.5 秒），<br>
     &nbsp;&nbsp;&nbsp;浮出选择条后左右划，松手生效<br>
     3 · 在页面内容上左右划：<br>
@@ -432,7 +482,7 @@
   const LABELS = { home: '首页', feed: '动态', ledger: '记账', me: '我的' };
   const PAGE = 0.16;
   const TAB = 0.40;
-  const COUNT = 2;
+  const COUNT = 3;
 
   const viewport = document.getElementById('viewport');
   const strip = document.getElementById('strip');
@@ -648,6 +698,11 @@
     });
   });
 
+  document.getElementById('glassChip').addEventListener('click', () => {
+    nav.classList.toggle('liquid');
+    document.getElementById('glassChip').textContent = nav.classList.contains('liquid') ? '液态玻璃' : '毛玻璃';
+  });
+
   document.getElementById('glassToggle').addEventListener('click', (e) => {
     nav.classList.toggle('liquid');
     e.currentTarget.textContent = nav.classList.contains('liquid') ? '切毛玻璃' : '切液态玻璃';
@@ -656,6 +711,11 @@
   // #0 / #1 直达某一页，#sheet 直接拉开抽屉。
   const initial = Number((location.hash || '').slice(1));
   if (Number.isInteger(initial) && initial >= 0 && initial < COUNT) setIndex(initial, false);
+  // #liquid 直接以液态玻璃渲染，方便截图对比。
+  if ((location.hash || '').indexOf('liquid') >= 0) {
+    nav.classList.add('liquid');
+    document.getElementById('glassChip').textContent = '液态玻璃';
+  }
   if ((location.hash || '').indexOf('sheet') >= 0) {
     // 截图模式：去掉动画，避免截到过渡中间帧。
     sheet.style.transition = 'none';

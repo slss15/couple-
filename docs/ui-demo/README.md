@@ -44,13 +44,14 @@
 - `preview-three-directions.png`：三方向同屏预览
 
 
-## Ledger（记账：统计 / 账户 + 记一笔抽屉）
+## Ledger（记账：统计 / 明细 / 账户 + 记一笔抽屉）
 
-- `ledger-swipe.html`：记账页两段切换（统计 / 账户），三种切换方式——点顶部、长按底栏「记账」图标后左右划、在内容上左右划
-- `ledger-swipe.html#0` / `#1`：直接打开某一页；`#sheet`：直接拉开记一笔抽屉
+- `ledger-swipe.html`：记账页三段切换（统计 / 明细 / 账户），三种切换方式——点顶部、长按底栏「记账」图标后左右划、在内容上左右划
+- `ledger-swipe.html#0` / `#1` / `#2`：直接打开某一页；`#sheet` 拉开记一笔抽屉；`#0liquid` 以液态玻璃渲染
 - 记一笔是贴底抽屉（ModalBottomSheet），不占二级页；双击底栏「记账」图标或点右上角「记一笔」打开
+- 头部「毛玻璃 / 液态玻璃」胶囊可在两种底栏质感间一键切换（App 里同位置也有，设置 → 底栏质感里也有）
 - 阈值与 App 一致：切二级页 16% 宽度，已在边界时超过 40% 大幅滑动切相邻底栏
-- `preview-ledger-swipe.png` / `preview-ledger-sheet.png`：预览
+- `preview-ledger-swipe.png`（统计）/ `preview-ledger-detail.png`（明细）/ `preview-ledger-accounts.png`（账户）/ `preview-ledger-sheet.png`（抽屉）/ `preview-ledger-liquid.png`（液态玻璃）
 
 ## Calm Daily
 

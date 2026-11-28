@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
@@ -75,6 +76,7 @@ import com.qimingnan.couple.data.ledger.LedgerEntry
 import com.qimingnan.couple.data.ledger.LedgerEntryType
 import com.qimingnan.couple.data.ledger.LedgerLogic
 import com.qimingnan.couple.data.ledger.LoanRecord
+import com.qimingnan.couple.data.settings.GlassStyle
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.components.GlyphAvatar
 import com.qimingnan.couple.ui.components.LedgerEntryRow
@@ -90,6 +92,7 @@ import java.util.UUID
 
 enum class LedgerSubTab(val label: String) {
     Stats("统计"),
+    Detail("明细"),
     Accounts("账户"),
 }
 
@@ -230,6 +233,23 @@ fun LedgerScreen(
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
             Text("记账", style = t.typography.headline, color = t.colors.onSurface)
             Spacer(Modifier.weight(1f))
+            // 底栏质感快捷开关：设置 → 底栏质感里也有，但藏得深。这里一键在
+            // 毛玻璃 / 液态玻璃之间切，切完立刻能看见底栏的变化。
+            val nextGlass = if (settings.glassStyle == GlassStyle.Liquid) GlassStyle.Frosted else GlassStyle.Liquid
+            Surface(
+                onClick = { settingsVm.setGlassStyle(nextGlass) },
+                shape = t.shapes.pill,
+                color = Color.Transparent,
+                contentColor = t.colors.onSurfaceVariant,
+                border = BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.28f)),
+            ) {
+                Text(
+                    settings.glassStyle.label,
+                    style = t.typography.caption,
+                    modifier = Modifier.padding(horizontal = t.spacing.sm, vertical = 6.dp),
+                )
+            }
+            Spacer(Modifier.width(t.spacing.xs))
             // 记一笔是抽屉：这里留一个常驻入口，双击底栏「记账」图标也能直接打开。
             // 描边而不是实心 primaryContainer：顶部两段切换的选中态已经是实心强调色，
             // 两个橙色块上下挨着会互相抢，主次反而分不出来。
@@ -278,6 +298,7 @@ fun LedgerScreen(
                             budgetCents = settings.monthlyBudgetCents,
                             onSaveBudget = { settingsVm.setMonthlyBudget(it) },
                         )
+                        TrendCard(entries, month)
                         val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
                         val expenseSlices = monthEntries.filter { it.type == LedgerEntryType.EXPENSE && it.loanAction == null }
                             .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
@@ -289,6 +310,14 @@ fun LedgerScreen(
                             .map { (cat, list) -> CategorySlice(cat, list.sumOf { it.amountCents }, list.size) }
                             .sortedByDescending { it.cents }
                         CategoryBreakdownCard("收入分类", incomeSlices, totals.incomeCents, "本月还没有收入。")
+                    }
+                    LedgerSubTab.Detail -> {
+                        MonthSwitcher(
+                            label = "${month.year}年${month.monthValue}月",
+                            onPrev = { vm.setMonth(month.minusMonths(1)) },
+                            onNext = { vm.setMonth(month.plusMonths(1)) },
+                        )
+                        MonthSummaryStrip(totals.incomeCents, totals.expenseCents, totals.netCents)
                         MonthEntriesCard(month, entries, accountById) { selectedEntry = it }
                     }
                     LedgerSubTab.Accounts -> {
@@ -481,6 +510,50 @@ private fun categoryPalette(): List<Color> {
     )
 }
 
+/** 近 6 个月支出柱状图：给统计页一点纵向节奏，也顺手能看出趋势。 */
+@Composable
+private fun TrendCard(entries: List<LedgerEntry>, month: java.time.YearMonth) {
+    val t = LocalCoupleTokens.current
+    val months = (5 downTo 0).map { month.minusMonths(it.toLong()) }
+    val sums = months.map { m ->
+        entries.filter {
+            it.type == LedgerEntryType.EXPENSE && it.loanAction == null &&
+                java.time.YearMonth.from(it.occurredOn) == m
+        }.sumOf { it.amountCents }
+    }
+    val max = sums.maxOrNull() ?: 0L
+    if (max <= 0L) return
+    SectionCard("近 6 个月支出") {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            months.forEachIndexed { index, m ->
+                val ratio = (sums[index].toFloat() / max.toFloat()).coerceIn(0.04f, 1f)
+                val current = m == month
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.BottomCenter) {
+                        Box(
+                            Modifier.fillMaxWidth().fillMaxHeight(ratio)
+                                .clip(t.shapes.medium)
+                                .background(
+                                    if (current) t.colors.primary
+                                    else t.colors.primaryContainer.copy(alpha = 0.50f),
+                                ),
+                        )
+                    }
+                    Text(
+                        "${m.monthValue}月",
+                        style = t.typography.caption,
+                        color = if (current) t.colors.primary else t.colors.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** 分类占比的横向堆叠条：一眼看出钱主要花在哪几类。 */
 @Composable
 private fun StackedShareBar(fractions: List<Float>) {
@@ -549,6 +622,32 @@ private fun CategoryShareRow(category: String, cents: Long, fraction: Float, cou
     }
 }
 
+/** 明细页顶部的三格汇总：收入 / 支出 / 结余，让人先看到结论再往下翻账目。 */
+@Composable
+private fun MonthSummaryStrip(incomeCents: Long, expenseCents: Long, netCents: Long) {
+    val t = LocalCoupleTokens.current
+    @Composable
+    fun cell(label: String, cents: Long, accent: Boolean, modifier: Modifier) {
+        Surface(
+            color = t.colors.surfaceContainer,
+            contentColor = if (accent) t.colors.primary else t.colors.onSurface,
+            shape = t.shapes.medium,
+            border = BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.10f)),
+            modifier = modifier,
+        ) {
+            Column(Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm)) {
+                Text(label, style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text(compactMoney(cents), style = t.typography.title, maxLines = 1)
+            }
+        }
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+        cell("收入", incomeCents, false, Modifier.weight(1f))
+        cell("支出", expenseCents, false, Modifier.weight(1f))
+        cell("结余", netCents, true, Modifier.weight(1f))
+    }
+}
+
 /** 本月账目明细：按天分组，点一行看详情/改/删。 */
 @Composable
 private fun MonthEntriesCard(
@@ -572,9 +671,21 @@ private fun MonthEntriesCard(
                 today.minusDays(1) -> "昨天 · ${date.monthValue}月${date.dayOfMonth}日"
                 else -> "${date.monthValue}月${date.dayOfMonth}日"
             }
+            // 每天给一个小计，翻明细的时候不用自己心算。
+            val dayNet = dayEntries.sumOf { e ->
+                when (e.type) {
+                    LedgerEntryType.INCOME -> e.amountCents
+                    LedgerEntryType.EXPENSE -> -e.amountCents
+                    LedgerEntryType.TRANSFER -> 0L
+                }
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(header, style = t.typography.label, color = t.colors.onSurfaceVariant, modifier = Modifier.weight(1f))
-                Text("共${dayEntries.size}笔", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                Text(
+                    "共${dayEntries.size}笔 · 净 " + (if (dayNet >= 0) "+" else "") + compactMoney(dayNet),
+                    style = t.typography.caption,
+                    color = if (dayNet >= 0) t.colors.onSurfaceVariant else t.colors.onSurface,
+                )
             }
             dayEntries.forEach { e ->
                 LedgerEntryRow(

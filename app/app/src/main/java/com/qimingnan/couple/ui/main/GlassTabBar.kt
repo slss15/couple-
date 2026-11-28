@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
@@ -139,80 +140,88 @@ private fun GlassSurface(
 ) {
     val t = LocalCoupleTokens.current
     val isLiquid = style == GlassStyle.Liquid
-    val transition = rememberInfiniteTransition(label = "glass")
-    // 两条不同速度的光带：液态玻璃靠它们「流动」，毛玻璃不参与动画。
-    val liquid by transition.animateFloat(
+    // 只有液态玻璃才建动画：以前无条件创建 rememberInfiniteTransition，静态的毛玻璃
+    // 也会每帧重组整条底栏（连同里面的 NavigationBarItem）。
+    val transition = if (isLiquid) rememberInfiniteTransition(label = "glass") else null
+    // 动画值只在绘制阶段读（drawBehind 里），不参与重组。
+    val liquidState = transition?.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(5_200, easing = LinearEasing), RepeatMode.Restart),
         label = "glass-shift",
     )
-    val drift by transition.animateFloat(
+    val driftState = transition?.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(9_400, easing = LinearEasing), RepeatMode.Reverse),
         label = "glass-drift",
     )
-    val shift = liquid * 1_100f - 550f
-    val baseBrush = if (isLiquid) {
-        Brush.linearGradient(
-            colors = listOf(
-                t.colors.surface.copy(alpha = 0.72f),
-                t.colors.primary.copy(alpha = 0.18f),
-                t.colors.surface.copy(alpha = 0.88f),
-                t.colors.secondary.copy(alpha = 0.16f),
-                t.colors.surface.copy(alpha = 0.70f),
-            ),
-            start = Offset(shift, 0f),
-            end = Offset(shift + 1_100f, 760f),
-        )
-    } else {
-        // 毛玻璃：上亮下暗的竖向渐变 + 顶部高光，安静不抢内容。
-        Brush.verticalGradient(
-            colors = listOf(
-                t.colors.surface.copy(alpha = 0.90f),
-                t.colors.surfaceContainer.copy(alpha = 0.64f),
-            ),
-        )
-    }
 
     Box(
         modifier
-            .shadow(if (isLiquid) 20.dp else 14.dp, shape, clip = false)
+            .shadow(if (isLiquid) 22.dp else 14.dp, shape, clip = false)
             .clip(shape)
-            .background(baseBrush)
-            .border(1.dp, t.colors.onSurface.copy(alpha = if (isLiquid) 0.16f else 0.10f), shape),
-    ) {
-        // 顶部高光：两种材质都有，液态玻璃更亮。
-        Box(
-            Modifier.matchParentSize().drawBehind {
+            // 不用整圈 border：深色主题下 onSurface 是浅色，1dp 描边会变成一圈「白边」，
+            // 看着像贴纸而不是玻璃。改成顶部镜面高光 + 底部极细暗边，两个主题下都成立。
+            .drawBehind {
+                val liquid = liquidState?.value ?: 0f
+                val drift = driftState?.value ?: 0f
+                val w = size.width
+                val h = size.height
+                // 底：半透明，让下面透出一点底色（不是纯白一块）。
                 drawRect(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            t.colors.onSurface.copy(alpha = if (isLiquid) 0.14f else 0.08f),
-                            t.colors.onSurface.copy(alpha = 0f),
-                        ),
-                        startY = 0f,
-                        endY = size.height * 0.55f,
-                    ),
+                    brush = if (isLiquid) {
+                        val shift = liquid * (w * 1.6f) - (w * 0.3f)
+                        Brush.linearGradient(
+                            colors = listOf(
+                                t.colors.surface.copy(alpha = 0.74f),
+                                t.colors.primary.copy(alpha = 0.20f),
+                                t.colors.surface.copy(alpha = 0.82f),
+                                t.colors.secondary.copy(alpha = 0.18f),
+                                t.colors.surface.copy(alpha = 0.70f),
+                            ),
+                            start = Offset(shift, 0f),
+                            end = Offset(shift + w * 1.2f, h),
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                t.colors.surface.copy(alpha = 0.82f),
+                                t.colors.surfaceContainer.copy(alpha = 0.62f),
+                            ),
+                        )
+                    },
                 )
-            },
-        )
-        if (isLiquid) {
-            Box(
-                Modifier.matchParentSize().drawBehind {
-                    val w = size.width
-                    val h = size.height
+                // 顶部镜面高光：玻璃的"边"是亮的，不是暗的。
+                val specular = t.colors.glassSpecular.copy(alpha = if (t.isDark) 0.16f else 0.55f)
+                val stroke = 1.dp.toPx()
+                drawLine(
+                    brush = Brush.horizontalGradient(
+                        listOf(t.colors.glassSpecular.copy(alpha = 0f), specular, t.colors.glassSpecular.copy(alpha = 0f)),
+                    ),
+                    start = Offset(0f, stroke / 2f),
+                    end = Offset(w, stroke / 2f),
+                    strokeWidth = stroke,
+                )
+                // 底部一道很淡的暗边，把玻璃和背景分开，不需要整圈描边。
+                drawLine(
+                    color = t.colors.onSurface.copy(alpha = if (t.isDark) 0.30f else 0.07f),
+                    start = Offset(w * 0.06f, h - stroke / 2f),
+                    end = Offset(w * 0.94f, h - stroke / 2f),
+                    strokeWidth = stroke,
+                )
+                if (isLiquid) {
+                    // 两道不同速度的高光带：液态玻璃靠它们"流动"。
                     val bandX = w * liquid
                     drawRect(
                         brush = Brush.linearGradient(
                             colors = listOf(
-                                t.colors.onSurface.copy(alpha = 0f),
-                                t.colors.onSurface.copy(alpha = 0.13f),
-                                t.colors.onSurface.copy(alpha = 0f),
+                                t.colors.glassSpecular.copy(alpha = 0f),
+                                t.colors.glassSpecular.copy(alpha = if (t.isDark) 0.10f else 0.34f),
+                                t.colors.glassSpecular.copy(alpha = 0f),
                             ),
-                            start = Offset(bandX - w * 0.30f, 0f),
-                            end = Offset(bandX + w * 0.30f, h),
+                            start = Offset(bandX - w * 0.28f, 0f),
+                            end = Offset(bandX + w * 0.28f, h),
                         ),
                     )
                     val driftX = w * drift
@@ -220,23 +229,16 @@ private fun GlassSurface(
                         brush = Brush.linearGradient(
                             colors = listOf(
                                 t.colors.primary.copy(alpha = 0f),
-                                t.colors.primary.copy(alpha = 0.18f),
+                                t.colors.primary.copy(alpha = 0.22f),
                                 t.colors.primary.copy(alpha = 0f),
                             ),
-                            start = Offset(driftX - w * 0.24f, h),
-                            end = Offset(driftX + w * 0.24f, 0f),
+                            start = Offset(driftX - w * 0.22f, h),
+                            end = Offset(driftX + w * 0.22f, 0f),
                         ),
                     )
-                    drawRect(
-                        brush = Brush.radialGradient(
-                            colors = listOf(t.colors.onSurface.copy(alpha = 0.12f), t.colors.onSurface.copy(alpha = 0f)),
-                            center = Offset(bandX, h * 0.16f),
-                            radius = h * 1.1f,
-                        ),
-                    )
-                },
-            )
-        }
+                }
+            },
+    ) {
         content()
     }
 }

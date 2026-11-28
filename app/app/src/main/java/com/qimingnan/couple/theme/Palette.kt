@@ -33,6 +33,8 @@ data class CouplePalette(
     /** 首页日落插画上的固定浅色文字；插画本身不随深色模式反色。 */
     val onHero: Long = 0xFFFFF8F2,
     val heroScrim: Long = 0xFF2E2522,
+    /** 玻璃材质顶部的镜面高光。固定近白，深浅色都靠 alpha 控制强度。 */
+    val glassSpecular: Long = 0xFFFFFFFF,
 ) {
     /** 文字/前景色 与 背景色 的配对，要求对比度 ≥ 4.5:1。 */
     fun textPairs(): Map<String, Pair<Long, Long>> = mapOf(

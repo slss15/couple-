@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Favorite
@@ -71,6 +72,7 @@ enum class MainTab(val layoutId: String, @StringRes val label: Int, val icon: Im
 
 private val LEDGER_SECONDARY_ITEMS = listOf(
     SecondaryTabItem("stats", "统计", Icons.Filled.DateRange),
+    SecondaryTabItem("detail", "明细", Icons.AutoMirrored.Filled.List),
     SecondaryTabItem("accounts", "账户", Icons.Filled.Person),
 )
 
