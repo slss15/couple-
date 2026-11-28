@@ -66,7 +66,9 @@ fun MeScreen(
 
     Column(
         // 顶部留白从 lg(16dp) 减到 sm(8dp)：外层 Scaffold 已给过状态栏留白，这里不再叠一层大留白。
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = t.spacing.lg, vertical = t.spacing.sm),
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = t.spacing.lg, vertical = t.spacing.sm)
+            // 底栏浮在内容上，末尾留出它的高度，否则最后一项被压在栏下面。
+            .padding(bottom = com.qimingnan.couple.ui.components.LocalBottomBarInset.current),
         verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
     ) {
         // 页头：给「我的」一个视觉锚点。之前一进来就是 8 张等权重的卡片，

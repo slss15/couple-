@@ -44,11 +44,18 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.qimingnan.couple.data.settings.GlassStyle
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeChild
 import com.qimingnan.couple.theme.LocalCoupleTokens
 
 @Composable
 fun GlassNavigationBar(
     style: GlassStyle,
+    /** 真实背景模糊的状态：内容侧用 Modifier.haze(state) 登记，这里用 hazeChild 取模糊结果。 */
+    hazeState: HazeState,
     modifier: Modifier = Modifier,
     /** 底栏项数；与 onDragSelect 一起启用「按住横向滑动选择」。 */
     itemCount: Int = 0,
@@ -65,6 +72,7 @@ fun GlassNavigationBar(
     ) {
         GlassSurface(
             style = style,
+            hazeState = hazeState,
             modifier = Modifier.fillMaxWidth().then(
                 if (itemCount > 1) Modifier.tabBarSwipe(itemCount, swipeSelect) else Modifier,
             ),
@@ -86,12 +94,14 @@ fun GlassNavigationBar(
 fun SecondaryTabOverlay(
     menu: SecondaryTabMenu,
     style: GlassStyle,
+    hazeState: HazeState,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val t = LocalCoupleTokens.current
     GlassSurface(
         style = style,
+        hazeState = hazeState,
         modifier = modifier.fillMaxWidth().heightIn(min = 108.dp),
         shape = RoundedCornerShape(30.dp),
     ) {
@@ -136,14 +146,14 @@ fun SecondaryTabOverlay(
 @Composable
 private fun GlassSurface(
     style: GlassStyle,
+    hazeState: HazeState,
     modifier: Modifier,
     shape: Shape,
     content: @Composable () -> Unit,
 ) {
     val t = LocalCoupleTokens.current
     val isLiquid = style == GlassStyle.Liquid
-    // 只有液态玻璃才建动画：以前无条件创建 rememberInfiniteTransition，静态的毛玻璃
-    // 也会每帧重组整条底栏（连同里面的 NavigationBarItem）。
+    // 只有液态玻璃才建动画：静态毛玻璃不需要每帧跑高光。
     val transition = if (isLiquid) rememberInfiniteTransition(label = "glass") else null
     // 动画值只在绘制阶段读（drawBehind 里），不参与重组。
     val liquidState = transition?.animateFloat(
@@ -158,6 +168,15 @@ private fun GlassSurface(
         animationSpec = infiniteRepeatable(tween(9_400, easing = LinearEasing), RepeatMode.Reverse),
         label = "glass-drift",
     )
+    // 真·背景模糊：hazeChild 会把内容侧（Modifier.haze）录下来的画面按 blurRadius 模糊后
+    // 画在这里。之前那套「半透明渐变 + 高光带」只是画出来的假玻璃，后面根本没有东西可糊。
+    // fallbackTint 在拿不到 RenderEffect 的低版本机型上退化成半透明底色，不会变透明块。
+    val hazeStyle = HazeStyle(
+        backgroundColor = if (t.isDark) t.colors.surfaceContainer.copy(alpha = 0.55f) else t.colors.surface.copy(alpha = 0.42f),
+        tint = HazeTint(t.colors.surface.copy(alpha = if (t.isDark) 0.42f else 0.55f)),
+        blurRadius = if (isLiquid) 32.dp else 18.dp,
+        noiseFactor = if (isLiquid) 0.10f else 0.06f,
+    )
 
     Box(
         modifier
@@ -171,46 +190,13 @@ private fun GlassSurface(
                 spotColor = if (t.isDark) t.colors.primaryContainer.copy(alpha = 0.35f) else t.colors.onSurface.copy(alpha = 0.30f),
             )
             .clip(shape)
-            // 不用整圈 border：深色主题下 onSurface 是浅色，1dp 描边会变成一圈「白边」，
-            // 看着像贴纸而不是玻璃。改成顶部镜面高光 + 底部极细暗边，两个主题下都成立。
+            // 已经 clip(shape) 了，不需要再传 shape（传了会走 deprecated 重载）。
+            .hazeChild(hazeState, hazeStyle)
             .drawBehind {
                 val liquid = liquidState?.value ?: 0f
                 val drift = driftState?.value ?: 0f
                 val w = size.width
                 val h = size.height
-                // 底：半透明，让下面透出一点底色（不是纯白一块）。
-                drawRect(
-                    brush = if (isLiquid) {
-                        val shift = liquid * (w * 1.6f) - (w * 0.3f)
-                        Brush.linearGradient(
-                            colors = listOf(
-                                t.colors.surface.copy(alpha = 0.74f),
-                                t.colors.primary.copy(alpha = 0.20f),
-                                t.colors.surface.copy(alpha = 0.82f),
-                                t.colors.secondary.copy(alpha = 0.18f),
-                                t.colors.surface.copy(alpha = 0.70f),
-                            ),
-                            start = Offset(shift, 0f),
-                            end = Offset(shift + w * 1.2f, h),
-                        )
-                    } else if (t.isDark) {
-                        // 深色 Palette 里 surface 与 background 同为 #1A1316，拿 surface 打底等于实心黑板。
-                        // 换成比背景亮一档的 surfaceContainer，才看得出「透」。
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                t.colors.surfaceContainer.copy(alpha = 0.92f),
-                                t.colors.surfaceContainer.copy(alpha = 0.78f),
-                            ),
-                        )
-                    } else {
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                t.colors.surface.copy(alpha = 0.82f),
-                                t.colors.surfaceContainer.copy(alpha = 0.62f),
-                            ),
-                        )
-                    },
-                )
                 // 顶部镜面高光：玻璃的"边"是亮的，不是暗的。
                 val specular = t.colors.glassSpecular.copy(alpha = if (t.isDark) 0.16f else 0.55f)
                 val stroke = 1.dp.toPx()
@@ -222,10 +208,9 @@ private fun GlassSurface(
                     end = Offset(w, stroke / 2f),
                     strokeWidth = stroke,
                 )
-                // 底部一道很淡的暗边，把玻璃和背景分开，不需要整圈描边。
+                // 底部一道很淡的暗边，把玻璃和背景分开（深色下用 background 压暗，
+                // 不能用 onSurface —— 深色下它是浅色，会变成一条亮线）。
                 drawLine(
-                    // 深色下不能用 onSurface（它是浅色，0.30 就是一条亮线，等于把白边挪到下沿）。
-                    // 深色用 background 压暗，浅色用 onSurface 极淡的一道。
                     color = if (t.isDark) t.colors.background.copy(alpha = 0.55f)
                     else t.colors.onSurface.copy(alpha = 0.07f),
                     start = Offset(w * 0.06f, h - stroke / 2f),
@@ -233,7 +218,8 @@ private fun GlassSurface(
                     strokeWidth = stroke,
                 )
                 if (isLiquid) {
-                    // 两道不同速度的高光带：液态玻璃靠它们"流动"。
+                    // 液态玻璃的两道流动高光：模糊底之上再叠一层会动的镜面，
+                    // 这才是"液态"和"磨砂"的差别。
                     val bandX = w * liquid
                     drawRect(
                         brush = Brush.linearGradient(

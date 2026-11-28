@@ -123,7 +123,11 @@ fun FeedScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = t.spacing.sm, horizontal = t.spacing.md),
+                // 底栏浮在内容上，列表末尾要留出它的高度。
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = t.spacing.md, end = t.spacing.md, top = t.spacing.sm,
+                    bottom = t.spacing.sm + com.qimingnan.couple.ui.components.LocalBottomBarInset.current,
+                ),
                 verticalArrangement = Arrangement.spacedBy(t.spacing.md),
             ) {
                 if (showAnniversaryCard) {

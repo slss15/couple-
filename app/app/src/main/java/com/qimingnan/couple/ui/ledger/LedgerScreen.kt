@@ -301,7 +301,9 @@ fun LedgerScreen(
             ),
         ) {
             Column(
-                Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
+                // 底栏浮在内容上，末尾留出它的高度，否则最后一项被压在栏下面。
+                Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg)
+                    .padding(bottom = com.qimingnan.couple.ui.components.LocalBottomBarInset.current),
                 verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
             ) {
                 operationError?.let { Text(it, color = t.colors.error) }

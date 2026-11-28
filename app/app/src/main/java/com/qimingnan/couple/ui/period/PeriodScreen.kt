@@ -82,7 +82,11 @@ fun PeriodScreen(vm: PeriodViewModel, modifier: Modifier = Modifier) {
         Box(modifier.padding(padding).fillMaxSize()) {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(t.spacing.md),
+                // 底栏浮在内容上，列表末尾要留出它的高度。
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = t.spacing.md, end = t.spacing.md, top = t.spacing.md,
+                    bottom = t.spacing.md + com.qimingnan.couple.ui.components.LocalBottomBarInset.current,
+                ),
                 verticalArrangement = Arrangement.spacedBy(t.spacing.md),
             ) {
                 item { StatusCard(state.stats) }

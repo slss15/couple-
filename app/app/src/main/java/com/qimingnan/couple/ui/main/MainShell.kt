@@ -56,6 +56,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.data.settings.AppSettings
 import com.qimingnan.couple.data.settings.TabVisibility
 import com.qimingnan.couple.layout.LayoutResolver
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.haze
 import com.qimingnan.couple.ui.settings.SettingsScreen
 import com.qimingnan.couple.ui.settings.SettingsViewModel
 
@@ -247,84 +249,26 @@ fun MainShell(
         )
         return
     }
+    // 真实背景模糊：内容侧登记成 haze 的 source，底栏 hazeChild 取它的模糊结果。
+    val hazeState = remember { HazeState() }
+    // 底栏浮在内容之上后，每个页面末尾要自己留出这段高度，否则最后一项会被压住。
+    val barInset = 104.dp
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = t.colors.background,
             contentColor = t.colors.onBackground,
-            bottomBar = {
-                // calm 版只保留一套底栏：记账的二级页改到页面顶部三段切换，
-                // 长按「记账」图标仍可弹出覆盖底栏的二级页浮层。
-                GlassNavigationBar(
-                    style = settings.glassStyle,
-                    itemCount = visibleTabs.size,
-                    onDragSelect = { index ->
-                        visibleTabs.getOrNull(index)?.let { item ->
-                            if (item != tab) {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Stats
-                                pinnedTab = null
-                                tab = item
-                            }
-                        }
-                    },
-                ) {
-                    visibleTabs.forEach { item ->
-                        NavigationBarItem(
-                            selected = tab == item,
-                            onClick = {
-                                if (item == MainTab.Ledger) {
-                                    val now = android.os.SystemClock.elapsedRealtime()
-                                    val doubleTap = now - lastLedgerRecordTapAt in 1..350
-                                    if (tab != MainTab.Ledger) ledgerSubTab = LedgerSubTab.Stats
-                                    if (doubleTap) {
-                                        // 双击「记账」直接拉开记一笔抽屉（不再占一个二级页）。
-                                        openLedgerWizard = true
-                                        lastLedgerRecordTapAt = 0L
-                                    } else {
-                                        lastLedgerRecordTapAt = now
-                                    }
-                                }
-                                pinnedTab = null
-                                tab = item
-                            },
-                            icon = {
-                                Icon(
-                                    item.icon,
-                                    contentDescription = null,
-                                    modifier = if (item == MainTab.Ledger) {
-                                        // 长按「记账」图标：弹出覆盖底栏的二级页浮层（统计/账户）。
-                                        Modifier.secondaryTabLongPress(
-                                            enabled = true,
-                                            itemCount = LEDGER_SECONDARY_ITEMS.size,
-                                            initialIndex = ledgerSubTab.ordinal,
-                                            onOpen = ::showLedgerSecondaryMenu,
-                                            onMove = ::moveLedgerSecondaryMenu,
-                                            onFinish = { index -> commitLedgerSecondaryMenu(index, switchToLedger = true) },
-                                            onCancel = ::closeLedgerSecondaryMenu,
-                                        )
-                                    } else Modifier,
-                                )
-                            },
-                            label = { Text(stringResource(item.label), style = t.typography.caption) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = t.colors.onPrimaryContainer,
-                                selectedTextColor = t.colors.primary,
-                                indicatorColor = t.colors.primaryContainer,
-                                unselectedIconColor = t.colors.onSurfaceVariant,
-                                unselectedTextColor = t.colors.onSurfaceVariant,
-                            ),
-                        )
-                    }
-                }
-            },
         ) { padding ->
             // 平板/横屏下把内容限制在 560dp 并居中：卡片全是 fillMaxWidth，不限制会被
             // 拉成一整行很宽的条，文字行长过百 dp 很难读。手机上 560 > 屏宽，等于没变化。
+            // haze：这一层就是"底栏后面的东西"，hazeChild 会把它模糊后画在底栏里。
             Box(
-                Modifier.fillMaxSize().padding(padding),
+                Modifier.fillMaxSize().padding(padding).haze(hazeState),
                 contentAlignment = androidx.compose.ui.Alignment.TopCenter,
             ) {
                 val contentModifier = Modifier.fillMaxSize().widthIn(max = 560.dp)
+                androidx.compose.runtime.CompositionLocalProvider(
+                    com.qimingnan.couple.ui.components.LocalBottomBarInset provides barInset,
+                ) {
                 when (tab) {
                     MainTab.Home -> com.qimingnan.couple.ui.home.HomeScreen(
                         anniversaryVm = hiltViewModel(),
@@ -392,6 +336,73 @@ fun MainShell(
                     )
                     MainTab.Period -> com.qimingnan.couple.ui.period.PeriodScreen(vm = hiltViewModel(), modifier = contentModifier)
                 }
+                }
+            }
+        }
+
+        // calm 版只保留一套底栏：记账的二级页改到页面顶部三段切换，
+        // 长按「记账」图标仍可弹出覆盖底栏的二级页浮层。
+        GlassNavigationBar(
+            style = settings.glassStyle,
+            hazeState = hazeState,
+            itemCount = visibleTabs.size,
+            onDragSelect = { index ->
+                visibleTabs.getOrNull(index)?.let { item ->
+                    if (item != tab) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (item == MainTab.Ledger) ledgerSubTab = LedgerSubTab.Stats
+                        pinnedTab = null
+                        tab = item
+                    }
+                }
+            },
+        ) {
+            visibleTabs.forEach { item ->
+                NavigationBarItem(
+                    selected = tab == item,
+                    onClick = {
+                        if (item == MainTab.Ledger) {
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            val doubleTap = now - lastLedgerRecordTapAt in 1..350
+                            if (tab != MainTab.Ledger) ledgerSubTab = LedgerSubTab.Stats
+                            if (doubleTap) {
+                                // 双击「记账」直接拉开记一笔抽屉（不再占一个二级页）。
+                                openLedgerWizard = true
+                                lastLedgerRecordTapAt = 0L
+                            } else {
+                                lastLedgerRecordTapAt = now
+                            }
+                        }
+                        pinnedTab = null
+                        tab = item
+                    },
+                    icon = {
+                        Icon(
+                            item.icon,
+                            contentDescription = null,
+                            modifier = if (item == MainTab.Ledger) {
+                                // 长按「记账」图标：弹出覆盖底栏的二级页浮层（统计/账户）。
+                                Modifier.secondaryTabLongPress(
+                                    enabled = true,
+                                    itemCount = LEDGER_SECONDARY_ITEMS.size,
+                                    initialIndex = ledgerSubTab.ordinal,
+                                    onOpen = ::showLedgerSecondaryMenu,
+                                    onMove = ::moveLedgerSecondaryMenu,
+                                    onFinish = { index -> commitLedgerSecondaryMenu(index, switchToLedger = true) },
+                                    onCancel = ::closeLedgerSecondaryMenu,
+                                )
+                            } else Modifier,
+                        )
+                    },
+                    label = { Text(stringResource(item.label), style = t.typography.caption) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = t.colors.onPrimaryContainer,
+                        selectedTextColor = t.colors.primary,
+                        indicatorColor = t.colors.primaryContainer,
+                        unselectedIconColor = t.colors.onSurfaceVariant,
+                        unselectedTextColor = t.colors.onSurfaceVariant,
+                    ),
+                )
             }
         }
 
@@ -409,6 +420,7 @@ fun MainShell(
                 SecondaryTabOverlay(
                     menu = menu,
                     style = settings.glassStyle,
+                    hazeState = hazeState,
                     onSelect = { index ->
                         commitLedgerSecondaryMenu(index, switchToLedger = tab != MainTab.Ledger)
                     },

@@ -148,7 +148,9 @@ fun SettingsScreen(
             Text("设置", style = t.typography.headline, color = t.colors.onSurface)
         }
         Column(
-            Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
+            Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg)
+            // 底栏浮在内容上，末尾留出它的高度，否则最后一项被压在栏下面。
+            .padding(bottom = com.qimingnan.couple.ui.components.LocalBottomBarInset.current),
             // 外层只负责组与组之间：xl 与组内 lg 差 8dp，扫读时能直接看出"换组了"。
             verticalArrangement = Arrangement.spacedBy(t.spacing.xl),
         ) {

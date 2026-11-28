@@ -113,7 +113,9 @@ fun HomeScreen(
         .minByOrNull { (_, occurrence) -> occurrence.date }
 
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = t.spacing.lg),
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = t.spacing.lg)
+            // 底栏浮在内容上，末尾留出它的高度，否则最后一项被压在栏下面。
+            .padding(bottom = com.qimingnan.couple.ui.components.LocalBottomBarInset.current),
     ) {
         HomeTopBar(
             greeting = meState.me?.displayName?.takeIf { it.isNotBlank() }?.let { "早安，" + it } ?: "早安",

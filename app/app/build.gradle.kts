@@ -208,6 +208,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     // 帖子图片/头像加载：走 apiClient（带 Bearer，媒体一律经后端代理）；Coil 2.x 的 okhttp 支持内置于 coil-base
     implementation(libs.coil.compose)
+    // 底栏/浮层的真实背景模糊（glass）。Compose 自身没有 backdrop blur。
+    implementation(libs.haze)
 
     implementation(libs.camerax.core)
     implementation(libs.camerax.camera2)
