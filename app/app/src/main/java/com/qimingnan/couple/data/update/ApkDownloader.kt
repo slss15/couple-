@@ -117,8 +117,10 @@ class ApkDownloader(private val transport: RangeTransport, private val clock: Mo
         }
 
         if (part.length() != expectedSize) {
+            // 先读长度再删：以前先 delete() 后读 length()，错误文案永远是 0。
+            val got = part.length()
             part.delete()
-            throw DownloadException("安装包大小不符（${part.length()} ≠ $expectedSize）", retryable = false)
+            throw DownloadException("安装包大小不符（$got ≠ $expectedSize）", retryable = false)
         }
         val actual = UpdateLogic.sha256Hex(part)
         if (actual != sha) {

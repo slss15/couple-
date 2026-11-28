@@ -88,6 +88,14 @@ class ChatRepository @Inject constructor(
                     if (it is MqttState.Connected) catchUp()
                 }
             }
+            launch(Dispatchers.IO) {
+                // 进程在"写 PENDING 行"和"enqueue worker"之间被杀时，这条消息会永远停在
+                // 「发送中」：WorkManager 没收到任务，而 UI 只有 FAILED 才给重试入口。
+                // 启动时补一次 enqueue——worker 自身幂等（已确认的行直接返回）。
+                runCatching { dao.pendingIds() }.getOrDefault(emptyList()).forEach { id ->
+                    runCatching { ChatSendWorker.enqueue(context, id, requireNetwork = !isDemo()) }
+                }
+            }
         }
     }
 

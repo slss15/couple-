@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.preferencesDataStore
 import com.qimingnan.couple.data.ledger.LoanRecord
 import kotlinx.coroutines.CoroutineScope
@@ -19,7 +20,16 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
-val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+/**
+ * corruptionHandler：文件损坏（断电、磁盘满、被其他进程写坏）时 DataStore 会抛
+ * CorruptionException。没有 handler 的话，读取端靠 .catch 静默回到默认值，而任何
+ * setXxx 的 edit 会再抛一次且没人接——表现为"设置全部重置后一点保存就崩"。
+ * 配一个 ReplaceFileCorruptionHandler 直接把坏文件换成空文件，行为退化成出厂默认。
+ */
+val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "settings",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /** 设置仓库：DataStore 持久化，[settings] 为热 StateFlow，修改立即生效。 */
 class SettingsRepository(private val store: DataStore<Preferences>, scope: CoroutineScope) {

@@ -100,6 +100,10 @@ interface ChatDao {
     @Query("SELECT id FROM chat_messages WHERE pendingState IS NULL ORDER BY sortAt ASC, id ASC LIMIT 1")
     suspend fun oldestConfirmedId(): String?
 
+    /** 启动时补发：进程在"写 PENDING 行"和"enqueue worker"之间被杀，这些消息没人再管。 */
+    @Query("SELECT id FROM chat_messages WHERE pendingState = 'PENDING' ORDER BY sortAt ASC")
+    suspend fun pendingIds(): List<String>
+
     @Query("SELECT COUNT(*) FROM chat_messages WHERE pendingState IS NULL")
     suspend fun confirmedCount(): Int
 

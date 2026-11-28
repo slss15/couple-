@@ -57,6 +57,7 @@ class LedgerViewModel @Inject constructor(
     private val profileDao: ProfileDao,
     private val clock: Clock,
     private val loanLedger: LoanLedgerRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
     val operationError = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     init { viewModelScope.launch { operationError.value = runCatching { loanLedger.importLegacy(currentOwnerId()) }.exceptionOrNull()?.message } }
@@ -147,7 +148,21 @@ class LedgerViewModel @Inject constructor(
     }
 
     fun deleteEntry(id: String) = viewModelScope.launch {
+        val removed = entries.value.firstOrNull { it.id == id }
         operationError.value = runCatching { loanLedger.deleteEntry(id, currentOwnerId()) }.exceptionOrNull()?.message
+        // 账目删掉后，它的本机照片授权如果没人再引用就释放掉。
+        // 持久 URI 授权有系统上限（128 个），只申请不释放会让后续 takePersistableUriPermission 静默失败。
+        if (operationError.value == null) {
+            val stillUsed = entries.value.filter { it.id != id }.flatMap { it.photoUris }.toSet()
+            removed?.photoUris?.filterNot { it in stillUsed }?.forEach { uri ->
+                runCatching {
+                    context.contentResolver.releasePersistableUriPermission(
+                        android.net.Uri.parse(uri),
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                }
+            }
+        }
     }
 
     fun deleteAccount(id: String) = viewModelScope.launch {

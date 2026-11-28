@@ -62,6 +62,12 @@ fun KeepAliveScreen(onBack: () -> Unit, vm: KeepAliveViewModel = hiltViewModel()
     // rememberSaveable：授权弹窗期间旋转屏幕/被系统重建后，结果回调里还要靠它
     // 判断"这次授权是用户想开保活"，用 remember 会丢，导致授权成功也开不起来。
     var enablingFgs by rememberSaveable { mutableStateOf(false) }
+    fun openNotificationSettings() {
+        OemIntentLauncher.openFirst(
+            context,
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
+        )
+    }
     var notificationDenied by rememberSaveable { mutableStateOf(false) }
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (enablingFgs) {
@@ -96,16 +102,18 @@ fun KeepAliveScreen(onBack: () -> Unit, vm: KeepAliveViewModel = hiltViewModel()
             s.checks.forEach { item ->
                 CheckRow(item)
                 when (item.id) {
-                    CheckId.NOTIFICATIONS -> if (item.status != CheckStatus.OK) SecondaryButton("允许通知", onClick = {
-                        if (Build.VERSION.SDK_INT >= 33) {
-                            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            OemIntentLauncher.openFirst(
-                                context,
-                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
-                            )
-                        }
-                    })
+                    CheckId.NOTIFICATIONS -> if (item.status != CheckStatus.OK) {
+                        SecondaryButton("允许通知", onClick = {
+                            if (Build.VERSION.SDK_INT >= 33) {
+                                notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else {
+                                openNotificationSettings()
+                            }
+                        })
+                        // 勾了「不再询问」之后系统不会再弹窗、launch 立刻返回 false，
+                        // 用户在这个页面就彻底没有出路了。给一个直达通知设置的入口。
+                        if (notificationDenied) SecondaryButton("去系统设置开启通知", onClick = { openNotificationSettings() })
+                    }
                     CheckId.BATTERY_OPTIMIZATION -> if (item.status != CheckStatus.OK) SecondaryButton("忽略电池优化", onClick = {
                         @SuppressLint("BatteryLife")
                         val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
@@ -163,7 +171,10 @@ fun KeepAliveScreen(onBack: () -> Unit, vm: KeepAliveViewModel = hiltViewModel()
             }
         }
 
-        if (notificationDenied) Text("通知权限未允许，暂未开启常驻连接。", style = t.typography.caption, color = t.colors.error)
+        if (notificationDenied) {
+            Text("通知权限未允许，暂未开启常驻连接。", style = t.typography.caption, color = t.colors.error)
+            SecondaryButton("去系统设置开启通知", onClick = { openNotificationSettings() })
+        }
 
         SectionCard("连接诊断") {
             val (label, color) = when (val m = s.mqtt) {

@@ -44,6 +44,17 @@ internal fun LedgerEntryWizard(
     val context = LocalContext.current
     var photoUrisText by rememberSaveable { mutableStateOf("") }
     val photoUris = remember(photoUrisText) { photoUrisText.lineSequence().filter { it.isNotBlank() }.toList() }
+    // 持久 URI 授权有系统上限（每个 App 128 个），只申请不释放，用久了 takePersistableUriPermission
+    // 会静默失败、重启后照片读不出来。这里统一管：移除照片、放弃本次记账都释放。
+    fun releasePhoto(uri: String) {
+        runCatching {
+            context.contentResolver.releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+    fun releaseUnsavedPhotos() {
+        // 只释放本次新加、且没进过库的那些（已保存账目的照片还要继续显示）。
+        photoUris.filter { uri -> entries.none { it.photoUris.contains(uri) } }.forEach(::releasePhoto)
+    }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val current = photoUris.toMutableList()
         uris.take((9 - current.size).coerceAtLeast(0)).forEach { uri ->
@@ -95,7 +106,7 @@ internal fun LedgerEntryWizard(
             step == 4 && repayment && loanAccountId != null -> { loanAccountId = null; loanId = null }
             step == 4 && presetLoan -> step = 2
             step > 0 -> step--
-            else -> onDismiss()
+            else -> { releaseUnsavedPhotos(); onDismiss() }
         }
     }
     val draft = LedgerEntryDraft(parseCents(amount), type, accountId, toId, category, detail, LocalDate.parse(date), note, photoUris)
@@ -115,7 +126,7 @@ internal fun LedgerEntryWizard(
     LaunchedEffect(step) { scroll.scrollTo(0); error = null; addAccount = false }
     // 「记一笔」是抽屉：贴底滑出，不占整页；六步仍在同一张弹层里走完。
     ModalBottomSheet(
-        onDismissRequest = { if (!saving) onDismiss() },
+        onDismissRequest = { if (!saving) { releaseUnsavedPhotos(); onDismiss() } },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = t.colors.surface,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
@@ -256,7 +267,11 @@ internal fun LedgerEntryWizard(
                                             modifier = Modifier.fillMaxSize().clip(t.shapes.medium),
                                         )
                                         IconButton(
-                                            onClick = { photoUrisText = photoUris.filterNot { it == uri }.joinToString("\n") },
+                                            onClick = {
+                                                // 这张是新加的（还没入库）才释放授权，已保存账目的照片继续要用。
+                                                if (entries.none { it.photoUris.contains(uri) }) releasePhoto(uri)
+                                                photoUrisText = photoUris.filterNot { it == uri }.joinToString("\n")
+                                            },
                                             modifier = Modifier.align(Alignment.TopEnd).size(24.dp),
                                         ) {
                                             Icon(Icons.Filled.Close, contentDescription = "删除照片", tint = t.colors.error)

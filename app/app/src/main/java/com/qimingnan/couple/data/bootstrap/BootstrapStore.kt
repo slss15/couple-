@@ -2,7 +2,9 @@ package com.qimingnan.couple.data.bootstrap
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -29,7 +31,14 @@ interface BootstrapStore {
     fun currentConfigBlocking(): ServerConfig?
 }
 
-private val Context.bootstrapDataStore: DataStore<Preferences> by preferencesDataStore(name = "bootstrap")
+/**
+ * 引导配置损坏时直接当成"没配置过"：App 会回到扫码/手动填服务器地址的引导页，
+ * 而不是启动即崩（没有 handler 时 CorruptionException 会在 load() 里冒出来）。
+ */
+private val Context.bootstrapDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "bootstrap",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 @Singleton
 class DataStoreBootstrapStore @Inject constructor(

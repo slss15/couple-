@@ -62,8 +62,12 @@ object DemoBackend {
     /** 调试入口只在 debug 构建出现；release 包里这个假后端永远不会被走到。 */
     val available: Boolean get() = BuildConfig.DEMO_ENABLED // debug + edge（瘦身的调试 OTA 包，非 debuggable）
 
-    fun isDemo(baseUrl: String?): Boolean = baseUrl != null && runCatching { java.net.URI(baseUrl).host == HOST }.getOrDefault(false)
-    fun isDemoUrl(url: String?): Boolean = url != null && runCatching { java.net.URI(url).host == HOST }.getOrDefault(false)
+    // 必须带 available：release 包（DEMO_ENABLED=false）如果配置里恰好写了 demo.couple.local，
+    // 以前仍会走演示分支——注入假的"TA 在线"、跳过 GitHub 兜底导致检查更新失效。
+    fun isDemo(baseUrl: String?): Boolean =
+        available && baseUrl != null && runCatching { java.net.URI(baseUrl).host == HOST }.getOrDefault(false)
+    fun isDemoUrl(url: String?): Boolean =
+        available && url != null && runCatching { java.net.URI(url).host == HOST }.getOrDefault(false)
 
     fun config(now: Long): ServerConfig = ServerConfig(
         baseUrl = BASE_URL, mqttUrl = MQTT_URL, configVersion = 1, issuedAt = now, signed = false, appliedAt = now,
@@ -525,13 +529,17 @@ object DemoBackend {
             emitTyping(false)
             val id = Ulid.next()
             val at = System.currentTimeMillis()
-            val reply = DemoChat(id, partner.id, replies[(chatMessages.size - 1) % replies.size], null, at, at, null)
-            chatMessages += reply
-            emitChatMessage(reply)
-            // 演示 TA 已读了我方最后一条消息。
-            chatMessages.lastOrNull { it.senderId == self().id }?.let { mine ->
-                demoPartnerReadUpTo = mine.id
-                emitChat("""{"kind":"read","userId":"${partner.id}","upToId":"${mine.id}","ts":$at}""")
+            // chatMessages 是普通 MutableList，respond() 在 synchronized(stateLock) 里遍历它；
+            // 这里在锁外 += 会并发抛 ConcurrentModificationException（演示账号偶发崩溃）。
+            synchronized(stateLock) {
+                val reply = DemoChat(id, partner.id, replies[(chatMessages.size - 1) % replies.size], null, at, at, null)
+                chatMessages += reply
+                emitChatMessage(reply)
+                // 演示 TA 已读了我方最后一条消息。
+                chatMessages.lastOrNull { it.senderId == self().id }?.let { mine ->
+                    demoPartnerReadUpTo = mine.id
+                    emitChat("""{"kind":"read","userId":"${partner.id}","upToId":"${mine.id}","ts":$at}""")
+                }
             }
         }
     }

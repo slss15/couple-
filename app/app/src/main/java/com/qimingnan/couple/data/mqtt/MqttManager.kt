@@ -171,6 +171,22 @@ class MqttManager @Inject constructor(
         scope.launch(Dispatchers.IO) {
             mutex.withLock {
                 if (newTarget == target && client?.isConnected == true) return@withLock
+                // cleanSession=false 时 broker 会把会话和订阅一起保留：换情侣/解绑后旧 couple 的
+                // feed/chat/typing 主题会继续推过来（客户端按 cid 丢弃，但流量和会话一直留着）。
+                // 断开前先退订旧主题。
+                val old = target
+                val live = client
+                val oldCid = old?.coupleId
+                if (oldCid != null && live != null && live.isConnected && newTarget != old) {
+                    runCatching {
+                        live.unsubscribe(
+                            arrayOf(
+                                MqttTopics.feed(oldCid), MqttTopics.chat(oldCid), MqttTopics.coupleEvents(oldCid),
+                                MqttTopics.typing(oldCid), MqttTopics.presence(oldCid),
+                            ),
+                        )
+                    }.onFailure { Log.w(TAG, "unsubscribe old couple topics failed: $it") }
+                }
                 disconnectLocked(publishOffline = true, fast = false)
                 if (newTarget != target) {
                     _presence.value = emptyMap()
