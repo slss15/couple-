@@ -215,10 +215,15 @@ fun SettingsScreen(
                     ThemeSeeds.all.forEach { seed ->
                         val selected = !s.dynamicColor && s.themeSeed == seed.id
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            // 选中环画在外圈、中间留 3dp 背景色空隙：直接拿 onSurface 描边时，
+                            // 深色下是白环套浅色点、浅色下是黑环套深色点，两个主题都看不出选中。
                             Box(
-                                Modifier.size(t.spacing.minTouchTarget).clip(CircleShape)
+                                Modifier.size(t.spacing.minTouchTarget)
+                                    .clip(CircleShape)
+                                    .background(if (selected) t.colors.onSurface else Color.Transparent)
+                                    .padding(3.dp)
+                                    .clip(CircleShape)
                                     .background(Color(if (t.isDark) seed.dark.primary else seed.light.primary))
-                                    .border(if (selected) 3.dp else 0.dp, t.colors.onSurface, CircleShape)
                                     .clickable { vm.setSeed(seed.id) },
                                 contentAlignment = Alignment.Center,
                             ) {

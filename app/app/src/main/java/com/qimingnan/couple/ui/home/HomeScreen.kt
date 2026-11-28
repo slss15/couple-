@@ -191,7 +191,9 @@ private fun HeroCard(days: Long?, partnerName: String?, partnerOnline: Boolean) 
             ),
         )
         Surface(
-            color = t.colors.heroScrim.copy(alpha = 0.22f),
+            // 22% 的压暗在浅色插画上只剩 1.6:1，白字基本糊掉；深色下反而正常。
+            // 提到 0.55 让胶囊在任何主题下都是「实心小标签」。
+            color = t.colors.heroScrim.copy(alpha = 0.55f),
             contentColor = t.colors.onHero,
             shape = t.shapes.pill,
             modifier = Modifier.align(Alignment.TopEnd).padding(t.spacing.md),

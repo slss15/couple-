@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -30,6 +31,8 @@ import com.qimingnan.couple.data.update.UpdatePhase
 import com.qimingnan.couple.theme.LocalCoupleTokens
 import com.qimingnan.couple.ui.components.BannerKind
 import com.qimingnan.couple.ui.components.CoupleTextField
+import androidx.compose.ui.unit.dp
+import com.qimingnan.couple.ui.components.GlyphAvatar
 import com.qimingnan.couple.ui.components.KeyValueRow
 import com.qimingnan.couple.ui.components.SectionCard
 import com.qimingnan.couple.ui.components.SecondaryButton
@@ -66,6 +69,26 @@ fun MeScreen(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = t.spacing.lg, vertical = t.spacing.sm),
         verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
     ) {
+        // 页头：给「我的」一个视觉锚点。之前一进来就是 8 张等权重的卡片，
+        // 全 App 最该有头像的一页反而没有。
+        s.me?.let { me ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = t.spacing.sm),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GlyphAvatar(me.displayName.firstOrNull()?.toString() ?: "我", modifier = Modifier.size(64.dp))
+                Column(Modifier.weight(1f).padding(start = t.spacing.md)) {
+                    Text(me.displayName, style = t.typography.headline, color = t.colors.onSurface, maxLines = 1)
+                    val partner = s.partner
+                    Text(
+                        if (partner != null) "和 ${partner.displayName} 在一起" else "@${me.username}",
+                        style = t.typography.caption,
+                        color = t.colors.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
         sections.forEach { section ->
             when (section) {
                 "settings" -> SectionCard("设置") {
@@ -89,7 +112,6 @@ fun MeScreen(
                 "profile" -> SectionCard(stringResource(R.string.me_profile)) {
                     val me = s.me
                     if (me != null) {
-                        Text(me.displayName, style = t.typography.headline, color = t.colors.onSurface)
                         KeyValueRow(stringResource(R.string.auth_username), me.username)
                         KeyValueRow("ID", me.id)
                     }

@@ -115,12 +115,15 @@ private fun LedgerSegmented(current: LedgerSubTab, onChange: (LedgerSubTab) -> U
             Surface(
                 onClick = { if (!selected) onChange(sub) },
                 shape = t.shapes.pill,
-                // 选中态用白底 + 主色文字 + 发丝边，不用实心 primaryContainer：
-                // linepuppy 的 #FF793F 铺满半个屏幕，会把下面的结余大卡压掉，
-                // 整页最响的应该只有那张大数字卡。
-                color = if (selected) t.colors.surface else Color.Transparent,
-                contentColor = if (selected) t.colors.primary else t.colors.onSurfaceVariant,
-                border = if (selected) BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.18f)) else null,
+                // 选中态按主题分开：
+                // 浅色下用 surface 白底（安静，不和下面的结余大卡抢）；
+                // 深色下 surface(#1A1316) 比轨道 surfaceContainer(#261D20) 更暗，白底会变成
+                // 「凹进去的洞」、文字对比度也只有 1.0，所以深色改用 primaryContainer 这一对。
+                color = if (!selected) Color.Transparent
+                else if (t.isDark) t.colors.primaryContainer else t.colors.surface,
+                contentColor = if (!selected) t.colors.onSurfaceVariant
+                else if (t.isDark) t.colors.onPrimaryContainer else t.colors.primary,
+                border = if (selected && !t.isDark) BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.18f)) else null,
                 modifier = Modifier.weight(1f).heightIn(min = 40.dp),
             ) {
                 Box(
@@ -239,9 +242,9 @@ fun LedgerScreen(
             Surface(
                 onClick = { settingsVm.setGlassStyle(nextGlass) },
                 shape = t.shapes.pill,
-                color = Color.Transparent,
+                // 实底而不是「透明 + 描边」：整圈 outline 在两个主题下都像画了个框，没有材质感。
+                color = t.colors.surfaceContainer,
                 contentColor = t.colors.onSurfaceVariant,
-                border = BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.28f)),
             ) {
                 Text(
                     settings.glassStyle.label,
@@ -256,9 +259,8 @@ fun LedgerScreen(
             Surface(
                 onClick = { showQuick = true },
                 shape = t.shapes.pill,
-                color = t.colors.surface,
-                contentColor = t.colors.primary,
-                border = BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.45f)),
+                color = t.colors.primaryContainer,
+                contentColor = t.colors.onPrimaryContainer,
             ) {
                 Row(
                     Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
@@ -538,8 +540,9 @@ private fun TrendCard(entries: List<LedgerEntry>, month: java.time.YearMonth) {
                             Modifier.fillMaxWidth().fillMaxHeight(ratio)
                                 .clip(t.shapes.medium)
                                 .background(
-                                    if (current) t.colors.primary
-                                    else t.colors.primaryContainer.copy(alpha = 0.50f),
+                                    // 不用 primaryContainer：它和卡片底 surfaceContainer 同亮度，
+                                    // 深色下柱子和底几乎同色，整张图只剩当月一根。
+                                    if (current) t.colors.primary else t.colors.primary.copy(alpha = 0.45f),
                                 ),
                         )
                     }

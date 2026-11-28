@@ -47,7 +47,7 @@ fun StitchProgressCapsules(step: Int, total: Int = 6, modifier: Modifier = Modif
                     .width(if (i == step) 24.dp else 12.dp)
                     .height(6.dp)
                     .clip(CircleShape)
-                    .background(if (done) t.colors.primaryContainer else t.colors.surfaceVariant),
+                    .background(if (done) t.colors.primary else t.colors.surfaceVariant),
             )
         }
     }
@@ -89,12 +89,15 @@ fun OptionCard(
 ) {
     val t = LocalCoupleTokens.current
     Surface(
-        color = if (selected) t.colors.surfaceContainer else t.colors.surface,
+        // 未选中用 surfaceContainer 做底：surface 在深浅两个主题里都和 background 同色，
+        // 卡片本体看不见，只剩一圈描边撑形状。选中环用 primary（primaryContainer 当环时
+        // 和未选中的灰环亮度几乎一样，选中/未选中分不出来）。
+        color = if (selected) t.colors.primaryContainer else t.colors.surfaceContainer,
         shape = t.shapes.large,
         modifier = modifier.fillMaxWidth()
             .border(
                 width = if (selected) 2.dp else 1.dp,
-                color = if (selected) t.colors.primaryContainer else t.colors.outline.copy(alpha = 0.4f),
+                color = if (selected) t.colors.primary else t.colors.outline.copy(alpha = 0.10f),
                 shape = t.shapes.large,
             )
             .clickable(onClick = onClick),
@@ -138,8 +141,10 @@ fun RatioBar(fraction: Float, modifier: Modifier = Modifier) {
             .background(t.colors.surfaceVariant),
     ) {
         Box(
+            // 填充不能用 primaryContainer：它和轨道 surfaceVariant 是多套主题下 1.0:1
+            // （深色 linepuppy、浅色 rose/天蓝都测过），进度条等于没画。
             Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(8.dp)
-                .clip(CircleShape).background(t.colors.primaryContainer),
+                .clip(CircleShape).background(t.colors.primary),
         )
     }
 }

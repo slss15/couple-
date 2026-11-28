@@ -171,7 +171,9 @@ private fun PartnerCard(p: com.qimingnan.couple.data.net.TaPartnerView, online: 
                     }
                 }
                 // 在线状态圆点（presence 流）
-                val dot = if (online) t.colors.primary else t.colors.onSurfaceVariant
+                // 深色下 primary 和 onSurfaceVariant 亮度几乎相同（1.00:1），在线/离线只能靠色相，
+// 16dp 的小圆点上分不出来。离线改用 outline，和聊天页头那组对齐。
+                        val dot = if (online) t.colors.success else t.colors.outline
                 Box(
                     Modifier.align(Alignment.BottomEnd).size(16.dp).clip(CircleShape).background(dot),
                 )

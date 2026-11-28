@@ -112,9 +112,11 @@ fun SecondaryTabOverlay(
                         onClick = { onSelect(index) },
                         modifier = Modifier.weight(1f).height(58.dp).graphicsLayer { scaleX = scale; scaleY = scale },
                         shape = RoundedCornerShape(20.dp),
-                        color = if (selected) t.colors.primaryContainer.copy(alpha = 0.92f) else t.colors.surface.copy(alpha = 0.30f),
+                        // 未选中态靠底色分层，不靠整圈描边：深色主题里 surface 和 background 同色，
+                        // 半透明底等于没有，只剩一圈发亮的边，正好是刚去掉的那种「白圈」。
+                        color = if (selected) t.colors.primaryContainer.copy(alpha = 0.92f) else t.colors.surfaceContainer.copy(alpha = 0.72f),
                         contentColor = if (selected) t.colors.onPrimaryContainer else t.colors.onSurfaceVariant,
-                        border = BorderStroke(1.dp, if (selected) t.colors.primary.copy(alpha = 0.28f) else t.colors.onSurface.copy(alpha = 0.08f)),
+                        border = if (selected) BorderStroke(1.dp, t.colors.primary.copy(alpha = 0.28f)) else null,
                     ) {
                         Column(
                             Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -159,7 +161,15 @@ private fun GlassSurface(
 
     Box(
         modifier
-            .shadow(if (isLiquid) 22.dp else 14.dp, shape, clip = false)
+            // 深色下纯黑投影落在近黑背景上看不见，底栏失去「浮起」的分离感；
+            // 深色改用一点主题色光晕，浅色仍用默认黑影。
+            .shadow(
+                elevation = if (isLiquid) 22.dp else 14.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = if (t.isDark) t.colors.primaryContainer.copy(alpha = 0.35f) else t.colors.onSurface.copy(alpha = 0.30f),
+                spotColor = if (t.isDark) t.colors.primaryContainer.copy(alpha = 0.35f) else t.colors.onSurface.copy(alpha = 0.30f),
+            )
             .clip(shape)
             // 不用整圈 border：深色主题下 onSurface 是浅色，1dp 描边会变成一圈「白边」，
             // 看着像贴纸而不是玻璃。改成顶部镜面高光 + 底部极细暗边，两个主题下都成立。
@@ -183,6 +193,15 @@ private fun GlassSurface(
                             start = Offset(shift, 0f),
                             end = Offset(shift + w * 1.2f, h),
                         )
+                    } else if (t.isDark) {
+                        // 深色 Palette 里 surface 与 background 同为 #1A1316，拿 surface 打底等于实心黑板。
+                        // 换成比背景亮一档的 surfaceContainer，才看得出「透」。
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                t.colors.surfaceContainer.copy(alpha = 0.92f),
+                                t.colors.surfaceContainer.copy(alpha = 0.78f),
+                            ),
+                        )
                     } else {
                         Brush.verticalGradient(
                             colors = listOf(
@@ -205,7 +224,10 @@ private fun GlassSurface(
                 )
                 // 底部一道很淡的暗边，把玻璃和背景分开，不需要整圈描边。
                 drawLine(
-                    color = t.colors.onSurface.copy(alpha = if (t.isDark) 0.30f else 0.07f),
+                    // 深色下不能用 onSurface（它是浅色，0.30 就是一条亮线，等于把白边挪到下沿）。
+                    // 深色用 background 压暗，浅色用 onSurface 极淡的一道。
+                    color = if (t.isDark) t.colors.background.copy(alpha = 0.55f)
+                    else t.colors.onSurface.copy(alpha = 0.07f),
                     start = Offset(w * 0.06f, h - stroke / 2f),
                     end = Offset(w * 0.94f, h - stroke / 2f),
                     strokeWidth = stroke,
