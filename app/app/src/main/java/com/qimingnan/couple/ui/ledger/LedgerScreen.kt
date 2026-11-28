@@ -46,6 +46,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -62,6 +63,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -124,6 +126,9 @@ private fun LedgerSegmented(current: LedgerSubTab, onChange: (LedgerSubTab) -> U
                 contentColor = if (!selected) t.colors.onSurfaceVariant
                 else if (t.isDark) t.colors.onPrimaryContainer else t.colors.primary,
                 border = if (selected && !t.isDark) BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.18f)) else null,
+                // 浅色下白底压奶油轨道只有 1.10~1.13:1，光靠底色差和发丝边撑不住"选中"，
+                // 加一层 2dp 投影把块真正抬起来（深色下选中块本来就有 1.2+，阴影不影响）。
+                shadowElevation = if (selected) 2.dp else 0.dp,
                 modifier = Modifier.weight(1f).heightIn(min = 40.dp),
             ) {
                 Box(
@@ -234,13 +239,23 @@ fun LedgerScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showBack) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = t.colors.onSurface) }
-            Text("记账", style = t.typography.headline, color = t.colors.onSurface)
-            Spacer(Modifier.weight(1f))
+            // 标题用 weight(fill = false)：Row 先量非加权子项（两个胶囊），标题拿剩下的宽度。
+            // 这样把字号调到 1.3x（或系统字体再放大）时，是标题变省略号，而不是把胶囊挤出屏幕。
+            Text(
+                "记账",
+                style = t.typography.headline,
+                color = t.colors.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(t.spacing.sm))
             // 底栏质感快捷开关：设置 → 底栏质感里也有，但藏得深。这里一键在
             // 毛玻璃 / 液态玻璃之间切，切完立刻能看见底栏的变化。
             val nextGlass = if (settings.glassStyle == GlassStyle.Liquid) GlassStyle.Frosted else GlassStyle.Liquid
             Surface(
                 onClick = { settingsVm.setGlassStyle(nextGlass) },
+                modifier = Modifier.minimumInteractiveComponentSize(),
                 shape = t.shapes.pill,
                 // 实底而不是「透明 + 描边」：整圈 outline 在两个主题下都像画了个框，没有材质感。
                 color = t.colors.surfaceContainer,
@@ -258,6 +273,7 @@ fun LedgerScreen(
             // 两个橙色块上下挨着会互相抢，主次反而分不出来。
             Surface(
                 onClick = { showQuick = true },
+                modifier = Modifier.minimumInteractiveComponentSize(),
                 shape = t.shapes.pill,
                 color = t.colors.primaryContainer,
                 contentColor = t.colors.onPrimaryContainer,
