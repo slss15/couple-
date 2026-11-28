@@ -36,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MenuAnchorType
@@ -229,7 +230,11 @@ fun LedgerScreen(
         }
     }
 
-    Column(modifier) {
+    // 主操作放 FAB 而不是页头：业界共识（Gmail / Calendar / Drive 都一样）是
+    // 3~5 个底栏目标 + 一个右下角 FAB 承担「唯一主操作」，放在拇指区。
+    // 页头留给标题和外观开关，不再挤一个按钮。
+    Box(modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(
                 // 有返回键时让图标左边缘落在内容的 16dp 上；没有返回键时标题自己对齐 16dp。
@@ -269,26 +274,6 @@ fun LedgerScreen(
                     modifier = Modifier.padding(horizontal = t.spacing.sm, vertical = 6.dp),
                 )
             }
-            Spacer(Modifier.width(t.spacing.xs))
-            // 记一笔是抽屉：这里留一个常驻入口，双击底栏「记账」图标也能直接打开。
-            // 描边而不是实心 primaryContainer：顶部两段切换的选中态已经是实心强调色，
-            // 两个橙色块上下挨着会互相抢，主次反而分不出来。
-            Surface(
-                onClick = { showQuick = true },
-                modifier = Modifier.minimumInteractiveComponentSize(),
-                shape = t.shapes.pill,
-                color = t.colors.primaryContainer,
-                contentColor = t.colors.onPrimaryContainer,
-            ) {
-                Row(
-                    Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("记一笔", style = t.typography.label)
-                }
-            }
         }
         LedgerSegmented(subTab, onSubTabChange)
         // 三种切换方式：点顶部、长按底栏「记账」图标后左右滑、在页面内容上左右滑。
@@ -301,9 +286,9 @@ fun LedgerScreen(
             ),
         ) {
             Column(
-                // 底栏浮在内容上，末尾留出它的高度，否则最后一项被压在栏下面。
+                // 底栏浮在内容上，末尾要留出「底栏 + FAB」的高度，否则最后一项会被压在它们下面。
                 Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg)
-                    .padding(bottom = com.qimingnan.couple.ui.components.LocalBottomBarInset.current),
+                    .padding(bottom = com.qimingnan.couple.ui.components.LocalBottomBarInset.current + 72.dp),
                 verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
             ) {
                 operationError?.let { Text(it, color = t.colors.error) }
@@ -412,6 +397,18 @@ fun LedgerScreen(
                 Text("个人私密账本，不会出现在动态、聊天或 TA 页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
             }
         }
+    }
+        // FAB 浮在内容上，位置在底栏之上；LocalBottomBarInset 已经包含底栏高度。
+        ExtendedFloatingActionButton(
+            onClick = { showQuick = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = t.spacing.lg, bottom = com.qimingnan.couple.ui.components.LocalBottomBarInset.current),
+            containerColor = t.colors.primaryContainer,
+            contentColor = t.colors.onPrimaryContainer,
+            icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+            text = { Text("记一笔", style = t.typography.label) },
+        )
     }
     if (showQuick) {
         LedgerEntryWizard(vm, orderedAccounts, entries, onDismiss = { showQuick = false; onWizardDismissed() })
