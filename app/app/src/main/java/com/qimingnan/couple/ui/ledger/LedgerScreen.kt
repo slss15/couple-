@@ -321,17 +321,11 @@ fun LedgerScreen(
                             onSaveBudget = { settingsVm.setMonthlyBudget(it) },
                         )
                         TrendCard(entries, month)
-                        val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
-                        val expenseSlices = monthEntries.filter { it.type == LedgerEntryType.EXPENSE && it.loanAction == null }
-                            .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
-                            .map { (cat, list) -> CategorySlice(cat, list.sumOf { it.amountCents }, list.size) }
-                            .sortedByDescending { it.cents }
-                        CategoryBreakdownCard("支出分类", expenseSlices, totals.expenseCents, "本月还没有支出。")
-                        val incomeSlices = monthEntries.filter { it.type == LedgerEntryType.INCOME && it.loanAction == null }
-                            .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
-                            .map { (cat, list) -> CategorySlice(cat, list.sumOf { it.amountCents }, list.size) }
-                            .sortedByDescending { it.cents }
-                        CategoryBreakdownCard("收入分类", incomeSlices, totals.incomeCents, "本月还没有收入。")
+                        // 分类聚合是 O(n log n) 的分组+排序，不能每次重组都算一遍
+                        // （Compose 官方最佳实践第一条就是「用 remember 缓存开销大的计算」）。
+                        val slices = remember(entries, month) { categorySlices(entries, month) }
+                        CategoryBreakdownCard("支出分类", slices.expense, totals.expenseCents, "本月还没有支出。")
+                        CategoryBreakdownCard("收入分类", slices.income, totals.incomeCents, "本月还没有收入。")
                     }
                     LedgerSubTab.Detail -> {
                         MonthSwitcher(
@@ -537,11 +531,14 @@ private fun categoryPalette(): List<Color> {
 private fun TrendCard(entries: List<LedgerEntry>, month: java.time.YearMonth) {
     val t = LocalCoupleTokens.current
     val months = (5 downTo 0).map { month.minusMonths(it.toLong()) }
-    val sums = months.map { m ->
-        entries.filter {
-            it.type == LedgerEntryType.EXPENSE && it.loanAction == null &&
-                java.time.YearMonth.from(it.occurredOn) == m
-        }.sumOf { it.amountCents }
+    // 六个月的支出是 6 次全表扫描，缓存住；entries 或月份变了才重算。
+    val sums = remember(entries, month) {
+        months.map { m ->
+            entries.filter {
+                it.type == LedgerEntryType.EXPENSE && it.loanAction == null &&
+                    java.time.YearMonth.from(it.occurredOn) == m
+            }.sumOf { it.amountCents }
+        }
     }
     val max = sums.maxOrNull() ?: 0L
     if (max <= 0L) return
@@ -645,6 +642,19 @@ private fun CategoryShareRow(category: String, cents: Long, fraction: Float, cou
     }
 }
 
+/** 一次遍历算出本月支出/收入分类切片；纯函数，调用方用 remember 缓存。 */
+private data class MonthSlices(val expense: List<CategorySlice>, val income: List<CategorySlice>)
+
+private fun categorySlices(entries: List<LedgerEntry>, month: java.time.YearMonth): MonthSlices {
+    val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month && it.loanAction == null }
+    fun slicesOf(type: LedgerEntryType) = monthEntries
+        .filter { it.type == type }
+        .groupBy { (it.categoryId ?: "其他").substringBefore("·") }
+        .map { (cat, list) -> CategorySlice(cat, list.sumOf { it.amountCents }, list.size) }
+        .sortedByDescending { it.cents }
+    return MonthSlices(slicesOf(LedgerEntryType.EXPENSE), slicesOf(LedgerEntryType.INCOME))
+}
+
 /** 明细页顶部的三格汇总：收入 / 支出 / 结余，让人先看到结论再往下翻账目。 */
 @Composable
 private fun MonthSummaryStrip(incomeCents: Long, expenseCents: Long, netCents: Long) {
@@ -681,8 +691,10 @@ private fun MonthEntriesCard(
 ) {
     val t = LocalCoupleTokens.current
     SectionCard("账目明细") {
-        val monthEntries = entries.filter { java.time.YearMonth.from(it.occurredOn) == month }
-            .sortedByDescending { it.occurredOn }
+        // 同上：整月账目的过滤 + 排序，缓存起来。
+        val monthEntries = remember(entries, month) {
+            entries.filter { java.time.YearMonth.from(it.occurredOn) == month }.sortedByDescending { it.occurredOn }
+        }
         if (monthEntries.isEmpty()) {
             Text("这个月还没有账目。", style = t.typography.body, color = t.colors.onSurfaceVariant)
             return@SectionCard

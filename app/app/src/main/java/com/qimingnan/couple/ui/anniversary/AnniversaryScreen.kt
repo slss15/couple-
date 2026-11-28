@@ -52,7 +52,10 @@ fun AnniversaryScreen(
     var editing by remember { mutableStateOf<AnniversaryEvent?>(null) }
     var deleting by remember { mutableStateOf<AnniversaryEvent?>(null) }
     var surpriseEvent by remember { mutableStateOf<AnniversaryEvent?>(null) }
-    val live = events.filter { !it.deleted }.sortedBy { AnniversaryLogic.nextOccurrence(it, today)?.date ?: LocalDate.MAX }
+    // 排序比较器里每个元素都要算一次 nextOccurrence（含农历换算），不能每次重组都跑。
+    val live = remember(events, today) {
+        events.filter { !it.deleted }.sortedBy { AnniversaryLogic.nextOccurrence(it, today)?.date ?: LocalDate.MAX }
+    }
     val nearest = live.firstOrNull { AnniversaryLogic.nextOccurrence(it, today) != null }
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = t.spacing.sm), verticalAlignment = Alignment.CenterVertically) {

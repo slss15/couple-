@@ -502,7 +502,7 @@ private fun RecentSection(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = t.spacing.lg, vertical = t.spacing.sm)) {
-            val recent = entries.sortedByDescending { it.occurredOn }.take(3)
+            val recent = remember(entries) { entries.sortedByDescending { it.occurredOn }.take(3) }
             if (recent.isEmpty()) {
                 Text(
                     "还没有账目，点「记一笔」记第一笔。",

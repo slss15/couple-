@@ -35,7 +35,7 @@ internal fun LoanAccountDetail(
     var renaming by remember { mutableStateOf(false) }
     var name by remember(account.name) { mutableStateOf(account.name) }
     var error by remember { mutableStateOf<String?>(null) }
-    val groups = loans.groupBy { it.counterpartyKey }
+    val groups = remember(loans) { loans.groupBy { it.counterpartyKey } }
     val groupLoans = selectedGroup?.let { groups[it] }.orEmpty()
     val groupLabel = groupLoans.firstOrNull()?.counterpartyName
     BackHandler(selectedGroup != null) { selectedGroup = null }
