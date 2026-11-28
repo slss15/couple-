@@ -35,8 +35,12 @@ npm run dev                  # http://localhost:5173
 
 | 变量 | 作用 |
 |---|---|
-| `VITE_API_BASE` | 后端根地址（**不含** `/api/v1`），构建时写入。留空 = 与后台同源，推荐用反向代理把 `/api` 转发给后端 |
+| `VITE_API_BASE` | 后端根地址（**不含** `/api/v1`），构建期默认值，可被运行时配置覆盖。留空 = 与后台同源，推荐用反向代理把 `/api` 转发给后端 |
 | `VITE_PROXY_TARGET` | 仅 `npm run dev` 使用的代理目标 |
+
+容器部署时还可以用运行时配置覆盖 `VITE_API_BASE`：`/config.js` 注入的 `window.__COUPLE_CONFIG__.apiBase`
+（由 `docker/40-couple-config.sh` 从 `COUPLE_API_BASE` 渲染，deploy 里的 `ADMIN_API_BASE` 也映射到它）
+优先级更高，所以同一个镜像可以适配任意域名——改完重启容器并刷新页面即可生效，不用重新打包。
 
 不要把任何密钥写进 `.env*`；这些变量会被打包进前端代码，公开可见。
 

@@ -115,4 +115,21 @@ describe('axios 拦截器：令牌刷新', () => {
     expect(err.code).toBe('NOT_PAIRED')
     expect(err.display).toBe('尚未配对')
   })
+
+  it('未显式指定 baseURL 时，每次请求都重新解析运行时注入的地址', async () => {
+    const seen: (string | undefined)[] = []
+    const http = createHttp({
+      storage: new TokenStorage(memStore()),
+      adapter: makeAdapter((config) => {
+        seen.push(config.baseURL)
+        return { status: 200, data: { ok: true } }
+      }),
+    })
+    window.__COUPLE_CONFIG__ = { apiBase: 'https://a.example.com' }
+    await http.get('/health')
+    window.__COUPLE_CONFIG__ = { apiBase: 'https://b.example.com' }
+    await http.get('/health')
+    delete window.__COUPLE_CONFIG__
+    expect(seen).toEqual(['https://a.example.com/api/v1', 'https://b.example.com/api/v1'])
+  })
 })

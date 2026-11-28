@@ -4,18 +4,20 @@ import { Refresh } from '@element-plus/icons-vue'
 import { api } from '@/api'
 import { errorText } from '@/api/errors'
 import type { AuditEntry } from '@/types/api'
+import { auditRequest, readAuditPage, type AuditCursor } from '@/utils/auditPage'
 import { formatTs, prettyJson } from '@/utils/format'
 
 /**
  * 契约：GET /admin/audit?limit&before -> 数组（游标分页，没有总数）。
- * 这里把 before 当作“上一页最后一条的 ts（epoch 毫秒）”，按时间倒序向前翻。
+ * 后端只有 before(ts) 且是 ts 严格小于，所以游标不能只记 ts——同一毫秒的记录会在页边界被整组丢掉；
+ * 具体取数与跳过策略见 utils/auditPage.ts。
  */
 const pageSize = ref(20)
 const rows = ref<AuditEntry[]>([])
 const loading = ref(false)
 const error = ref('')
-/** cursors[i] = 第 i 页使用的 before；第 0 页为 undefined */
-const cursors = ref<(number | undefined)[]>([undefined])
+/** cursors[i] = 第 i 页使用的游标（(ts, id) + 已展示条数）；第 0 页为 null（从最新开始） */
+const cursors = ref<(AuditCursor | null)[]>([null])
 const page = ref(0)
 const hasNext = ref(false)
 const keyword = ref('')
@@ -35,13 +37,13 @@ async function load(p: number) {
   loading.value = true
   error.value = ''
   try {
-    // 多取 1 条用于判断是否还有下一页
-    const data = await api.audit({ limit: pageSize.value + 1, before: cursors.value[p] })
-    hasNext.value = data.length > pageSize.value
-    rows.value = data.slice(0, pageSize.value)
+    const cursor = cursors.value[p] ?? null
+    const data = await api.audit(auditRequest(cursor, pageSize.value))
+    const result = readAuditPage(data, cursor, pageSize.value)
+    hasNext.value = result.hasNext
+    rows.value = result.rows
     page.value = p
-    const last = rows.value[rows.value.length - 1]
-    if (hasNext.value && last) cursors.value[p + 1] = last.ts
+    if (result.next) cursors.value[p + 1] = result.next
     cursors.value.length = Math.min(cursors.value.length, p + 2)
   } catch (e) {
     error.value = errorText(e)
@@ -51,7 +53,7 @@ async function load(p: number) {
 }
 
 function reset() {
-  cursors.value = [undefined]
+  cursors.value = [null]
   load(0)
 }
 

@@ -10,8 +10,18 @@ import { toApiError } from './errors'
 /** 不需要（也不能）带 access token、且 401 时不触发刷新的路径 */
 const AUTH_FREE = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout', '/health', '/bootstrap/pubkey', '/setup', '/setup/status']
 
-export function apiRoot(base = import.meta.env.VITE_API_BASE ?? ''): string {
-  return `${base.replace(/\/+$/, '')}/api/v1`
+/**
+ * 后端根地址（不含 /api/v1）。优先级：调用方显式传入 > 容器启动时注入的
+ * window.__COUPLE_CONFIG__.apiBase > 构建期 VITE_API_BASE > 同源。
+ *
+ * 每次调用都重新读 window，而不是在模块初始化时缓存一次：/config.js 是 nginx 后置注入的
+ * （后端 AdminStatic.kt 也会输出同样的对象），部署时只改 COUPLE_API_BASE / ADMIN_API_BASE
+ * 并重启容器即可换域名；缓存会把“脚本谁先加载”变成只在线上复现的隐性 bug。
+ */
+export function apiRoot(base?: string): string {
+  const runtime = typeof window === 'undefined' ? undefined : window.__COUPLE_CONFIG__?.apiBase
+  const resolved = base ?? runtime ?? import.meta.env.VITE_API_BASE ?? ''
+  return `${resolved.trim().replace(/\/+$/, '')}/api/v1`
 }
 
 export interface HttpOptions {
@@ -40,7 +50,9 @@ function isAuthFree(url?: string): boolean {
 export function createHttp(opts: HttpOptions = {}): Http {
   const storage = opts.storage ?? tokenStorage
   const skew = opts.refreshSkewMs ?? 30_000
-  const baseURL = opts.baseURL ?? apiRoot()
+  // 显式传入 baseURL（测试、嵌入场景）时固定使用；否则每次请求前重新解析运行时配置
+  const fixedBase = opts.baseURL
+  const baseURL = fixedBase ?? apiRoot()
 
   const instance = axios.create({ baseURL, timeout: 15_000, adapter: opts.adapter }) as Http
   // 刷新请求使用独立实例，避免经过本实例的拦截器造成递归
@@ -59,6 +71,8 @@ export function createHttp(opts: HttpOptions = {}): Http {
         return current.accessToken
       }
       const rt = current?.refreshToken ?? before
+      // raw 实例不经过拦截器，这里手动跟上运行时配置，避免刷新令牌打到旧域名
+      if (fixedBase === undefined) raw.defaults.baseURL = apiRoot()
       const { data } = await raw.post<TokenPair>('/auth/refresh', {
         refreshToken: rt,
         deviceId: storage.deviceId(),
@@ -91,6 +105,9 @@ export function createHttp(opts: HttpOptions = {}): Http {
   }
 
   instance.interceptors.request.use(async (config) => {
+    // 每次请求前重新解析 baseURL：/config.js 与模块的加载顺序、多份 config.js 覆盖、
+    // 部署后换域名等场景都不必依赖“初始化那一刻读到的值是对的”
+    if (fixedBase === undefined) config.baseURL = apiRoot()
     if (isAuthFree(config.url)) return config
     const t = storage.get()
     if (!t) return config

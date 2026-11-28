@@ -40,6 +40,10 @@ export class ApiError extends Error {
 
   /** 面向用户的中文提示 */
   get display(): string {
+    // 400 一般是后端带具体原因的校验失败（例如布局超宽时给出“区域 bottomBar 网格宽 16 格，
+    // 可见项共占 18 格”）；固定翻成“参数校验失败”会把唯一有用的信息丢掉。
+    // 只有 message 为空（或只有空白）时才回退到映射表。
+    if (this.status === 400 && this.message?.trim()) return this.message
     return ZH[this.code] ?? this.message ?? this.code
   }
 }

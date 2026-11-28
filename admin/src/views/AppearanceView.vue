@@ -8,6 +8,7 @@ import type {
   AppearanceUpdate,
   AppearanceView,
   LayoutItem,
+  LayoutItemSize,
   LayoutSpec,
   LayoutZone,
   LayoutZoneCatalog,
@@ -59,6 +60,52 @@ function zoneOf(zoneId: string): LayoutZone | undefined {
 
 function catalogOf(zoneId: string): LayoutZoneCatalog | undefined {
   return catalog.value.find((zone) => zone.id === zoneId)
+}
+
+/** 与后端 LayoutRules.ItemSize.gridSpan 对齐：区域宽度按“可见项尺寸之和”校验 */
+const SPAN: Record<LayoutItemSize, number> = { S: 1, M: 2, L: 4 }
+
+function gridWidthOf(zoneId: string): number | undefined {
+  return catalogOf(zoneId)?.gridWidth
+}
+
+/** 区域当前可见项占用的格数（后端用同样的方式累加，超宽直接返回 ZONE_OVER_WIDTH 拒绝保存） */
+function usedSpan(zoneId: string): number {
+  return (zoneOf(zoneId)?.items ?? [])
+    .filter((item) => item.visible)
+    .reduce((sum, item) => sum + SPAN[item.size], 0)
+}
+
+function zoneOverWidth(zoneId: string): boolean {
+  const width = gridWidthOf(zoneId)
+  return width !== undefined && usedSpan(zoneId) > width
+}
+
+/** 已超宽的区域：保存按钮据此禁用，避免把后端必定拒绝的布局发出去 */
+const overWidthZones = computed(() => catalog.value.filter((zone) => zoneOverWidth(zone.id)))
+
+/** 把某一项改成 target 尺寸后会不会超宽；隐藏项不占格，改尺寸不影响总跨度 */
+function sizeOverflows(zoneId: string, item: LayoutItem, target: LayoutItemSize): boolean {
+  const width = gridWidthOf(zoneId)
+  if (width === undefined || !item.visible) return false
+  const current = usedSpan(zoneId)
+  const next = current - SPAN[item.size] + SPAN[target]
+  // 已经超宽（历史数据）时允许往小改，否则每一项都会被禁用、只能靠隐藏来修
+  return next > width && next > current
+}
+
+/** 把隐藏项显示出来会不会超宽（显示开关也要拦，否则同样存出非法布局） */
+function showOverflows(zoneId: string, item: LayoutItem): boolean {
+  const width = gridWidthOf(zoneId)
+  if (width === undefined || item.visible) return false
+  return usedSpan(zoneId) + SPAN[item.size] > width
+}
+
+/** 区域下方的实时提示：解释为什么某些开关/尺寸被禁用，而不是只在保存时才报错 */
+function zoneHint(zoneId: string): string {
+  if (zoneOverWidth(zoneId)) return `可见项已占 ${usedSpan(zoneId)} 格，超出 ${gridWidthOf(zoneId) ?? 0} 格：请隐藏入口或缩小尺寸，否则后端会拒绝保存。`
+  if (zoneId === 'meSections') return '聊天入口默认隐藏；聊天模块仍保留，可在需要时重新显示。'
+  return ''
 }
 
 function itemLabel(zoneId: string, itemId: string): string {
@@ -148,6 +195,13 @@ async function load() {
 
 async function save() {
   if (!layout.value) return
+  // 界面上已经实时拦住超宽，这里再兜一次：从服务器加载来的旧布局本身可能就越界
+  if (overWidthZones.value.length) {
+    error.value = `以下区域可见项超出网格宽度，后端会拒绝保存：${overWidthZones.value
+      .map((zone) => `${zone.label}（${usedSpan(zone.id)} / ${zone.gridWidth} 格）`)
+      .join('、')}`
+    return
+  }
   saving.value = true
   error.value = ''
   try {
@@ -177,7 +231,7 @@ onMounted(load)
       </div>
       <div class="actions">
         <el-button :icon="Refresh" @click="load">重新加载</el-button>
-        <el-button type="primary" :icon="Upload" :loading="saving" @click="save">保存</el-button>
+        <el-button type="primary" :icon="Upload" :loading="saving" :disabled="overWidthZones.length > 0" @click="save">保存</el-button>
       </div>
     </div>
 
@@ -254,7 +308,7 @@ onMounted(load)
       <template #header>
         <div class="card-h">
           <span>布局编辑器</span>
-          <span class="muted">拖拽未启用；用上下按钮排序。锁定项不可隐藏或移动。</span>
+          <span class="muted">拖拽未启用；用上下按钮排序。锁定项不可隐藏或移动。尺寸 S/M/L 分别占 1/2/4 格，会超出区域宽度的选项自动禁用。</span>
         </div>
       </template>
 
@@ -264,9 +318,19 @@ onMounted(load)
           <template #header>
             <div class="card-h">
               <span>{{ zone.label }}</span>
-              <span class="muted">最多 {{ zone.capacity }} 项 · {{ zone.gridWidth }} 格</span>
+              <span class="muted" :class="{ danger: zoneOverWidth(zone.id) }">
+                最多 {{ zone.capacity }} 项 · {{ zone.gridWidth }} 格 · 已用 {{ usedSpan(zone.id) }} 格
+              </span>
             </div>
           </template>
+          <el-alert
+            v-if="zoneOverWidth(zone.id)"
+            :title="`可见项共占 ${usedSpan(zone.id)} 格，超过 ${zone.gridWidth} 格，后端会拒绝保存；请隐藏入口或缩小尺寸。`"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="zone-alert"
+          />
           <div class="layout-row header-row">
             <span>入口</span>
             <span>显示</span>
@@ -278,19 +342,23 @@ onMounted(load)
               <span>{{ itemLabel(zone.id, item.id) }}</span>
               <el-tag v-if="isLocked(item.id)" size="small" type="info">锁定</el-tag>
             </div>
-            <el-switch v-model="item.visible" :disabled="isLocked(item.id)" />
+            <el-switch
+              v-model="item.visible"
+              :disabled="isLocked(item.id) || showOverflows(zone.id, item)"
+              :title="showOverflows(zone.id, item) ? '显示后会超出该区域的网格宽度' : undefined"
+            />
             <el-select v-model="item.size" :disabled="isLocked(item.id)" size="small" style="width: 72px">
-              <el-option label="S" value="S" />
-              <el-option label="M" value="M" />
-              <el-option label="L" value="L" />
+              <el-option label="S" value="S" :disabled="sizeOverflows(zone.id, item, 'S')" />
+              <el-option label="M" value="M" :disabled="sizeOverflows(zone.id, item, 'M')" />
+              <el-option label="L" value="L" :disabled="sizeOverflows(zone.id, item, 'L')" />
             </el-select>
             <div class="order-actions">
               <el-button size="small" :icon="ArrowUp" circle :disabled="isLocked(item.id)" @click="move(zone.id, item.id, -1)" />
               <el-button size="small" :icon="ArrowDown" circle :disabled="isLocked(item.id)" @click="move(zone.id, item.id, 1)" />
             </div>
           </div>
-          <div class="muted hint">
-            {{ zone.id === 'meSections' ? '聊天入口默认隐藏；聊天模块仍保留，可在需要时重新显示。' : '' }}
+          <div class="muted hint" :class="{ danger: zoneOverWidth(zone.id) }">
+            {{ zoneHint(zone.id) }}
           </div>
         </el-card>
       </div>
@@ -298,7 +366,7 @@ onMounted(load)
 
     <div class="bottom-actions">
       <el-button @click="load">放弃修改</el-button>
-      <el-button type="primary" :loading="saving" @click="save">保存主题与布局</el-button>
+      <el-button type="primary" :loading="saving" :disabled="overWidthZones.length > 0" @click="save">保存主题与布局</el-button>
     </div>
   </div>
 </template>
@@ -328,6 +396,8 @@ onMounted(load)
 .item-name { display: flex; align-items: center; gap: 8px; }
 .order-actions { display: flex; gap: 6px; }
 .hint { min-height: 18px; margin-top: 8px; }
+.danger { color: #f56c6c; }
+.zone-alert { margin-bottom: 8px; }
 .bottom-actions { justify-content: flex-end; margin-top: 8px; }
 @media (max-width: 768px) {
   .head { flex-direction: column; }
