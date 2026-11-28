@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -40,7 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qimingnan.couple.R
@@ -48,6 +51,7 @@ import com.qimingnan.couple.data.period.PeriodLog
 import com.qimingnan.couple.data.period.PeriodLogic
 import com.qimingnan.couple.data.period.Stats
 import com.qimingnan.couple.theme.LocalCoupleTokens
+import com.qimingnan.couple.ui.components.GlyphAvatar
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -87,7 +91,26 @@ fun PeriodScreen(vm: PeriodViewModel, modifier: Modifier = Modifier) {
                 }
                 if (state.logs.isEmpty()) {
                     item {
-                        Text(stringResource(R.string.period_empty), style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                        // 原来只有一行 caption，像一条错误提示而不是「这里还空着」。
+                        // 居中给图标 + 标题 + 说明，第一次记录的入口才立得住。
+                        Column(
+                            Modifier.fillMaxWidth().padding(vertical = t.spacing.xl),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(t.spacing.sm),
+                        ) {
+                            Icon(
+                                Icons.Filled.DateRange,
+                                contentDescription = null,
+                                tint = t.colors.onSurfaceVariant,
+                                modifier = Modifier.size(40.dp),
+                            )
+                            Text(stringResource(R.string.period_state_none), style = t.typography.title, color = t.colors.onSurface)
+                            Text(
+                                stringResource(R.string.period_empty),
+                                style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                 }
                 items(state.logs.asReversed(), key = { it.id }) { log ->
@@ -129,37 +152,43 @@ fun PeriodScreen(vm: PeriodViewModel, modifier: Modifier = Modifier) {
 private fun StatusCard(stats: Stats?) {
     val t = LocalCoupleTokens.current
     Surface(shape = t.shapes.large, color = t.colors.primaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(t.spacing.lg), verticalArrangement = Arrangement.spacedBy(t.spacing.xs)) {
-            when {
-                stats == null || stats.lastStart == null -> {
-                    Text(stringResource(R.string.period_state_none), style = t.typography.headline, color = t.colors.onPrimaryContainer)
-                    Text(stringResource(R.string.period_state_none_hint), style = t.typography.caption, color = t.colors.onPrimaryContainer)
+        Column(Modifier.padding(t.spacing.xl), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+            if (stats == null || stats.lastStart == null) {
+                Text(stringResource(R.string.period_state_none), style = t.typography.headline, color = t.colors.onPrimaryContainer)
+                Text(stringResource(R.string.period_state_none_hint), style = t.typography.caption, color = t.colors.onPrimaryContainer)
+            } else {
+                // 原来三行同色同级的 caption 竖着堆在一起，状态、预测、统计分不出主次。
+                // 改成「大数字 + 单位 + 说明」：状态数字 40sp 独占视线，说明只做 caption。
+                val overdue = stats.overdueDays
+                val (number, label) = when {
+                    stats.inPeriod -> (stats.dayOfPeriod ?: 1) to "经期第"
+                    overdue != null -> overdue to "预计推迟"
+                    else -> (stats.daysUntilNext ?: 0) to "距离下次"
                 }
-                stats.inPeriod -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        stringResource(R.string.period_state_in, stats.dayOfPeriod ?: 1),
-                        style = t.typography.headline, color = t.colors.onPrimaryContainer,
+                        number.toString(),
+                        // 收掉 display 自带的 4sp 字距，数字和后面的单位才不会隔开一截。
+                        style = t.typography.display.copy(letterSpacing = 0.sp),
+                        color = t.colors.onPrimaryContainer,
+                        maxLines = 1,
                     )
-                }
-                stats.overdueDays != null -> {
                     Text(
-                        stringResource(R.string.period_state_overdue, stats.overdueDays),
-                        style = t.typography.headline, color = t.colors.onPrimaryContainer,
+                        "天",
+                        style = t.typography.label,
+                        color = t.colors.onPrimaryContainer.copy(alpha = 0.86f),
+                        modifier = Modifier.padding(start = t.spacing.xs, top = t.spacing.sm),
                     )
+                    Spacer(Modifier.size(t.spacing.md))
+                    Text(label, style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.86f))
                 }
-                else -> {
-                    Text(
-                        stringResource(R.string.period_state_next, stats.daysUntilNext ?: 0),
-                        style = t.typography.headline, color = t.colors.onPrimaryContainer,
-                    )
-                }
-            }
-            val next = stats?.nextPredicted?.let { stringResource(R.string.period_predict, it.format(ISO)) }
-            next?.let { Text(it, style = t.typography.caption, color = t.colors.onPrimaryContainer) }
-            if (stats != null && stats.lastStart != null) {
+                // 预测日期与周期统计原来是两行，合并成一行 caption，回到「说明」的视觉层级。
+                val next = stats.nextPredicted?.let { stringResource(R.string.period_predict, it.format(ISO)) }
+                val stat = stringResource(R.string.period_stats, stats.cycleDays, stats.periodDays, stats.samples)
                 Text(
-                    stringResource(R.string.period_stats, stats.cycleDays, stats.periodDays, stats.samples),
-                    style = t.typography.caption, color = t.colors.onPrimaryContainer,
+                    listOfNotNull(next, stat).joinToString(" · "),
+                    style = t.typography.caption,
+                    color = t.colors.onPrimaryContainer.copy(alpha = 0.86f),
                 )
             }
         }
@@ -169,14 +198,24 @@ private fun StatusCard(stats: Stats?) {
 @Composable
 private fun LogRow(log: PeriodLog, onDelete: () -> Unit) {
     val t = LocalCoupleTokens.current
+    // 原来 "2026-01-01 ~ 2026-01-05 · 5" 是一整条拼接字符串，天数连单位都没有，
+    // 和账本行的读法也不一致。改成账本行同构：日号字形 + "M月d日 – M月d日" + "共 N 天"。
+    // LedgerEntryRow 不支持行尾按钮，所以手写同样的 Row 结构，保留原来的删除 IconButton。
     Surface(shape = t.shapes.medium, color = t.colors.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(t.spacing.md), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(t.spacing.md),
+        ) {
+            GlyphAvatar("%02d".format(log.start.dayOfMonth), modifier = Modifier.size(40.dp))
             Column(Modifier.weight(1f)) {
+                val startText = "${log.start.monthValue}月${log.start.dayOfMonth}日"
+                val endText = log.end?.let { "${it.monthValue}月${it.dayOfMonth}日" } ?: "至今"
+                Text("$startText – $endText", style = t.typography.body, color = t.colors.onSurface)
                 val days = log.end?.let { java.time.temporal.ChronoUnit.DAYS.between(log.start, it).toInt() + 1 }
-                    ?: stringResource(R.string.period_ongoing)
                 Text(
-                    "${log.startDate} ~ ${log.endDate ?: "…"} · " + days,
-                    style = t.typography.body, color = t.colors.onSurface,
+                    days?.let { "共 $it 天" } ?: stringResource(R.string.period_ongoing),
+                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
                 )
                 if (log.note.isNotEmpty()) {
                     Text(log.note, style = t.typography.caption, color = t.colors.onSurfaceVariant)

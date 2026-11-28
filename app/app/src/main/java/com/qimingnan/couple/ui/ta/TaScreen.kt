@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
@@ -42,12 +43,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.qimingnan.couple.R
 import com.qimingnan.couple.data.net.ImportantDay
 import com.qimingnan.couple.theme.LocalCoupleTokens
+import com.qimingnan.couple.ui.components.GlyphAvatar
 
 @Composable
 fun TaScreen(
@@ -127,7 +130,31 @@ fun TaScreen(
                             }
                         }
                         item(key = "edit_me") {
-                            TextButton(onClick = { editingMe = true }) { Text(stringResource(R.string.ta_edit_me)) }
+                            // 原来是一个裸 TextButton：夹在一列卡片后面，既没有行结构也没有点击面积，
+                            // 读起来像一句可以忽略的脚注。改成和设置项一致的可点行：
+                            // 底色分层撑出卡片感，右侧 "›" 说明"点进去还有内容"。
+                            Surface(
+                                shape = t.shapes.medium,
+                                color = t.colors.surfaceContainer,
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = { editingMe = true },
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = t.spacing.lg, vertical = t.spacing.lg),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        stringResource(R.string.ta_edit_me),
+                                        style = t.typography.label, color = t.colors.onSurface,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = null,
+                                        tint = t.colors.onSurfaceVariant,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -198,29 +225,62 @@ private fun PartnerCard(p: com.qimingnan.couple.data.net.TaPartnerView, online: 
 @Composable
 private fun AnniversaryRow(days: Long) {
     val t = LocalCoupleTokens.current
-    Surface(shape = t.shapes.medium, color = t.colors.primaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Text(
-            stringResource(R.string.ta_days_together, days),
-            style = t.typography.body, color = t.colors.onPrimaryContainer,
-            modifier = Modifier.padding(t.spacing.md),
-        )
+    // 原来是一行 body 文字塞在 medium 圆角条里，比下面的名字（headline）还轻，
+    // 「在一起 N 天」却是这一页最该被一眼看到的信息。改成整块 hero：
+    // primaryContainer 大圆角 + 40sp 数字 + 右侧大爱心。
+    Surface(shape = t.shapes.large, color = t.colors.primaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(t.spacing.xl),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("在一起", style = t.typography.caption, color = t.colors.onPrimaryContainer.copy(alpha = 0.86f))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        days.toString(),
+                        // display 自带 4sp 字距，数字后面还要接单位「天」，不收掉会平白多出一截空隙。
+                        style = t.typography.display.copy(letterSpacing = 0.sp),
+                        color = t.colors.onPrimaryContainer,
+                        maxLines = 1,
+                    )
+                    Text(
+                        "天",
+                        style = t.typography.label,
+                        color = t.colors.onPrimaryContainer.copy(alpha = 0.86f),
+                        modifier = Modifier.padding(start = t.spacing.xs, bottom = t.spacing.sm),
+                    )
+                }
+            }
+            Icon(
+                Icons.Filled.Favorite,
+                contentDescription = null,
+                tint = t.colors.onPrimaryContainer,
+                modifier = Modifier.size(40.dp),
+            )
+        }
     }
 }
 
 @Composable
 private fun DayRow(day: ImportantDay, canDelete: Boolean, onDelete: () -> Unit) {
     val t = LocalCoupleTokens.current
+    // 原来两行都是同色 caption 级文字，日期和倒计时糊成一条，扫不出「哪一天、还剩几天」。
+    // 改成账本行同构：左侧月份字形，中间名字 + 日期，右侧倒计时用 primary 提亮。
+    // LedgerEntryRow 不支持行尾按钮，这里手写同样的 Row 结构，保留删除 IconButton。
     Surface(shape = t.shapes.medium, color = t.colors.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(t.spacing.md), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(t.spacing.md),
+        ) {
+            GlyphAvatar("%02d".format(day.month), modifier = Modifier.size(40.dp))
             Column(Modifier.weight(1f)) {
                 Text(day.name, style = t.typography.body, color = t.colors.onSurface)
                 val whenText = "%02d-%02d".format(day.month, day.day) + (day.year?.let { " · $it" } ?: "")
-                val inDays = daysUntil(day.month, day.day, System.currentTimeMillis())
-                Text(
-                    whenText + stringResource(R.string.ta_days_until, inDays),
-                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
-                )
+                Text(whenText, style = t.typography.caption, color = t.colors.onSurfaceVariant)
             }
+            val inDays = daysUntil(day.month, day.day, System.currentTimeMillis())
+            Text("还有 $inDays 天", style = t.typography.label, color = t.colors.primary)
             if (canDelete) {
                 IconButton(onClick = onDelete, modifier = Modifier.size(t.spacing.minTouchTarget)) {
                     Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.feed_delete), tint = t.colors.onSurfaceVariant)

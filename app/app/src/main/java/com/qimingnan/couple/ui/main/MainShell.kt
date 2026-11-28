@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -317,72 +318,80 @@ fun MainShell(
                 }
             },
         ) { padding ->
-            when (tab) {
-                MainTab.Home -> com.qimingnan.couple.ui.home.HomeScreen(
-                    anniversaryVm = hiltViewModel(),
-                    ledgerVm = hiltViewModel(),
-                    meVm = hiltViewModel(),
-                    onRecord = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Stats; openLedgerWizard = true },
-                    onOpenTa = { pinnedTab = MainTab.Ta; tab = MainTab.Ta },
-                    onOpenAnniversary = { pinnedTab = MainTab.Anniversary; tab = MainTab.Anniversary },
-                    onOpenPeriod = { pinnedTab = MainTab.Period; tab = MainTab.Period },
-                    onOpenLedger = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Stats },
-                    onOpenFeed = { pinnedTab = null; tab = MainTab.Feed },
-                    modifier = Modifier.padding(padding),
-                )
-                MainTab.Me -> MeScreen(
-                    onRescan = onRescan,
-                    onOpenKeepAlive = onOpenKeepAlive,
-                    onOpenSettings = { showSettings = true },
-                    onOpenChat = { showChat = true },
-                    sectionOrder = LayoutResolver.visibleIds(
-                        layout, "meSections",
-                        listOf("settings", "profile", "couple", "mqtt", "server", "updates"),
-                    ),
-                    modifier = Modifier.padding(padding),
-                )
-                MainTab.Feed -> FeedScreen(
-                    vm = hiltViewModel(),
-                    showAnniversaryCard = LayoutResolver.isVisible(layout, "feedHeader", "plugin:anniversary"),
-                    modifier = Modifier.padding(padding),
-                )
-                MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(
-                    vm = hiltViewModel(),
-                    cardOrder = LayoutResolver.visibleIds(layout, "taCards", listOf("partner_card", "anniversary", "days")),
-                    modifier = Modifier.padding(padding),
-                )
-                MainTab.Anniversary -> {
-                    com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
+            // 平板/横屏下把内容限制在 560dp 并居中：卡片全是 fillMaxWidth，不限制会被
+            // 拉成一整行很宽的条，文字行长过百 dp 很难读。手机上 560 > 屏宽，等于没变化。
+            Box(
+                Modifier.fillMaxSize().padding(padding),
+                contentAlignment = androidx.compose.ui.Alignment.TopCenter,
+            ) {
+                val contentModifier = Modifier.fillMaxSize().widthIn(max = 560.dp)
+                when (tab) {
+                    MainTab.Home -> com.qimingnan.couple.ui.home.HomeScreen(
                         anniversaryVm = hiltViewModel(),
                         ledgerVm = hiltViewModel(),
-                        today = java.time.LocalDate.now(),
-                        onBack = { tab = MainTab.Me },
-                        showBack = false,
-                        modifier = Modifier.padding(padding),
+                        meVm = hiltViewModel(),
+                        onRecord = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Stats; openLedgerWizard = true },
+                        onOpenTa = { pinnedTab = MainTab.Ta; tab = MainTab.Ta },
+                        onOpenAnniversary = { pinnedTab = MainTab.Anniversary; tab = MainTab.Anniversary },
+                        onOpenPeriod = { pinnedTab = MainTab.Period; tab = MainTab.Period },
+                        onOpenLedger = { pinnedTab = null; tab = MainTab.Ledger; ledgerSubTab = LedgerSubTab.Stats },
+                        onOpenFeed = { pinnedTab = null; tab = MainTab.Feed },
+                        modifier = contentModifier,
                     )
+                    MainTab.Me -> MeScreen(
+                        onRescan = onRescan,
+                        onOpenKeepAlive = onOpenKeepAlive,
+                        onOpenSettings = { showSettings = true },
+                        onOpenChat = { showChat = true },
+                        sectionOrder = LayoutResolver.visibleIds(
+                            layout, "meSections",
+                            listOf("settings", "profile", "couple", "mqtt", "server", "updates"),
+                        ),
+                        modifier = contentModifier,
+                    )
+                    MainTab.Feed -> FeedScreen(
+                        vm = hiltViewModel(),
+                        showAnniversaryCard = LayoutResolver.isVisible(layout, "feedHeader", "plugin:anniversary"),
+                        modifier = contentModifier,
+                    )
+                    MainTab.Ta -> com.qimingnan.couple.ui.ta.TaScreen(
+                        vm = hiltViewModel(),
+                        cardOrder = LayoutResolver.visibleIds(layout, "taCards", listOf("partner_card", "anniversary", "days")),
+                        modifier = contentModifier,
+                    )
+                    MainTab.Anniversary -> {
+                        com.qimingnan.couple.ui.anniversary.AnniversaryScreen(
+                            anniversaryVm = hiltViewModel(),
+                            ledgerVm = hiltViewModel(),
+                            today = java.time.LocalDate.now(),
+                            onBack = { tab = MainTab.Me },
+                            showBack = false,
+                            modifier = contentModifier,
+                        )
+                    }
+                    MainTab.Ledger -> com.qimingnan.couple.ui.ledger.LedgerScreen(
+                        vm = hiltViewModel(),
+                        onBack = { returnToStart() },
+                        // 记账现在是普通底栏 Tab：二级页由页面顶部三段切换，不再需要页头返回键。
+                        showBack = false,
+                        subTab = ledgerSubTab,
+                        onSubTabChange = { ledgerSubTab = it },
+                        // 在第一个/最后一个二级页还大幅左右滑：切到相邻的底栏 Tab。
+                        onSwipeToTab = { delta ->
+                            val index = visibleTabs.indexOf(tab)
+                            val target = visibleTabs.getOrNull(index + delta)
+                            if (target != null) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                pinnedTab = null
+                                tab = target
+                            }
+                        },
+                        autoOpenWizard = openLedgerWizard,
+                        onWizardDismissed = { openLedgerWizard = false },
+                        modifier = contentModifier,
+                    )
+                    MainTab.Period -> com.qimingnan.couple.ui.period.PeriodScreen(vm = hiltViewModel(), modifier = contentModifier)
                 }
-                MainTab.Ledger -> com.qimingnan.couple.ui.ledger.LedgerScreen(
-                    vm = hiltViewModel(),
-                    onBack = { returnToStart() },
-                    // 记账现在是普通底栏 Tab：二级页由页面顶部三段切换，不再需要页头返回键。
-                    showBack = false,
-                    subTab = ledgerSubTab,
-                    onSubTabChange = { ledgerSubTab = it },
-                    // 在第一个/最后一个二级页还大幅左右滑：切到相邻的底栏 Tab。
-                    onSwipeToTab = { delta ->
-                        val index = visibleTabs.indexOf(tab)
-                        val target = visibleTabs.getOrNull(index + delta)
-                        if (target != null) {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            pinnedTab = null
-                            tab = target
-                        }
-                    },
-                    autoOpenWizard = openLedgerWizard,
-                    onWizardDismissed = { openLedgerWizard = false },
-                    modifier = Modifier.padding(padding),
-                )
-                MainTab.Period -> com.qimingnan.couple.ui.period.PeriodScreen(vm = hiltViewModel(), modifier = Modifier.padding(padding))
             }
         }
 

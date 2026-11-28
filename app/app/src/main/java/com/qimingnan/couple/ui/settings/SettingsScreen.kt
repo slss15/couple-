@@ -13,9 +13,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -26,12 +28,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -39,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -144,179 +149,245 @@ fun SettingsScreen(
         }
         Column(
             Modifier.fillMaxSize().verticalScroll(scrollState).padding(t.spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(t.spacing.lg),
+            // 外层只负责组与组之间：xl 与组内 lg 差 8dp，扫读时能直接看出"换组了"。
+            verticalArrangement = Arrangement.spacedBy(t.spacing.xl),
         ) {
-            SectionCard("底部 Tab") {
-                Text("默认底栏是 首页 / 动态 / 记账 / 我的；TA、纪念日、经期关掉后仍可从首页快捷入口进入。管理员在布局中关闭的入口不会显示。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                TabVisibility.HIDEABLE.forEach { id ->
-                    SwitchRow("显示「${TAB_LABELS[id]}」", checked = id !in s.hiddenTabs) { vm.setTabHidden(id, !it) }
-                }
-                SwitchRow("显示「我的」（不可隐藏）", checked = true, enabled = false) {}
-            }
-            SectionCard("底部 Tab 顺序") {
-                Text("长按一项，浮起后拖动调整底栏从左到右的顺序，松手保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                val orderLabels = TAB_LABELS + mapOf("me_entry" to "我的")
-                LongPressReorderableColumn(
-                    items = s.tabOrder,
-                    itemKey = { it },
-                    onOrderChange = { order, onSaved -> vm.saveTabOrder(order, onSaved) },
-                    scrollState = scrollState,
-                ) { id, index ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = t.spacing.md), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${index + 1}. ${orderLabels[id] ?: id}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
-                        Text("≡", style = t.typography.title, color = t.colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = t.spacing.md))
-                    }
-                }
-                Text("实时预览", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                    s.tabOrder.filter { it == TabVisibility.LOCKED || it !in s.hiddenTabs }.forEach { id ->
-                        val selected = s.homeTab == id
-                        Surface(
-                            color = if (selected) t.colors.primaryContainer else t.colors.surfaceContainer,
-                            shape = t.shapes.pill,
-                        ) {
-                            Text(
-                                orderLabels[id] ?: id,
-                                style = t.typography.label,
-                                color = if (selected) t.colors.onPrimaryContainer else t.colors.onSurface,
-                                modifier = Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
-                            )
-                        }
-                    }
-                }
-                Text("高亮的是默认启动页；未设置时默认打开首页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-            }
-            SectionCard("默认启动页") {
-                Text("打开 App 时首先显示哪个页面：默认是首页，也可以选任意一个 Tab。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                    HOME_TAB_LABELS.forEach { (id, label) ->
-                        val pluginId = when (id) {
-                            "tab_ledger" -> "ledger"
-                            "tab_anniversary" -> "anniversary"
-                            "tab_period" -> "period"
-                            else -> null
-                        }
-                        val available = id !in s.hiddenTabs && (pluginId == null || pluginId !in s.disabledPlugins)
-                        FilterChip(selected = s.homeTab == id, enabled = available, onClick = { vm.setHomeTab(id) }, label = { Text(label) })
-                    }
-                }
-            }
-            SectionCard("主题色") {
-                if (!remoteTheme.allowUserOverride) {
-                    Text("管理员已锁定服务器主题，本地主题选择不会生效。", style = t.typography.caption, color = t.colors.warning)
-                } else if (!s.themeCustomized) {
-                    Text("当前使用服务器主题；手动选择后改为本地主题。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                } else {
-                    Text("当前使用本地主题。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                    SecondaryButton("恢复服务器主题", onClick = vm::useServerTheme)
-                }
-                val dynAvail = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
-                    ThemeSeeds.all.forEach { seed ->
-                        val selected = !s.dynamicColor && s.themeSeed == seed.id
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            // 选中环画在外圈、中间留 3dp 背景色空隙：直接拿 onSurface 描边时，
-                            // 深色下是白环套浅色点、浅色下是黑环套深色点，两个主题都看不出选中。
-                            Box(
-                                Modifier.size(t.spacing.minTouchTarget)
-                                    .clip(CircleShape)
-                                    .background(if (selected) t.colors.onSurface else Color.Transparent)
-                                    .padding(3.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(if (t.isDark) seed.dark.primary else seed.light.primary))
-                                    .clickable { vm.setSeed(seed.id) },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (selected) Icon(Icons.Filled.Check, contentDescription = null,
-                                    tint = Color(if (t.isDark) seed.dark.onPrimary else seed.light.onPrimary))
-                            }
-                            Text(seed.label, style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                        }
-                    }
-                }
-                if (dynAvail) SwitchRow("系统动态取色（Android 12+）", checked = s.dynamicColor) { vm.setDynamic(it) }
-            }
-            SectionCard("深浅色") {
-                ChipRow(DarkMode.entries, s.darkMode, { it.label }) { vm.setDarkMode(it) }
-            }
-            SectionCard("字号") {
-                ChipRow(FontSize.entries, s.fontSize, { it.label }) { vm.setFontSize(it) }
-                Text("预览：今天也想你 ❤", style = t.typography.body, color = t.colors.onSurface)
-            }
-            SectionCard("底栏质感") {
-                ChipRow(GlassStyle.entries, s.glassStyle, { it.label }) { vm.setGlassStyle(it) }
-                Text(
-                    if (s.glassStyle == GlassStyle.Liquid) {
-                        "液态玻璃：底栏与二级菜单上有两道不同速度的流动高光，会随主题色变化。"
+            SettingsGroup("外观") {
+                // 主题色是整页唯一的色彩落点，排在外观组第一位，一进设置页就能看到。
+                SectionCard("主题色") {
+                    if (!remoteTheme.allowUserOverride) {
+                        Text("管理员已锁定服务器主题，本地主题选择不会生效。", style = t.typography.caption, color = t.colors.warning)
+                    } else if (!s.themeCustomized) {
+                        Text("当前使用服务器主题；手动选择后改为本地主题。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
                     } else {
-                        "毛玻璃：上亮下暗的静态磨砂质感，更安静，适合日常长时间使用。"
-                    },
-                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
-                )
-                Text(
-                    "底栏支持按住横向滑动切换；在记账页长按「记账」图标约 1 秒，可弹出覆盖底栏的二级页（统计 / 记账 / 账户），松手即回到原页面。",
-                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
-                )
-            }
-            SectionCard("插件") {
-                com.qimingnan.couple.data.plugin.PluginRegistry.all.forEach { plugin ->
-                    val enabled = plugin.available && plugin.id !in s.disabledPlugins
-                    Row(
-                        Modifier.fillMaxWidth().clickable(enabled = plugin.available) {
-                            if (plugin.id == com.qimingnan.couple.data.plugin.PluginRegistry.ANNIVERSARY) onOpenAnniversary()
-                            if (plugin.id == com.qimingnan.couple.data.plugin.PluginRegistry.LEDGER) onOpenLedger()
-                        },
-                        verticalAlignment = Alignment.CenterVertically,
+                        Text("当前使用本地主题。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                        SecondaryButton("恢复服务器主题", onClick = vm::useServerTheme)
+                    }
+                    val dynAvail = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    val seeds = ThemeSeeds.all
+                    // 七个色圆排三列网格而不是随手流排：它是这一组的主视觉，
+                    // 对齐之后色板才读得出"一套可选主题"，散排会像临时摆放的按钮。
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(t.spacing.md),
+                        verticalArrangement = Arrangement.spacedBy(t.spacing.sm),
+                        maxItemsInEachRow = 3,
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(plugin.title, style = t.typography.body, color = t.colors.onSurface)
-                            Text(
-                                if (plugin.available) plugin.description else plugin.description + "（即将推出）",
-                                style = t.typography.caption, color = t.colors.onSurfaceVariant,
-                            )
-                            Text(
-                                if (plugin.scope == com.qimingnan.couple.data.plugin.PluginScope.PERSONAL) "个人私密" else "情侣共享",
-                                style = t.typography.caption, color = t.colors.onSurfaceVariant,
-                            )
+                        seeds.forEach { seed ->
+                            val selected = !s.dynamicColor && s.themeSeed == seed.id
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                // 选中环画在外圈、中间留 3dp 背景色空隙：直接拿 onSurface 描边时，
+                                // 深色下是白环套浅色点、浅色下是黑环套深色点，两个主题都看不出选中。
+                                Box(
+                                    Modifier.size(t.spacing.minTouchTarget)
+                                        .clip(CircleShape)
+                                        .background(if (selected) t.colors.onSurface else Color.Transparent)
+                                        .padding(3.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(if (t.isDark) seed.dark.primary else seed.light.primary))
+                                        .clickable { vm.setSeed(seed.id) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (selected) Icon(Icons.Filled.Check, contentDescription = null,
+                                        tint = Color(if (t.isDark) seed.dark.onPrimary else seed.light.onPrimary))
+                                }
+                                Text(seed.label, style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                            }
                         }
-                        Switch(checked = enabled, enabled = plugin.available, onCheckedChange = { vm.setPluginEnabled(plugin.id, it) })
+                        // 7 不是 3 的倍数：补两个等宽空位，最后一行才不会把单个色圆拉成整行宽。
+                        repeat((3 - seeds.size % 3) % 3) { Spacer(Modifier.weight(1f)) }
+                    }
+                    if (dynAvail) SwitchRow("系统动态取色（Android 12+）", checked = s.dynamicColor) { vm.setDynamic(it) }
+                }
+                SectionCard("深浅色") {
+                    ChipRow(DarkMode.entries, s.darkMode, { it.label }) { vm.setDarkMode(it) }
+                }
+                SectionCard("字号") {
+                    ChipRow(FontSize.entries, s.fontSize, { it.label }) { vm.setFontSize(it) }
+                    // 预览句必须用 title 档：和 caption 放在一起时，切换字号几乎看不出差别。
+                    Text("预览：今天也想你 ❤", style = t.typography.title, color = t.colors.onSurface)
+                }
+                SectionCard("底栏质感") {
+                    ChipRow(GlassStyle.entries, s.glassStyle, { it.label }) { vm.setGlassStyle(it) }
+                    val liquid = s.glassStyle == GlassStyle.Liquid
+                    NoteWithHelp(
+                        short = if (liquid) "流动高光，随主题色变化。" else "静态磨砂，更安静。",
+                        title = "底栏质感",
+                        detail = (if (liquid) {
+                            "液态玻璃：底栏与二级菜单上有两道不同速度的流动高光，会随主题色变化。"
+                        } else {
+                            "毛玻璃：上亮下暗的静态磨砂质感，更安静，适合日常长时间使用。"
+                        }) + "\n\n底栏支持按住横向滑动切换；在记账页长按「记账」图标约 1 秒，可弹出覆盖底栏的二级页（统计 / 记账 / 账户），松手即回到原页面。",
+                    )
+                }
+            }
+            SettingsGroup("交互") {
+                SectionCard("底部 Tab") {
+                    Text("默认底栏是 首页 / 动态 / 记账 / 我的；TA、纪念日、经期关掉后仍可从首页快捷入口进入。管理员在布局中关闭的入口不会显示。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    TabVisibility.HIDEABLE.forEach { id ->
+                        SwitchRow("显示「${TAB_LABELS[id]}」", checked = id !in s.hiddenTabs) { vm.setTabHidden(id, !it) }
+                    }
+                    SwitchRow("显示「我的」（不可隐藏）", checked = true, enabled = false) {}
+                }
+                SectionCard("底部 Tab 顺序") {
+                    Text("长按一项，浮起后拖动调整底栏从左到右的顺序，松手保存。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    val orderLabels = TAB_LABELS + mapOf("me_entry" to "我的")
+                    LongPressReorderableColumn(
+                        items = s.tabOrder,
+                        itemKey = { it },
+                        onOrderChange = { order, onSaved -> vm.saveTabOrder(order, onSaved) },
+                        scrollState = scrollState,
+                    ) { id, index ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = t.spacing.md), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${index + 1}. ${orderLabels[id] ?: id}", style = t.typography.body, color = t.colors.onSurface, modifier = Modifier.weight(1f))
+                            Text("≡", style = t.typography.title, color = t.colors.onSurfaceVariant, modifier = Modifier.padding(horizontal = t.spacing.md))
+                        }
+                    }
+                    Text("实时预览", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                        s.tabOrder.filter { it == TabVisibility.LOCKED || it !in s.hiddenTabs }.forEach { id ->
+                            val selected = s.homeTab == id
+                            Surface(
+                                color = if (selected) t.colors.primaryContainer else t.colors.surfaceContainer,
+                                shape = t.shapes.pill,
+                            ) {
+                                Text(
+                                    orderLabels[id] ?: id,
+                                    style = t.typography.label,
+                                    color = if (selected) t.colors.onPrimaryContainer else t.colors.onSurface,
+                                    modifier = Modifier.padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
+                                )
+                            }
+                        }
+                    }
+                    Text("高亮的是默认启动页；未设置时默认打开首页。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                }
+                SectionCard("默认启动页") {
+                    Text("打开 App 时首先显示哪个页面：默认是首页，也可以选任意一个 Tab。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(t.spacing.md), verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                        HOME_TAB_LABELS.forEach { (id, label) ->
+                            val pluginId = when (id) {
+                                "tab_ledger" -> "ledger"
+                                "tab_anniversary" -> "anniversary"
+                                "tab_period" -> "period"
+                                else -> null
+                            }
+                            val available = id !in s.hiddenTabs && (pluginId == null || pluginId !in s.disabledPlugins)
+                            FilterChip(selected = s.homeTab == id, enabled = available, onClick = { vm.setHomeTab(id) }, label = { Text(label) })
+                        }
                     }
                 }
-                Text(
-                    "关闭插件只隐藏入口，不删除数据；插件内容由后续单独的 PR 提供。",
-                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
-                )
-            }
-            SectionCard("静默安装（Shizuku）") {
-                Text(
-                    when (upd.shizuku) {
-                        ShizukuState.AUTHORIZED -> "Shizuku 已授权：有新版本时可静默安装，不用再点系统安装确认。"
-                        ShizukuState.NOT_AUTHORIZED -> "Shizuku 未授权：更新时走系统安装确认。"
-                        ShizukuState.UNSUPPORTED -> "Shizuku 版本过旧，请先升级 Shizuku。"
-                        ShizukuState.NOT_RUNNING -> "未检测到正在运行的 Shizuku：更新时走系统安装确认。"
-                    },
-                    style = t.typography.body, color = t.colors.onSurface,
-                )
-                if (upd.shizuku == ShizukuState.NOT_AUTHORIZED) {
-                    SecondaryButton("授权 Shizuku 静默安装", onClick = updateVm::requestShizukuPermission)
+                SectionCard("插件") {
+                    com.qimingnan.couple.data.plugin.PluginRegistry.all.forEach { plugin ->
+                        val enabled = plugin.available && plugin.id !in s.disabledPlugins
+                        Row(
+                            Modifier.fillMaxWidth().clickable(enabled = plugin.available) {
+                                if (plugin.id == com.qimingnan.couple.data.plugin.PluginRegistry.ANNIVERSARY) onOpenAnniversary()
+                                if (plugin.id == com.qimingnan.couple.data.plugin.PluginRegistry.LEDGER) onOpenLedger()
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(plugin.title, style = t.typography.body, color = t.colors.onSurface)
+                                Text(
+                                    if (plugin.available) plugin.description else plugin.description + "（即将推出）",
+                                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                                )
+                                Text(
+                                    if (plugin.scope == com.qimingnan.couple.data.plugin.PluginScope.PERSONAL) "个人私密" else "情侣共享",
+                                    style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                                )
+                            }
+                            Switch(checked = enabled, enabled = plugin.available, onCheckedChange = { vm.setPluginEnabled(plugin.id, it) })
+                        }
+                    }
+                    Text(
+                        "关闭插件只隐藏入口，不删除数据；插件内容由后续单独的 PR 提供。",
+                        style = t.typography.caption, color = t.colors.onSurfaceVariant,
+                    )
                 }
-                Text("同一份授权也用于后台保活的一键豁免（我的 → 后台保活）。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
             }
-            SectionCard("后台与任务保留") {
-                SwitchRow("常驻连接 · 静音通知", checked = keepAliveOn) { on ->
-                    if (on && Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    else keepAliveVm.setEnabled(on)
+            SettingsGroup("连接与提醒") {
+                SectionCard("后台与任务保留") {
+                    SwitchRow("常驻连接 · 静音通知", checked = keepAliveOn) { on ->
+                        if (on && Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        else keepAliveVm.setEnabled(on)
+                    }
+                    // 权限被拒是当下的状态，不是背景知识，留在卡里而不是收进说明。
+                    if (notificationDenied) Text("通知权限未允许，暂未开启常驻连接。可在后台保活页重新授权。", style = t.typography.caption, color = t.colors.error)
+                    SwitchRow("在最近任务列表保留", checked = s.retainRecentTask, onChange = vm::setRetainRecentTask)
+                    NoteWithHelp(
+                        short = "前台服务维持连接；任务卡保留不改变数据。",
+                        title = "后台与任务保留",
+                        detail = "常驻连接：使用前台服务尽量保持消息连接；关闭后撤掉常驻通知。系统未允许通知权限时无法开启。\n\n在最近任务列表保留：显示在系统最近任务列表；可在支持的手机上手动锁定任务卡片。不能阻止手动划掉、强行停止或系统回收。",
+                    )
+                    SecondaryButton("后台保活 · Shizuku 豁免与诊断", onClick = onOpenKeepAlive)
                 }
-                Text("使用前台服务尽量保持消息连接；关闭后撤掉常驻通知。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                if (notificationDenied) Text("通知权限未允许，暂未开启常驻连接。可在后台保活页重新授权。", style = t.typography.caption, color = t.colors.error)
-                SwitchRow("在最近任务列表保留", checked = s.retainRecentTask, onChange = vm::setRetainRecentTask)
-                Text("显示在系统最近任务列表；可在支持的手机上手动锁定任务卡片。不能阻止手动划掉、强行停止或系统回收。", style = t.typography.caption, color = t.colors.onSurfaceVariant)
-                SecondaryButton("后台保活 · Shizuku 豁免与诊断", onClick = onOpenKeepAlive)
+                NotifySection(notifyVm)
             }
-            NotifySection(notifyVm)
-            ChatExportSection(exportVm)
-            UpdateMirrorSection()
+            SettingsGroup("数据与系统") {
+                ChatExportSection(exportVm)
+                SectionCard("静默安装（Shizuku）") {
+                    Text(
+                        when (upd.shizuku) {
+                            ShizukuState.AUTHORIZED -> "Shizuku 已授权：有新版本时可静默安装，不用再点系统安装确认。"
+                            ShizukuState.NOT_AUTHORIZED -> "Shizuku 未授权：更新时走系统安装确认。"
+                            ShizukuState.UNSUPPORTED -> "Shizuku 版本过旧，请先升级 Shizuku。"
+                            ShizukuState.NOT_RUNNING -> "未检测到正在运行的 Shizuku：更新时走系统安装确认。"
+                        },
+                        style = t.typography.body, color = t.colors.onSurface,
+                    )
+                    if (upd.shizuku == ShizukuState.NOT_AUTHORIZED) {
+                        SecondaryButton("授权 Shizuku 静默安装", onClick = updateVm::requestShizukuPermission)
+                    }
+                    NoteWithHelp(
+                        short = "同一份授权也用于后台保活的一键豁免。",
+                        title = "静默安装（Shizuku）",
+                        detail = "Shizuku 授权后，检查到新版本会直接安装，不用再点系统安装确认；未授权、未运行或版本过旧时，更新会走系统安装确认。\n\n同一份授权也用于后台保活的一键豁免（我的 → 后台保活）。",
+                    )
+                }
+                UpdateMirrorSection()
+            }
         }
+    }
+}
+
+/**
+ * 组标题不是卡片：用 caption + 1sp 字距 + onSurfaceVariant 做层级，
+ * 这样 13 张等宽卡片才不会被读成一串同权重的大块，而能分成四段可跳读的区块。
+ */
+@Composable
+private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    val t = LocalCoupleTokens.current
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            title,
+            style = t.typography.caption.copy(letterSpacing = 1.sp),
+            color = t.colors.onSurfaceVariant,
+            modifier = Modifier.padding(start = t.spacing.xs, bottom = t.spacing.sm),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(t.spacing.lg), content = content)
+    }
+}
+
+/**
+ * 卡片里只留一行摘要，完整说明收进「说明」弹窗：
+ * 常驻两三段 caption 会把开关压到首屏之外，而这些说明是查得到、不必天天看的信息。
+ */
+@Composable
+private fun NoteWithHelp(short: String, title: String, detail: String) {
+    val t = LocalCoupleTokens.current
+    var open by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(short, style = t.typography.caption, color = t.colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+        TextButton(onClick = { open = true }) { Text("说明") }
+    }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(title) },
+            text = { Text(detail, style = t.typography.body) },
+            confirmButton = { TextButton(onClick = { open = false }) { Text("知道了") } },
+        )
     }
 }
 

@@ -121,11 +121,13 @@ private fun LedgerSegmented(current: LedgerSubTab, onChange: (LedgerSubTab) -> U
                 // 浅色下用 surface 白底（安静，不和下面的结余大卡抢）；
                 // 深色下 surface(#1A1316) 比轨道 surfaceContainer(#261D20) 更暗，白底会变成
                 // 「凹进去的洞」、文字对比度也只有 1.0，所以深色改用 primaryContainer 这一对。
+                // 浅色下用 35% 的 primaryContainer 淡染：纯白底压奶油轨道实测只有 1.10:1，
+                // 看不出选中；35% 淡染后是 1.36:1，且 onPrimaryContainer 文字仍有 7.9:1。
+                // 深色下 surface 比轨道更暗（会变成"凹进去的洞"），直接用容器色。
                 color = if (!selected) Color.Transparent
-                else if (t.isDark) t.colors.primaryContainer else t.colors.surface,
-                contentColor = if (!selected) t.colors.onSurfaceVariant
-                else if (t.isDark) t.colors.onPrimaryContainer else t.colors.primary,
-                border = if (selected && !t.isDark) BorderStroke(1.dp, t.colors.outline.copy(alpha = 0.18f)) else null,
+                else if (t.isDark) t.colors.primaryContainer else t.colors.primaryContainer.copy(alpha = 0.35f),
+                contentColor = if (selected) t.colors.onPrimaryContainer else t.colors.onSurfaceVariant,
+                border = null,
                 // 浅色下白底压奶油轨道只有 1.10~1.13:1，光靠底色差和发丝边撑不住"选中"，
                 // 加一层 2dp 投影把块真正抬起来（深色下选中块本来就有 1.2+，阴影不影响）。
                 shadowElevation = if (selected) 2.dp else 0.dp,
